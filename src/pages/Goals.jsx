@@ -3,10 +3,28 @@ import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
 import Toast from '../components/Toast';
 import GoalCard from '../components/GoalCard';
+import CustomSelect from '../components/CustomSelect';
+import CustomDatePicker from '../components/CustomDatePicker';
 import {
   Plus, Target, AlertCircle, Search, Filter, Layers, Activity, Flame, ShieldAlert, Sparkles
 } from 'lucide-react';
 import { useConfetti } from '../hooks/useConfetti';
+
+const GOALS_META_KEY = 'habit_tracker_goals_meta';
+
+function getLocalGoalsMeta() {
+  try {
+    return JSON.parse(localStorage.getItem(GOALS_META_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalGoalsMeta(meta) {
+  try {
+    localStorage.setItem(GOALS_META_KEY, JSON.stringify(meta));
+  } catch {}
+}
 
 export default function Goals() {
   const { session } = useAuth();
@@ -23,12 +41,12 @@ export default function Goals() {
 
   const [form, setForm] = useState({
     goal_name: '',
-    target_date: '',
+    target_date: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
     status: 'Pending',
     goal_type: 'Target',
-    start_value: 0,
-    current_value: 0,
-    target_value: 100,
+    start_value: '',
+    current_value: '',
+    target_value: '',
     unit: '',
     start_date: new Date().toISOString().split('T')[0],
     bad_habit: false,
@@ -51,7 +69,24 @@ export default function Goals() {
       }
       const data = await goalsRes.json();
       const milestonesData = milestonesRes.ok ? await milestonesRes.json() : [];
-      setGoals(Array.isArray(data) ? data : []);
+
+      const localMeta = getLocalGoalsMeta();
+      const rawGoals = Array.isArray(data) ? data : [];
+      const enrichedGoals = rawGoals.map((g) => {
+        const meta = localMeta[g.id] || {};
+        return {
+          ...g,
+          goal_type: meta.goal_type || g.goal_type || 'Target',
+          target_value: meta.target_value !== undefined ? meta.target_value : (g.target_value !== undefined && g.target_value !== null ? g.target_value : null),
+          current_value: meta.current_value !== undefined ? meta.current_value : (g.current_value !== undefined && g.current_value !== null ? g.current_value : 0),
+          start_value: meta.start_value !== undefined ? meta.start_value : (g.start_value !== undefined && g.start_value !== null ? g.start_value : 0),
+          unit: meta.unit !== undefined ? meta.unit : (g.unit || ''),
+          start_date: meta.start_date || g.start_date || (g.created_at ? g.created_at.split('T')[0] : new Date().toISOString().split('T')[0]),
+          bad_habit: meta.bad_habit !== undefined ? meta.bad_habit : (g.bad_habit !== undefined ? g.bad_habit : false),
+        };
+      });
+
+      setGoals(enrichedGoals);
       setMilestones(Array.isArray(milestonesData) ? milestonesData : []);
       window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
     } catch (err) {
@@ -66,16 +101,18 @@ export default function Goals() {
     if (session) fetchGoals();
   }, [session, fetchGoals]);
 
-  const openAdd = () => {
+  const openAdd = (typeOverride) => {
     setEditing(null);
+    const defaultGenre = (typeof typeOverride === 'string' && typeOverride) 
+      || (['Target', 'Project', 'Average', 'Habit'].includes(activeFilter) ? activeFilter : 'Target');
     setForm({
       goal_name: '',
       target_date: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
       status: 'Pending',
-      goal_type: 'Target',
-      start_value: 0,
-      current_value: 0,
-      target_value: 100,
+      goal_type: defaultGenre,
+      start_value: '',
+      current_value: '',
+      target_value: '',
       unit: '',
       start_date: new Date().toISOString().split('T')[0],
       bad_habit: false,
@@ -90,11 +127,11 @@ export default function Goals() {
       target_date: goal.target_date || '',
       status: goal.status || 'Pending',
       goal_type: goal.goal_type || 'Target',
-      start_value: goal.start_value ?? 0,
-      current_value: goal.current_value ?? 0,
-      target_value: goal.target_value ?? 100,
+      start_value: goal.start_value !== null && goal.start_value !== undefined ? goal.start_value : '',
+      current_value: goal.current_value !== null && goal.current_value !== undefined ? goal.current_value : '',
+      target_value: goal.target_value !== null && goal.target_value !== undefined ? goal.target_value : '',
       unit: goal.unit || '',
-      start_date: goal.start_date || new Date().toISOString().split('T')[0],
+      start_date: goal.start_date || (goal.created_at ? goal.created_at.split('T')[0] : new Date().toISOString().split('T')[0]),
       bad_habit: Boolean(goal.bad_habit),
     });
     setModalOpen(true);
@@ -106,15 +143,41 @@ export default function Goals() {
     setFormLoading(true);
     try {
       const method = editing ? 'PUT' : 'POST';
-      const body = editing ? { ...form, id: editing.id } : form;
+      const hasQty = form.target_value !== '' && form.target_value !== null && form.target_value !== undefined && !isNaN(Number(form.target_value)) && Number(form.target_value) > 0;
+      const cleanForm = {
+        ...form,
+        target_value: hasQty ? Number(form.target_value) : null,
+        current_value: hasQty ? (Number(form.current_value) || 0) : 0,
+        start_value: hasQty ? (Number(form.start_value) || 0) : 0,
+        unit: hasQty ? (form.unit?.trim() || '') : '',
+      };
+      const body = editing ? { ...cleanForm, id: editing.id } : cleanForm;
       const res = await fetch('/api/goals', {
         method,
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
         body: JSON.stringify(body),
       });
       if (res.ok) {
+        const savedData = await res.json().catch(() => ({}));
+        const goalId = savedData?.id || editing?.id;
+        if (goalId) {
+          const localMeta = getLocalGoalsMeta();
+          localMeta[goalId] = {
+            goal_type: form.goal_type || 'Target',
+            target_value: hasQty ? Number(form.target_value) : null,
+            current_value: hasQty ? (Number(form.current_value) || 0) : 0,
+            start_value: hasQty ? (Number(form.start_value) || 0) : 0,
+            unit: hasQty ? (form.unit?.trim() || '') : '',
+            start_date: form.start_date,
+            bad_habit: Boolean(form.bad_habit),
+          };
+          saveLocalGoalsMeta(localMeta);
+        }
         setToast({ message: editing ? 'Goal updated!' : 'Goal created! 🎯', type: 'success' });
         setModalOpen(false);
+        if (!editing && activeFilter !== 'All' && activeFilter !== form.goal_type) {
+          setActiveFilter(form.goal_type);
+        }
         fetchGoals();
       } else {
         const errData = await res.json().catch(() => ({}));
@@ -136,6 +199,11 @@ export default function Goals() {
         body: JSON.stringify({ id }),
       });
       if (res.ok) {
+        const localMeta = getLocalGoalsMeta();
+        if (localMeta[id]) {
+          delete localMeta[id];
+          saveLocalGoalsMeta(localMeta);
+        }
         setToast({ message: 'Goal deleted', type: 'success' });
         fetchGoals();
       } else {
@@ -150,13 +218,26 @@ export default function Goals() {
   const handleUpdateProgress = async (id, newValue) => {
     try {
       const targetGoal = goals.find((g) => g.id === id);
-      const isCompleted = targetGoal && Number(newValue) >= Number(targetGoal.target_value);
+      const isCompleted = targetGoal && targetGoal.target_value && Number(newValue) >= Number(targetGoal.target_value);
       const newStatus = isCompleted ? 'Completed' : 'In Progress';
+
+      const localMeta = getLocalGoalsMeta();
+      if (localMeta[id]) {
+        localMeta[id].current_value = Number(newValue);
+        saveLocalGoalsMeta(localMeta);
+      }
 
       const res = await fetch('/api/goals', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ id, current_value: newValue, status: newStatus }),
+        body: JSON.stringify({
+          id,
+          goal_name: targetGoal?.goal_name,
+          target_date: targetGoal?.target_date,
+          goal_type: targetGoal?.goal_type || 'Target',
+          current_value: newValue,
+          status: newStatus
+        }),
       });
       if (res.ok) {
         if (isCompleted && targetGoal?.status !== 'Completed') {
@@ -167,6 +248,40 @@ export default function Goals() {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleMarkComplete = async (id, undo = false) => {
+    try {
+      const targetGoal = goals.find((g) => g.id === id);
+      if (!targetGoal) return;
+      const newStatus = undo ? 'In Progress' : 'Completed';
+
+      const res = await fetch('/api/goals', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          id,
+          goal_name: targetGoal.goal_name,
+          target_date: targetGoal.target_date,
+          goal_type: targetGoal.goal_type || 'Target',
+          status: newStatus,
+        }),
+      });
+      if (res.ok) {
+        if (!undo) {
+          fireMilestone();
+          setToast({ message: 'Goal Completed! 🎉 Great work!', type: 'success' });
+        } else {
+          setToast({ message: 'Goal reverted to In Progress.', type: 'success' });
+        }
+        fetchGoals();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setToast({ message: errData.error || 'Failed to update goal.', type: 'error' });
+      }
+    } catch {
+      setToast({ message: 'Network error — check your connection.', type: 'error' });
     }
   };
 
@@ -267,7 +382,7 @@ export default function Goals() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-10">Goals & Tasks</h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#e4ecf5] dark:bg-[#182a40] text-[#2f5378] dark:text-[#8fb4d9]">
               Performance Analytics
             </span>
           </div>
@@ -278,7 +393,7 @@ export default function Goals() {
 
         <button
           onClick={openAdd}
-          className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-4 py-2.5 rounded-xl font-semibold text-sm transition-all shadow-md shadow-blue-500/20 active:scale-95 flex-shrink-0"
+          className="inline-flex items-center gap-2 bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] px-4 py-2.5 rounded-xl font-semibold text-sm transition-all shadow-md shadow-[#3d7a75]/20 active:scale-95 flex-shrink-0"
         >
           <Plus size={18} /> Add Goal
         </button>
@@ -304,8 +419,8 @@ export default function Goals() {
                 onClick={() => setActiveFilter(tab.id)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
                   active
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60'
+                    ? 'bg-[#3d7a75] text-white dark:bg-[#5fae9e] dark:text-[#0e2320] shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-[#eef2f4] dark:hover:bg-[#222b33]'
                 }`}
               >
                 <TabIcon size={14} />
@@ -328,7 +443,7 @@ export default function Goals() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search goals..."
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 dark:text-slate-100"
+            className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-xl outline-none focus:ring-2 focus:ring-[#3d7a75] text-slate-800 dark:text-slate-100"
           />
         </div>
       </div>
@@ -345,7 +460,7 @@ export default function Goals() {
 
       {loading ? (
         <div className="flex items-center justify-center h-64">
-          <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+          <div className="w-8 h-8 border-4 border-[#e2f0ef] border-t-[#3d7a75] dark:border-[#14302e] dark:border-t-[#5fae9e] rounded-full animate-spin" />
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -360,13 +475,14 @@ export default function Goals() {
               onToggleMilestone={handleToggleMilestone}
               onDeleteMilestone={handleDeleteMilestone}
               onUpdateProgress={handleUpdateProgress}
+              onMarkComplete={handleMarkComplete}
             />
           ))}
 
           {filteredGoals.length === 0 && !fetchError && (
             <div className="col-span-full">
               <div className="bg-white dark:bg-slate-800/60 rounded-3xl border border-slate-100 dark:border-slate-700/60 py-16 flex flex-col items-center gap-3 text-center px-4">
-                <div className="w-14 h-14 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-blue-600 dark:text-blue-400">
+                <div className="w-14 h-14 bg-[#e2f0ef] dark:bg-[#14302e] rounded-2xl flex items-center justify-center text-[#3d7a75] dark:text-[#5fae9e]">
                   <Target size={28} />
                 </div>
                 <h3 className="text-slate-800 dark:text-slate-100 font-semibold text-lg">No goals found</h3>
@@ -377,7 +493,7 @@ export default function Goals() {
                 </p>
                 <button
                   onClick={openAdd}
-                  className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-700 transition-colors shadow-xs"
+                  className="mt-2 px-4 py-2 bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] rounded-xl font-medium text-sm transition-colors shadow-xs"
                 >
                   Create Goal
                 </button>
@@ -411,11 +527,11 @@ export default function Goals() {
                     onClick={() => setForm({ ...form, goal_type: t.type })}
                     className={`p-3 rounded-xl border text-left flex items-start gap-2.5 transition-all ${
                       selected
-                        ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 shadow-xs'
+                        ? 'border-[#3d7a75] bg-[#e2f0ef] dark:bg-[#14302e] text-[#2c6560] dark:text-[#7cc3bb] shadow-xs'
                         : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300'
                     }`}
                   >
-                    <TIcon size={18} className={selected ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400'} />
+                    <TIcon size={18} className={selected ? 'text-[#3d7a75] dark:text-[#5fae9e]' : 'text-slate-400'} />
                     <div>
                       <p className="text-xs font-bold">{t.label}</p>
                       <p className="text-[10px] text-slate-400 leading-tight mt-0.5">{t.desc}</p>
@@ -432,14 +548,46 @@ export default function Goals() {
               required
               value={form.goal_name}
               onChange={(e) => setForm({ ...form, goal_name: e.target.value })}
-              className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none dark:bg-slate-800 dark:text-slate-100"
-              placeholder="e.g. Save $8,000 or Launch Website"
+              className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-[#3d7a75] outline-none dark:bg-slate-800 dark:text-slate-100"
+              placeholder={
+                form.goal_type === 'Project'
+                  ? 'e.g. Launch Portfolio Website or Complete Redesign'
+                  : form.goal_type === 'Habit'
+                  ? 'e.g. 30-Day Morning Workout or Daily Reading'
+                  : form.goal_type === 'Average'
+                  ? 'e.g. Sleep 8 Hours or Study 2 Hours Daily'
+                  : 'e.g. Save $8,000 or Pass Certification'
+              }
             />
           </div>
 
-          {/* Numeric fields for Target / Average */}
-          {(form.goal_type === 'Target' || form.goal_type === 'Average') && (
-            <div className="grid grid-cols-3 gap-3 p-3 bg-slate-50 dark:bg-slate-700/30 rounded-xl border border-slate-100 dark:border-slate-700">
+          {/* Optional Numeric / Quantity Tracker */}
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-700/30 rounded-xl border border-slate-100 dark:border-slate-700 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Target Quantity & Progress <span className="text-slate-400 font-normal">(Optional)</span>
+                </label>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {form.goal_type === 'Project'
+                    ? 'Project roadmap tracks milestones. Set quantity only if you need numeric tracking.'
+                    : form.goal_type === 'Habit'
+                    ? 'Track streak days or count. Leave blank if you only want milestone check-ins.'
+                    : 'Leave blank if you don’t need a numerical target (removes the quick log counter).'}
+                </p>
+              </div>
+              {form.target_value && (
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, target_value: '', start_value: '', current_value: '', unit: '' })}
+                  className="text-[11px] text-[#3d7a75] dark:text-[#5fae9e] hover:underline font-medium flex-shrink-0"
+                >
+                  Clear quantity
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">Start Value</label>
                 <input
@@ -447,7 +595,8 @@ export default function Goals() {
                   step="any"
                   value={form.start_value}
                   onChange={(e) => setForm({ ...form, start_value: e.target.value })}
-                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-slate-100"
+                  placeholder="0"
+                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg outline-none focus:ring-2 focus:ring-[#3d7a75] dark:bg-slate-800 dark:text-slate-100"
                 />
               </div>
               <div>
@@ -457,7 +606,8 @@ export default function Goals() {
                   step="any"
                   value={form.current_value}
                   onChange={(e) => setForm({ ...form, current_value: e.target.value })}
-                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-slate-100"
+                  placeholder="0"
+                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg outline-none focus:ring-2 focus:ring-[#3d7a75] dark:bg-slate-800 dark:text-slate-100"
                 />
               </div>
               <div>
@@ -465,45 +615,43 @@ export default function Goals() {
                 <input
                   type="number"
                   step="any"
-                  required
                   value={form.target_value}
                   onChange={(e) => setForm({ ...form, target_value: e.target.value })}
-                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-slate-100"
-                />
-              </div>
-              <div className="col-span-3">
-                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">Unit Symbol / Label (optional)</label>
-                <input
-                  type="text"
-                  value={form.unit}
-                  onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                  placeholder="e.g. $, kg, hours, books, steps"
-                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-slate-100"
+                  placeholder="e.g. 100"
+                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg outline-none focus:ring-2 focus:ring-[#3d7a75] dark:bg-slate-800 dark:text-slate-100"
                 />
               </div>
             </div>
-          )}
+            <div>
+              <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">Unit Symbol / Label (optional)</label>
+              <input
+                type="text"
+                value={form.unit}
+                onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                placeholder="e.g. $, kg, hours, books, sessions, days"
+                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg outline-none focus:ring-2 focus:ring-[#3d7a75] dark:bg-slate-800 dark:text-slate-100"
+              />
+            </div>
+          </div>
 
           {/* Dates */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Start Date</label>
-              <input
-                type="date"
+              <CustomDatePicker
                 required
                 value={form.start_date}
                 onChange={(e) => setForm({ ...form, start_date: e.target.value })}
-                className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none dark:bg-slate-800 dark:text-slate-100"
+                className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-[#3d7a75] outline-none dark:bg-slate-800 dark:text-slate-100"
               />
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Target Due Date</label>
-              <input
-                type="date"
+              <CustomDatePicker
                 required
                 value={form.target_date}
                 onChange={(e) => setForm({ ...form, target_date: e.target.value })}
-                className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none dark:bg-slate-800 dark:text-slate-100"
+                className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-[#3d7a75] outline-none dark:bg-slate-800 dark:text-slate-100"
               />
             </div>
           </div>
@@ -512,15 +660,15 @@ export default function Goals() {
           <div className="grid grid-cols-2 gap-3 items-center">
             <div>
               <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Status</label>
-              <select
+              <CustomSelect
                 value={form.status}
                 onChange={(e) => setForm({ ...form, status: e.target.value })}
-                className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none dark:bg-slate-800 dark:text-slate-100"
+                className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-[#3d7a75] outline-none dark:bg-slate-800 dark:text-slate-100"
               >
                 <option value="Pending">Pending</option>
                 <option value="In Progress">In Progress</option>
                 <option value="Completed">Completed</option>
-              </select>
+              </CustomSelect>
             </div>
 
             <div className="pt-4">
@@ -529,7 +677,7 @@ export default function Goals() {
                   type="checkbox"
                   checked={form.bad_habit}
                   onChange={(e) => setForm({ ...form, bad_habit: e.target.checked })}
-                  className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                  className="w-4 h-4 text-[#3d7a75] rounded border-slate-300 focus:ring-[#3d7a75] accent-[#3d7a75] dark:accent-[#5fae9e]"
                 />
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
                   Limit / Bad Habit Goal
@@ -549,7 +697,7 @@ export default function Goals() {
             <button
               type="submit"
               disabled={formLoading}
-              className="px-5 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors disabled:opacity-60 flex items-center gap-2 shadow-sm"
+              className="px-5 py-2 text-xs font-semibold text-white bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] dark:text-[#0e2320] rounded-xl transition-colors disabled:opacity-60 flex items-center gap-2 shadow-sm"
             >
               {formLoading && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
               {editing ? 'Update Goal' : 'Create Goal'}

@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import {
   Pencil, Trash2, Target, Plus, Minus, Check, X, TrendingUp, TrendingDown,
-  Calendar, Layers, Activity, Flame, AlertCircle, ShieldAlert
+  Calendar, Layers, Activity, Flame, AlertCircle, ShieldAlert, CheckCircle2, Undo2
 } from 'lucide-react';
 
 const statusColors = {
-  Pending: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200/50 dark:border-amber-700/50',
-  'In Progress': 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200/50 dark:border-blue-700/50',
-  Completed: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200/50 dark:border-emerald-700/50',
+  Pending: 'bg-[#f5ecdb] text-[#8a5a24] dark:bg-[#3a2c14] dark:text-[#dcb579] border border-[#c99a52]/40',
+  'In Progress': 'bg-[#e4ecf5] text-[#2f5378] dark:bg-[#182a40] dark:text-[#8fb4d9] border border-[#2f5378]/40',
+  Completed: 'bg-[#e3f3ee] text-[#2f6b5c] dark:bg-[#1c3a32] dark:text-[#7fd1b9] border border-[#2f6b5c]/40',
 };
 
 const goalTypeIcons = {
@@ -33,6 +33,7 @@ export default function GoalCard({
   onToggleMilestone,
   onDeleteMilestone,
   onUpdateProgress,
+  onMarkComplete,
 }) {
   const [newTitle, setNewTitle] = useState('');
   const [adding, setAdding] = useState(false);
@@ -43,13 +44,20 @@ export default function GoalCard({
   const IconComponent = goalTypeIcons[goalType] || Target;
   const isBadHabit = Boolean(goal.bad_habit);
 
+  // Check whether quantity was given / set
+  const hasQuantity = goal.target_value !== null &&
+    goal.target_value !== undefined &&
+    goal.target_value !== '' &&
+    !isNaN(Number(goal.target_value)) &&
+    Number(goal.target_value) > 0;
+
   // Numeric tracking values
   const currentVal = Number(goal.current_value) || 0;
-  const targetVal = Number(goal.target_value) || 100;
+  const targetVal = hasQuantity ? Number(goal.target_value) : null;
   const startVal = Number(goal.start_value) || 0;
   const unit = goal.unit || '';
 
-  // Pace calculations for Target goals
+  // Pace calculations for Target goals (only when quantity is set)
   const today = new Date();
   const startDate = goal.start_date ? new Date(goal.start_date) : new Date();
   const targetDate = goal.target_date ? new Date(goal.target_date) : new Date();
@@ -58,23 +66,25 @@ export default function GoalCard({
   const elapsedTime = Math.max(0, today.getTime() - startDate.getTime());
   const progressRatio = Math.min(1, Math.max(0, elapsedTime / totalTime));
 
-  const totalDiff = targetVal - startVal;
-  const expectedPaceVal = startVal + (totalDiff * progressRatio);
+  const totalDiff = hasQuantity ? targetVal - startVal : 0;
+  const expectedPaceVal = hasQuantity ? startVal + (totalDiff * progressRatio) : 0;
 
-  const isAhead = currentVal >= expectedPaceVal;
+  const isAhead = hasQuantity && currentVal >= expectedPaceVal;
   const daysLeft = Math.max(0, Math.ceil((targetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
-  const remainingVal = Math.max(0, targetVal - currentVal);
-  const dailyNeeded = daysLeft > 0 ? (remainingVal / daysLeft).toFixed(1) : 0;
+  const remainingVal = hasQuantity ? Math.max(0, targetVal - currentVal) : 0;
+  const dailyNeeded = (hasQuantity && daysLeft > 0) ? (remainingVal / daysLeft).toFixed(1) : 0;
 
   // Percentage complete
   let pct = 0;
-  if (goalType === 'Project' || milestones.length > 0) {
+  if (milestones.length > 0) {
     const doneMilestones = milestones.filter((m) => m.completed).length;
-    pct = milestones.length > 0 ? Math.round((doneMilestones / milestones.length) * 100) : 0;
-  } else if (totalDiff > 0) {
+    pct = Math.round((doneMilestones / milestones.length) * 100);
+  } else if (hasQuantity && totalDiff > 0) {
     pct = Math.min(100, Math.round(((currentVal - startVal) / totalDiff) * 100));
   } else if (goal.status === 'Completed') {
     pct = 100;
+  } else if (goal.status === 'In Progress') {
+    pct = 50;
   }
 
   const handleMilestoneAdd = async () => {
@@ -104,19 +114,14 @@ export default function GoalCard({
   };
 
   return (
-    <div className={`bg-white dark:bg-slate-800/90 rounded-2xl p-5 shadow-sm border ${
-      isBadHabit
-        ? 'border-amber-200 dark:border-amber-900/40 bg-gradient-to-b from-amber-50/20 to-transparent'
-        : 'border-slate-100 dark:border-slate-700/60'
-    } hover:shadow-md transition-all duration-200 h-full flex flex-col relative overflow-hidden group`}>
-      
-      {/* Top bar with icon, type badge, actions */}
+    <div className="bg-white dark:bg-slate-800/90 rounded-2xl p-5 shadow-sm border border-slate-100 dark:border-slate-700/60 hover:shadow-md transition-all duration-200 flex flex-col justify-between group">
+      {/* Header Info */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3">
           <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-sm ${
             isBadHabit
-              ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-300'
-              : 'bg-blue-50 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400'
+              ? 'bg-[#f7e8e6] text-[#8a3a34] dark:bg-[#3a201d] dark:text-[#e2a8a3]'
+              : 'bg-[#e4ecf5] text-[#2f5378] dark:bg-[#182a40] dark:text-[#8fb4d9]'
           }`}>
             <IconComponent size={20} />
           </div>
@@ -126,7 +131,7 @@ export default function GoalCard({
                 {goalType}
               </span>
               {isBadHabit && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#f7e8e6] text-[#8a3a34] dark:bg-[#3a201d] dark:text-[#e2a8a3] border border-[#b3574f]/40">
                   <ShieldAlert size={10} /> Limit Goal
                 </span>
               )}
@@ -140,14 +145,14 @@ export default function GoalCard({
         <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
           <button
             onClick={() => onEdit(goal)}
-            className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
+            className="p-1.5 text-slate-400 hover:text-[#3d7a75] dark:hover:text-[#5fae9e] hover:bg-[#eaf4f2] dark:hover:bg-[#1c3733] rounded-lg transition-colors"
             title="Edit Goal"
           >
             <Pencil size={15} />
           </button>
           <button
             onClick={() => onDelete(goal.id)}
-            className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
+            className="p-1.5 text-slate-400 hover:text-[#b3453f] dark:hover:text-[#e2a8a3] hover:bg-[#fbebeb] dark:hover:bg-[#3a2020] rounded-lg transition-colors"
             title="Delete Goal"
           >
             <Trash2 size={15} />
@@ -161,11 +166,11 @@ export default function GoalCard({
           {goal.status}
         </span>
 
-        {goalType === 'Target' && goal.status !== 'Completed' && (
+        {goalType === 'Target' && hasQuantity && goal.status !== 'Completed' && (
           <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${
             isAhead
-              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200/50'
-              : 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200/50'
+              ? 'bg-[#e3f3ee] text-[#2f6b5c] dark:bg-[#1c3a32] dark:text-[#7fd1b9] border border-[#2f6b5c]/40'
+              : 'bg-[#f5ecdb] text-[#8a5a24] dark:bg-[#3a2c14] dark:text-[#dcb579] border border-[#c99a52]/40'
           }`}>
             {isAhead ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
             {isAhead ? 'Ahead of Pace' : 'Behind Pace'}
@@ -178,60 +183,102 @@ export default function GoalCard({
         </div>
       </div>
 
-      {/* Progress Bar & Numeric Tracker for Target / Average / Habit */}
+      {/* Progress Bar & Numeric Tracker */}
       <div className="space-y-2 mb-4">
         <div className="flex items-center justify-between text-xs font-medium">
           <span className="text-slate-500 dark:text-slate-400">
-            {goalType === 'Project' || milestones.length > 0
+            {milestones.length > 0
               ? 'Roadmap Progress'
-              : `${unit ? `${unit} ` : ''}${currentVal.toLocaleString()} / ${targetVal.toLocaleString()}`}
+              : hasQuantity
+              ? `${unit ? `${unit} ` : ''}${currentVal.toLocaleString()} / ${targetVal.toLocaleString()}`
+              : goalType === 'Project'
+              ? 'Project Roadmap'
+              : goalType === 'Habit'
+              ? 'Habit Routine'
+              : 'Goal Progress'}
           </span>
-          <span className="text-blue-600 dark:text-blue-400 font-bold">{pct}%</span>
+          <span className="text-[#3d7a75] dark:text-[#5fae9e] font-bold">{pct}%</span>
         </div>
 
-        <div className="h-2 bg-slate-100 dark:bg-slate-700/80 rounded-full overflow-hidden relative">
+        <div className="h-2 bg-[#f1f3f5] dark:bg-[#14181c] rounded-full overflow-hidden relative">
           <div
             className={`h-full rounded-full transition-all duration-500 ${
               isBadHabit
-                ? 'bg-gradient-to-r from-amber-400 to-orange-500'
-                : 'bg-gradient-to-r from-blue-500 via-indigo-500 to-teal-400'
+                ? 'bg-gradient-to-r from-[#c99a52] to-[#b3574f]'
+                : 'bg-gradient-to-r from-[#3d7a75] via-[#5fae9e] to-[#8fd0c4]'
             }`}
             style={{ width: `${pct}%` }}
           />
         </div>
 
         {/* Target metrics extra details */}
-        {goalType === 'Target' && daysLeft > 0 && goal.status !== 'Completed' && (
-          <div className="flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500 pt-1">
+        {hasQuantity && daysLeft > 0 && goal.status !== 'Completed' && (
+          <div className="flex items-center justify-between text-[11px] text-gray-400 dark:text-gray-500 pt-1">
             <span>Needed: {dailyNeeded} {unit}/day</span>
             <span>{daysLeft} days remaining</span>
           </div>
         )}
+        {!hasQuantity && daysLeft > 0 && goal.status !== 'Completed' && (
+          <div className="flex items-center justify-between text-[11px] text-gray-400 dark:text-gray-500 pt-1">
+            <span>Target due in {daysLeft} days</span>
+          </div>
+        )}
       </div>
 
-      {/* Quick Numeric Logger for Target/Average Goals */}
-      {(goalType === 'Target' || goalType === 'Average') && onUpdateProgress && (
-        <div className="mb-4 p-2.5 bg-slate-50 dark:bg-slate-700/40 rounded-xl border border-slate-100 dark:border-slate-700/60">
+      {/* Mark Complete button for non-quantity, non-milestone goals */}
+      {!hasQuantity && milestones.length === 0 && goal.status !== 'Completed' && onMarkComplete && (
+        <div className="mb-4">
+          <button
+            onClick={() => onMarkComplete(goal.id)}
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-[#e2f0ef] dark:bg-[#14302e] text-[#3d7a75] dark:text-[#5fae9e] hover:bg-[#3d7a75] hover:text-white dark:hover:bg-[#5fae9e] dark:hover:text-[#0e2320] rounded-xl text-xs font-semibold transition-all duration-200 border border-[#3d7a75]/20 dark:border-[#5fae9e]/20 hover:shadow-md hover:shadow-[#3d7a75]/15 active:scale-[0.98]"
+          >
+            <CheckCircle2 size={15} />
+            Mark as Complete
+          </button>
+        </div>
+      )}
+
+      {/* Completed state indicator for manually-completed goals (allows undo) */}
+      {!hasQuantity && milestones.length === 0 && goal.status === 'Completed' && onMarkComplete && (
+        <div className="mb-4 flex items-center justify-between p-2.5 bg-[#e3f3ee] dark:bg-[#1c3a32] rounded-xl border border-[#2f6b5c]/20 dark:border-[#7fd1b9]/20">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={15} className="text-[#2f6b5c] dark:text-[#7fd1b9]" />
+            <span className="text-xs font-semibold text-[#2f6b5c] dark:text-[#7fd1b9]">Goal Completed!</span>
+          </div>
+          <button
+            onClick={() => onMarkComplete(goal.id, true)}
+            className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-[#8a5a24] dark:hover:text-[#dcb579] hover:bg-[#f5ecdb]/50 dark:hover:bg-[#3a2c14]/50 rounded-lg transition-colors"
+            title="Revert to In Progress"
+          >
+            <Undo2 size={12} />
+            Undo
+          </button>
+        </div>
+      )}
+
+      {/* Quick Numeric Logger only when quantity is given / setted */}
+      {hasQuantity && onUpdateProgress && (
+        <div className="mb-4 p-2.5 bg-[#f7f9fa] dark:bg-[#14181c] rounded-xl border border-[#e2e8ec] dark:border-[#2a343d]">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Quick Log</span>
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Quick Log</span>
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => handleQuickLog(-1)}
-                className="w-7 h-7 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 rounded-lg flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors"
+                className="w-7 h-7 bg-white dark:bg-[#1a2129] border border-[#e2e8ec] dark:border-[#2a343d] text-gray-700 dark:text-gray-200 rounded-lg flex items-center justify-center hover:bg-gray-100 dark:hover:bg-[#2a343d] transition-colors"
                 title="Subtract 1"
               >
                 <Minus size={13} />
               </button>
               <button
                 onClick={() => handleQuickLog(1)}
-                className="w-7 h-7 bg-blue-600 text-white rounded-lg flex items-center justify-center hover:bg-blue-700 transition-colors shadow-xs"
+                className="w-7 h-7 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white rounded-lg flex items-center justify-center transition-colors shadow-xs"
                 title="Add 1"
               >
                 <Plus size={13} />
               </button>
               <button
                 onClick={() => setShowLogInput(!showLogInput)}
-                className="px-2 py-1 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-[11px] font-medium text-slate-600 dark:text-slate-300 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors"
+                className="px-2 py-1 bg-white dark:bg-[#1a2129] border border-[#e2e8ec] dark:border-[#2a343d] text-[11px] font-medium text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-[#2a343d] transition-colors"
               >
                 Set Value
               </button>
@@ -239,18 +286,18 @@ export default function GoalCard({
           </div>
 
           {showLogInput && (
-            <form onSubmit={handleCustomLogSubmit} className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-200/60 dark:border-slate-600/60">
+            <form onSubmit={handleCustomLogSubmit} className="flex items-center gap-2 mt-2 pt-2 border-t border-[#e2e8ec] dark:border-[#2a343d]">
               <input
                 type="number"
                 step="any"
                 value={logValue}
                 onChange={(e) => setLogValue(e.target.value)}
                 placeholder={`Current ${unit}...`}
-                className="flex-1 px-2.5 py-1 text-xs border border-slate-200 dark:border-slate-600 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-slate-100"
+                className="flex-1 px-2.5 py-1 text-xs border border-[#e2e8ec] dark:border-[#2a343d] rounded-lg outline-none focus:ring-2 focus:ring-[#3d7a75] dark:bg-[#14181c] text-gray-900 dark:text-gray-100"
               />
               <button
                 type="submit"
-                className="px-3 py-1 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+                className="px-3 py-1 bg-[#3d7a75] text-white text-xs font-semibold rounded-lg hover:bg-[#2f5f5b] transition-colors"
               >
                 Save
               </button>
@@ -280,8 +327,8 @@ export default function GoalCard({
                 onClick={() => onToggleMilestone(m.id, !m.completed, goal.id)}
                 className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 transition-all ${
                   m.completed
-                    ? 'bg-emerald-500 border-emerald-500 text-white'
-                    : 'border-2 border-slate-300 dark:border-slate-600 hover:border-blue-500'
+                    ? 'bg-[#3d7a75] border-[#3d7a75] text-white'
+                    : 'border-2 border-slate-300 dark:border-slate-600 hover:border-[#3d7a75]'
                 }`}
               >
                 {m.completed && <Check size={11} />}
@@ -296,7 +343,7 @@ export default function GoalCard({
               <button
                 type="button"
                 onClick={() => onDeleteMilestone(m.id)}
-                className="opacity-0 group-hover/item:opacity-100 text-slate-300 dark:text-slate-600 hover:text-red-500 transition-opacity p-0.5"
+                className="opacity-0 group-hover/item:opacity-100 text-slate-300 dark:text-slate-600 hover:text-[#b3453f] dark:hover:text-[#e2a8a3] transition-opacity p-0.5"
               >
                 <X size={12} />
               </button>
@@ -320,13 +367,13 @@ export default function GoalCard({
               }
             }}
             placeholder="Add a milestone..."
-            className="flex-1 min-w-0 px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none dark:bg-slate-700 dark:text-slate-100"
+            className="flex-1 min-w-0 px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-[#3d7a75] outline-none dark:bg-slate-700 dark:text-slate-100"
           />
           <button
             type="button"
             onClick={handleMilestoneAdd}
             disabled={adding || !newTitle.trim()}
-            className="p-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg transition-colors disabled:opacity-40 flex-shrink-0"
+            className="p-1.5 bg-[#e4ecf5] dark:bg-[#182a40] text-[#2f5378] dark:text-[#8fb4d9] hover:bg-[#d9ecea] rounded-lg transition-colors disabled:opacity-40 flex-shrink-0"
           >
             <Plus size={14} />
           </button>

@@ -12,16 +12,20 @@ import HabitGroupTable from '../components/HabitGroupTable';
 import HabitTemplatesModal from '../components/HabitTemplatesModal';
 import AIPromptModal from '../components/AIPromptModal';
 import FocusTimerModal from '../components/FocusTimerModal';
+import CustomSelect from '../components/CustomSelect';
 
-const PRESET_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#64748b'];
+const PRESET_COLORS = ['#3d7a75', '#6b8e6a', '#c99a52', '#b3574f', '#7570ab', '#b6708f', '#4a95a3', '#6b7785'];
+
+const isOldBlue = (c) => !c || ['#3b82f6', '#2563eb', '#1d4ed8', '#60a5fa', '#93c5fd', '#1e40af', '#1e3a8a', '#0075ff', '#38bdf8', '#0284c7'].includes(String(c).toLowerCase().trim());
+const getHabitColor = (h) => (!h?.color || isOldBlue(h.color)) ? '#3d7a75' : h.color;
 
 const CATEGORY_BADGES = {
-  Health: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200/60',
-  Fitness: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200/60',
-  Learning: 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border-purple-200/60',
-  Productivity: 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200/60',
-  Mindfulness: 'bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300 border-teal-200/60',
-  Other: 'bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200/60',
+  Health: 'bg-[#e3f3ee] text-[#2f6b5c] dark:bg-[#1c3a32] dark:text-[#7fd1b9] border border-[#e3f3ee] dark:border-[#1c3a32]',
+  Fitness: 'bg-[#f5ecdb] text-[#8a5a24] dark:bg-[#3a2c14] dark:text-[#dcb579] border border-[#f5ecdb] dark:border-[#3a2c14]',
+  Learning: 'bg-[#eae7f5] text-[#4b4a8a] dark:bg-[#232042] dark:text-[#b0aee0] border border-[#eae7f5] dark:border-[#232042]',
+  Productivity: 'bg-[#e4ecf5] text-[#2f5378] dark:bg-[#182a40] dark:text-[#8fb4d9] border border-[#e4ecf5] dark:border-[#182a40]',
+  Mindfulness: 'bg-[#e2f0ef] text-[#2c6560] dark:bg-[#14302e] dark:text-[#7cc3bb] border border-[#e2f0ef] dark:border-[#14302e]',
+  Other: 'bg-[#f1f3f5] text-[#4b5563] dark:bg-[#2a343d] dark:text-[#cbd5e1] border border-[#f1f3f5] dark:border-[#2a343d]',
 };
 
 export default function Habits() {
@@ -53,7 +57,7 @@ export default function Habits() {
     target_quantity: '',
     unit: '',
     time_of_day: 'anytime',
-    color: '#3b82f6',
+    color: '#3d7a75',
     timer_duration: '',
   });
 
@@ -81,12 +85,7 @@ export default function Habits() {
       setTracking(t);
 
       const completed = t.filter((r) => r.status === true).length;
-      const wasPerfect = perfectDay;
-      const nowPerfect = h.length > 0 && completed === h.length;
-      setPerfectDay(nowPerfect);
-      if (!wasPerfect && nowPerfect) {
-        firePerfectDay();
-      }
+      setPerfectDay(h.length > 0 && completed === h.length);
       window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
     } catch (err) {
       console.error(err);
@@ -94,7 +93,7 @@ export default function Habits() {
     } finally {
       setLoading(false);
     }
-  }, [session, today, perfectDay, firePerfectDay]);
+  }, [session, today]);
 
   useEffect(() => {
     if (session) fetchData();
@@ -110,13 +109,14 @@ export default function Habits() {
       target_quantity: '',
       unit: '',
       time_of_day: 'anytime',
-      color: '#3b82f6',
+      color: '#3d7a75',
       timer_duration: '',
     });
     setModalOpen(true);
   };
 
   const openEdit = (habit) => {
+    const isOldBlue = (c) => !c || ['#3b82f6', '#2563eb', '#1d4ed8', '#60a5fa', '#93c5fd', '#1e40af', '#1e3a8a', '#0075ff', '#38bdf8', '#0284c7'].includes(String(c).toLowerCase().trim());
     setEditing(habit);
     setForm({
       habit_name: habit.habit_name,
@@ -126,7 +126,7 @@ export default function Habits() {
       target_quantity: habit.target_quantity ?? '',
       unit: habit.unit || '',
       time_of_day: habit.time_of_day || 'anytime',
-      color: habit.color || '#3b82f6',
+      color: (!habit.color || isOldBlue(habit.color)) ? '#3d7a75' : habit.color,
       timer_duration: habit.timer_duration ?? '',
     });
     setModalOpen(true);
@@ -205,7 +205,14 @@ export default function Habits() {
         body: JSON.stringify({ habit_id: habitId, completion_date: today, status: newStatus }),
       });
       if (res.ok) {
-        if (newStatus) fireSmall();
+        if (newStatus) {
+          const completedCount = tracking.filter((t) => t.status === true && t.habit_id !== habitId).length;
+          if (habits.length > 0 && completedCount + 1 >= habits.length) {
+            firePerfectDay();
+          } else {
+            fireSmall();
+          }
+        }
         fetchData();
       } else {
         setToast({ message: 'Failed to update habit status.', type: 'error' });
@@ -230,7 +237,14 @@ export default function Habits() {
       });
       if (res.ok) {
         const updated = await res.json();
-        if (!wasComplete && updated.status === true) fireSmall();
+        if (!wasComplete && updated.status === true) {
+          const completedCount = tracking.filter((t) => t.status === true && t.habit_id !== habitId).length;
+          if (habits.length > 0 && completedCount + 1 >= habits.length) {
+            firePerfectDay();
+          } else {
+            fireSmall();
+          }
+        }
         fetchData();
       } else {
         const e = await res.json().catch(() => ({}));
@@ -267,7 +281,7 @@ export default function Habits() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">My Routines & Habits</h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#e2f0ef] dark:bg-[#14302e] text-[#2c6560] dark:text-[#7cc3bb]">
               {habits.length} Habits Active
             </span>
           </div>
@@ -279,65 +293,46 @@ export default function Habits() {
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setFocusModalOpen(true)}
-            className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl font-semibold text-xs transition-all shadow-md shadow-blue-500/20 active:scale-95"
+            className="inline-flex items-center gap-1.5 bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] px-3.5 py-2 rounded-xl font-semibold text-xs transition-all shadow-md shadow-[#3d7a75]/20 active:scale-95"
           >
-            <Play size={14} className="fill-white text-white" /> Focus Timer
+            <Play size={14} className="fill-current" /> Focus Timer
           </button>
 
           <button
             onClick={() => setTemplatesOpen(true)}
-            className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl font-semibold text-xs transition-all shadow-md shadow-blue-500/20 active:scale-95"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700/80 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors border border-slate-200/60 dark:border-slate-600/60"
           >
-            <BookOpen size={14} className="text-white" /> Templates
+            <Sparkles size={14} className="text-[#3d7a75] dark:text-[#5fae9e]" /> Preset Templates
           </button>
-
-          <button
-            onClick={() => setAiOpen(true)}
-            className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl font-semibold text-xs transition-all shadow-md shadow-blue-500/20 active:scale-95"
-          >
-            <Sparkles size={14} className="text-white" /> AI Assistant
-          </button>
-
           <button
             onClick={openAdd}
-            className="inline-flex items-center gap-1.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-4 py-2 rounded-xl font-semibold text-xs transition-all shadow-md shadow-blue-500/20 active:scale-95"
+            className="inline-flex items-center gap-1.5 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-4 py-2 rounded-xl font-semibold text-xs transition-all shadow-md shadow-[#3d7a75]/20 active:scale-95 flex-shrink-0"
           >
-            <Plus size={16} /> Add Habit
+            <Plus size={16} /> New Habit
           </button>
         </div>
       </div>
 
-      {/* Routine Time of Day Tabs & Layout View Switcher */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-white dark:bg-slate-800/80 p-2 rounded-2xl border border-slate-100 dark:border-slate-700/60 shadow-xs">
+      {/* Routine Windows & Search Filter Toolbar */}
+      <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         {/* Routine Filter Pills */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
-          {[
-            { id: 'All', label: 'All Routines', icon: Clock },
-            { id: 'Morning', label: 'Morning 🌅', icon: Sun },
-            { id: 'Afternoon', label: 'Afternoon ☀️', icon: Sunset },
-            { id: 'Evening', label: 'Evening 🌙', icon: Moon },
-            { id: 'Anytime', label: 'Anytime', icon: Calendar },
-          ].map((tab) => {
-            const TabIcon = tab.icon;
-            const active = activeRoutine === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveRoutine(tab.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
-                  active
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60'
-                }`}
-              >
-                <TabIcon size={14} />
-                {tab.label}
-              </button>
-            );
-          })}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+          {['all', 'morning', 'afternoon', 'evening'].map((time) => (
+            <button
+              key={time}
+              onClick={() => setActiveRoutine(time === 'all' ? 'All' : time.charAt(0).toUpperCase() + time.slice(1))}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold capitalize transition-all whitespace-nowrap ${
+                activeRoutine.toLowerCase() === time
+                  ? 'bg-[#3d7a75] text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/60'
+              }`}
+            >
+              {time === 'morning' ? '🌅 Morning' : time === 'afternoon' ? '☀️ Afternoon' : time === 'evening' ? '🌙 Evening' : 'All Routines'}
+            </button>
+          ))}
         </div>
 
-        {/* View Switcher & Search Bar */}
+        {/* Search & View Mode Switcher */}
         <div className="flex items-center gap-2">
           <div className="relative flex-1 min-w-[160px]">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -346,7 +341,7 @@ export default function Habits() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search habits..."
-              className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 dark:text-slate-100"
+              className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-xl outline-none focus:ring-2 focus:ring-[#3d7a75] text-slate-800 dark:text-slate-100"
             />
           </div>
 
@@ -354,7 +349,7 @@ export default function Habits() {
             <button
               onClick={() => setViewMode('grid')}
               className={`p-1.5 rounded-lg transition-all ${
-                viewMode === 'grid' ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs' : 'text-slate-400 hover:text-slate-600'
+                viewMode === 'grid' ? 'bg-white dark:bg-[#1a2129] text-[#3d7a75] dark:text-[#5fae9e] shadow-xs' : 'text-slate-400 hover:text-slate-600'
               }`}
               title="Grid Card View"
             >
@@ -363,7 +358,7 @@ export default function Habits() {
             <button
               onClick={() => setViewMode('grouped')}
               className={`p-1.5 rounded-lg transition-all ${
-                viewMode === 'grouped' ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs' : 'text-slate-400 hover:text-slate-600'
+                viewMode === 'grouped' ? 'bg-white dark:bg-[#1a2129] text-[#3d7a75] dark:text-[#5fae9e] shadow-xs' : 'text-slate-400 hover:text-slate-600'
               }`}
               title="Table Routine View"
             >
@@ -392,14 +387,14 @@ export default function Habits() {
                 `Today's Routine Progress — ${completedCount} of ${habits.length} completed`
               )}
             </span>
-            <span className={`text-sm font-bold ${perfectDay ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`}>
+            <span className={`text-sm font-bold ${perfectDay ? 'text-white' : 'text-[#3d7a75] dark:text-[#5fae9e]'}`}>
               {habits.length > 0 ? Math.round((completedCount / habits.length) * 100) : 0}%
             </span>
           </div>
           {!perfectDay && (
             <div className="h-2 bg-slate-100 dark:bg-slate-700/80 rounded-full overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-teal-400 rounded-full transition-all duration-500"
+                className="h-full bg-gradient-to-r from-[#3d7a75] via-[#5fae9e] to-[#7cc3bb] rounded-full transition-all duration-500"
                 style={{ width: `${habits.length > 0 ? (completedCount / habits.length) * 100 : 0}%` }}
               />
             </div>
@@ -419,14 +414,14 @@ export default function Habits() {
 
       {loading ? (
         <div className="flex items-center justify-center h-64">
-          <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+          <div className="w-8 h-8 border-4 border-[#e2f0ef] border-t-[#3d7a75] dark:border-[#14302e] dark:border-t-[#5fae9e] rounded-full animate-spin" />
         </div>
       ) : (
         <>
           {filteredHabits.length === 0 && !fetchError ? (
             <div className="bg-white dark:bg-slate-800/60 rounded-3xl border border-slate-100 dark:border-slate-700/60 py-16 text-center">
               <div className="flex flex-col items-center gap-3">
-                <div className="w-14 h-14 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-blue-600 dark:text-blue-400">
+                <div className="w-14 h-14 bg-[#e2f0ef] dark:bg-[#14302e] rounded-2xl flex items-center justify-center text-[#3d7a75] dark:text-[#5fae9e]">
                   <Calendar size={28} />
                 </div>
                 <h3 className="text-slate-800 dark:text-slate-100 font-semibold text-lg">No habits found</h3>
@@ -437,7 +432,7 @@ export default function Habits() {
                 </p>
                 <button
                   onClick={openAdd}
-                  className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-700 transition-colors shadow-xs"
+                  className="mt-2 px-4 py-2 bg-[#3d7a75] text-white rounded-xl font-medium text-sm hover:bg-[#2f5f5b] transition-colors shadow-xs"
                 >
                   Create Habit
                 </button>
@@ -455,7 +450,7 @@ export default function Habits() {
                     key={habit.id}
                     className={`bg-white dark:bg-slate-800/90 rounded-2xl p-5 shadow-sm border transition-all duration-200 flex flex-col justify-between group ${
                       done
-                        ? 'border-blue-200/80 dark:border-blue-900/40 bg-gradient-to-b from-blue-50/20 to-transparent'
+                        ? 'border-[#3d7a75]/30 dark:border-[#5fae9e]/30 bg-gradient-to-b from-[#e2f0ef]/30 dark:from-[#14302e]/20 to-transparent'
                         : 'border-slate-100 dark:border-slate-700/60 hover:shadow-md'
                     } ${poppingHabit === habit.id ? 'habit-pop' : ''}`}
                   >
@@ -464,7 +459,7 @@ export default function Habits() {
                         <div className="flex items-center gap-2.5">
                           <div
                             className="w-3.5 h-3.5 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: habit.color || '#3b82f6' }}
+                            style={{ backgroundColor: getHabitColor(habit) }}
                           />
                           <div>
                             <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold border mb-1 ${
@@ -491,7 +486,7 @@ export default function Habits() {
                           {habit.target_frequency}
                         </span>
                         {habit.timer_duration && (
-                          <span className="flex items-center gap-1 text-blue-500">
+                          <span className="flex items-center gap-1 text-[#3d7a75] dark:text-[#5fae9e]">
                             <Clock size={13} />
                             {habit.timer_duration}m Focus
                           </span>
@@ -514,7 +509,7 @@ export default function Habits() {
                           onClick={() => toggleHabit(habit.id)}
                           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-200 border ${
                             done
-                              ? 'bg-blue-600 dark:bg-blue-500 border-blue-600 dark:border-blue-500 text-white shadow-md shadow-blue-500/20'
+                              ? 'bg-[#3d7a75] dark:bg-[#5fae9e] border-[#3d7a75] dark:border-[#5fae9e] text-white dark:text-[#0e2320] shadow-md shadow-[#3d7a75]/20'
                               : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
                           }`}
                         >
@@ -526,7 +521,7 @@ export default function Habits() {
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => openEdit(habit)}
-                          className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                          className="p-1.5 text-slate-400 hover:text-[#3d7a75] dark:hover:text-[#5fae9e] hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
                           title="Edit Habit"
                         >
                           Edit
@@ -597,7 +592,7 @@ export default function Habits() {
               required
               value={form.habit_name}
               onChange={(e) => setForm({ ...form, habit_name: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm dark:bg-slate-800 dark:text-slate-100"
+              className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-[#3d7a75] outline-none text-sm dark:bg-slate-800 dark:text-slate-100"
               placeholder="e.g. Morning Exercise or Read 20 Pages"
             />
           </div>
@@ -605,43 +600,43 @@ export default function Habits() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Category</label>
-              <select
+              <CustomSelect
                 value={form.category}
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs dark:bg-slate-800 dark:text-slate-100"
+                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-[#3d7a75] outline-none text-xs dark:bg-slate-800 dark:text-slate-100"
               >
                 {categories.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
-              </select>
+              </CustomSelect>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Routine Time</label>
-              <select
+              <CustomSelect
                 value={form.time_of_day || 'anytime'}
                 onChange={(e) => setForm({ ...form, time_of_day: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs dark:bg-slate-800 dark:text-slate-100"
+                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-[#3d7a75] outline-none text-xs dark:bg-slate-800 dark:text-slate-100"
               >
                 <option value="anytime">Anytime</option>
                 <option value="morning">Morning 🌅</option>
                 <option value="afternoon">Afternoon ☀️</option>
                 <option value="evening">Evening 🌙</option>
-              </select>
+              </CustomSelect>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Frequency</label>
-              <select
+              <CustomSelect
                 value={form.target_frequency}
                 onChange={(e) => setForm({ ...form, target_frequency: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs dark:bg-slate-800 dark:text-slate-100"
+                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-[#3d7a75] outline-none text-xs dark:bg-slate-800 dark:text-slate-100"
               >
                 {frequencies.map((f) => (
                   <option key={f} value={f}>{f}</option>
                 ))}
-              </select>
+              </CustomSelect>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Focus Timer (Mins)</label>
@@ -652,7 +647,7 @@ export default function Habits() {
                 value={form.timer_duration || ''}
                 onChange={(e) => setForm({ ...form, timer_duration: e.target.value })}
                 placeholder="e.g. 25"
-                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs dark:bg-slate-800 dark:text-slate-100"
+                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-[#3d7a75] outline-none text-xs dark:bg-slate-800 dark:text-slate-100"
               />
             </div>
           </div>
@@ -667,7 +662,7 @@ export default function Habits() {
                   type="button"
                   onClick={() => setForm({ ...form, color: c })}
                   className={`w-7 h-7 rounded-full transition-transform ${
-                    form.color === c ? 'scale-125 ring-2 ring-offset-2 ring-blue-500' : 'hover:scale-110'
+                    form.color === c ? 'scale-125 ring-2 ring-offset-2 ring-[#3d7a75]' : 'hover:scale-110'
                   }`}
                   style={{ backgroundColor: c }}
                 />
@@ -684,7 +679,7 @@ export default function Habits() {
                 onClick={() => setForm({ ...form, tracking_type: 'boolean' })}
                 className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
                   form.tracking_type === 'boolean'
-                    ? 'bg-white dark:bg-slate-700 shadow-xs text-blue-600 dark:text-blue-400'
+                    ? 'bg-white dark:bg-slate-700 shadow-xs text-[#3d7a75] dark:text-[#5fae9e]'
                     : 'text-slate-500 dark:text-slate-400'
                 }`}
               >
@@ -695,7 +690,7 @@ export default function Habits() {
                 onClick={() => setForm({ ...form, tracking_type: 'quantity' })}
                 className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
                   form.tracking_type === 'quantity'
-                    ? 'bg-white dark:bg-slate-700 shadow-xs text-blue-600 dark:text-blue-400'
+                    ? 'bg-white dark:bg-slate-700 shadow-xs text-[#3d7a75] dark:text-[#5fae9e]'
                     : 'text-slate-500 dark:text-slate-400'
                 }`}
               >
@@ -715,7 +710,7 @@ export default function Habits() {
                   required
                   value={form.target_quantity}
                   onChange={(e) => setForm({ ...form, target_quantity: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs dark:bg-slate-800 dark:text-slate-100"
+                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-[#3d7a75] outline-none text-xs dark:bg-slate-800 dark:text-slate-100"
                   placeholder="e.g. 3"
                 />
               </div>
@@ -725,7 +720,7 @@ export default function Habits() {
                   required
                   value={form.unit}
                   onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs dark:bg-slate-800 dark:text-slate-100"
+                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-[#3d7a75] outline-none text-xs dark:bg-slate-800 dark:text-slate-100"
                   placeholder="e.g. liters, pages"
                 />
               </div>
@@ -743,7 +738,7 @@ export default function Habits() {
             <button
               type="submit"
               disabled={formLoading}
-              className="px-5 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors disabled:opacity-60 flex items-center gap-2 shadow-xs"
+              className="px-5 py-2 text-xs font-semibold text-white bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] dark:text-[#0e2320] rounded-xl transition-colors disabled:opacity-60 flex items-center gap-2 shadow-xs"
             >
               {formLoading && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
               {editing ? 'Update Habit' : 'Save Habit'}
@@ -770,6 +765,8 @@ export default function Habits() {
       <AIPromptModal
         open={aiOpen}
         onClose={() => setAiOpen(false)}
+        habits={habits}
+        trackingLogs={tracking}
         onAddHabits={async (newHabits) => {
           for (const h of newHabits) {
             await fetch('/api/habits', {

@@ -23,8 +23,8 @@ export default function DateBulkActionModal({
   return (
     <Modal open={open} onClose={onClose} title="Date Quick Actions">
       <div className="space-y-4 py-1">
-        <div className="flex items-center gap-3 p-3.5 bg-blue-50/70 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/50 rounded-2xl">
-          <Calendar size={20} className="text-blue-600 dark:text-blue-400 flex-shrink-0" />
+        <div className="flex items-center gap-3 p-3.5 bg-[#e2f0ef]/70 dark:bg-[#14302e]/60 border border-[#cde3e1] dark:border-[#234b47] rounded-2xl">
+          <Calendar size={20} className="text-[#2c6560] dark:text-[#7cc3bb] flex-shrink-0" />
           <div>
             <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">{formattedDate}</h4>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -43,7 +43,7 @@ export default function DateBulkActionModal({
               onConfirmAllComplete(dateStr);
               onClose();
             }}
-            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl transition-all shadow-sm active:scale-[0.98]"
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white font-semibold text-xs rounded-xl transition-all shadow-sm active:scale-[0.98]"
           >
             <CheckCircle2 size={16} />
             <span>Mark All Scheduled Complete</span>

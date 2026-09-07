@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 
 const MILESTONES = {
   7:   { emoji: '⚡', title: '7-Day Streak!',   subtitle: 'One week of consistency. Keep it up!',        color: 'from-amber-400 to-orange-500' },
-  14:  { emoji: '🚀', title: '2-Week Streak!',  subtitle: 'Two weeks strong. You\'re building a habit!', color: 'from-blue-500 to-indigo-600' },
+  14:  { emoji: '🚀', title: '2-Week Streak!',  subtitle: 'Two weeks strong. You\'re building a habit!', color: 'from-[#3d7a75] to-[#2f5378]' },
   21:  { emoji: '💪', title: '21-Day Streak!',  subtitle: 'Science says habits form in 21 days. You did it!', color: 'from-violet-500 to-purple-600' },
   30:  { emoji: '🔥', title: '30-Day Streak!',  subtitle: 'One full month. You\'re unstoppable!',        color: 'from-orange-500 to-red-600' },
   60:  { emoji: '⭐', title: '60-Day Streak!',  subtitle: 'Two months of dedication. Incredible!',       color: 'from-yellow-400 to-amber-500' },

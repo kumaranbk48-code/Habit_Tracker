@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import Modal from './Modal';
+import CustomSelect from './CustomSelect';
 import { Play, Pause, RotateCcw, CheckCircle, Clock, Volume2, Sparkles } from 'lucide-react';
 import { useConfetti } from '../hooks/useConfetti';
 
@@ -105,26 +106,26 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
           <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
             Target Habit
           </label>
-          <select
+          <CustomSelect
             value={selectedHabitId}
             onChange={(e) => handleSelectHabit(e.target.value)}
-            className="w-full px-3.5 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3.5 py-2.5 bg-[#f7f9fa] dark:bg-[#14181c] border border-[#e2e8ec] dark:border-[#2a343d] rounded-xl text-sm font-medium text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-[#3d7a75]"
           >
             {habits.map(h => (
               <option key={h.id} value={h.id}>
                 {h.habit_name} ({h.category})
               </option>
             ))}
-          </select>
+          </CustomSelect>
         </div>
 
         {/* Mode Toggle & Preset Presets */}
         <div className="flex items-center justify-between gap-3">
-          <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl">
+          <div className="flex bg-[#f1f3f5] dark:bg-[#14181c] p-1 rounded-xl">
             <button
               onClick={() => { setMode('timer'); setIsRunning(false); }}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                mode === 'timer' ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'
+                mode === 'timer' ? 'bg-white dark:bg-[#1a2129] shadow-sm text-[#3d7a75] dark:text-[#5fae9e]' : 'text-gray-500 dark:text-gray-400'
               }`}
             >
               Countdown
@@ -132,7 +133,7 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
             <button
               onClick={() => { setMode('stopwatch'); setIsRunning(false); }}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                mode === 'stopwatch' ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'
+                mode === 'stopwatch' ? 'bg-white dark:bg-[#1a2129] shadow-sm text-[#3d7a75] dark:text-[#5fae9e]' : 'text-gray-500 dark:text-gray-400'
               }`}
             >
               Stopwatch
@@ -147,8 +148,8 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
                   onClick={() => handleSetDuration(m)}
                   className={`px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors ${
                     durationMinutes === m
-                      ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400'
-                      : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                      ? 'bg-[#e2f0ef] dark:bg-[#14302e] border-[#3d7a75]/40 text-[#2c6560] dark:text-[#7cc3bb]'
+                      : 'border-[#e2e8ec] dark:border-[#2a343d] text-gray-600 dark:text-gray-400 hover:bg-[#f7f9fa] dark:hover:bg-[#14181c]'
                   }`}
                 >
                   {m}m
@@ -162,7 +163,7 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
         <div className="flex flex-col items-center justify-center py-4">
           <div className="relative w-56 h-56 flex items-center justify-center">
             <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
-              <circle cx="60" cy="60" r="50" stroke="currentColor" strokeWidth="6" className="text-gray-100 dark:text-gray-800" fill="none" />
+              <circle cx="60" cy="60" r="50" stroke="currentColor" strokeWidth="6" className="text-gray-100 dark:text-[#14181c]" fill="none" />
               <circle
                 cx="60"
                 cy="60"
@@ -177,8 +178,8 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
               />
               <defs>
                 <linearGradient id="timerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#3b82f6" />
-                  <stop offset="100%" stopColor="#06b6d4" />
+                  <stop offset="0%" stopColor="#3d7a75" />
+                  <stop offset="100%" stopColor="#5fae9e" />
                 </linearGradient>
               </defs>
             </svg>
@@ -188,7 +189,7 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
                 {currentDisplayTime}
               </span>
               <span className="text-xs font-medium text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-1">
-                <Sparkles size={12} className="text-amber-500" />
+                <Sparkles size={12} className="text-[#dcb579]" />
                 {activeHabit?.habit_name || 'Focus Session'}
               </span>
             </div>
@@ -200,7 +201,7 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
           <button
             onClick={resetTimer}
             title="Reset"
-            className="p-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 rounded-xl transition-colors"
+            className="p-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 bg-gray-100 dark:bg-[#14181c] hover:bg-gray-200 dark:hover:bg-[#2a343d] rounded-xl transition-colors"
           >
             <RotateCcw size={18} />
           </button>
@@ -209,8 +210,8 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
             onClick={toggleTimer}
             className={`flex items-center gap-2 px-8 py-3.5 rounded-2xl font-semibold text-white shadow-lg transition-all duration-200 hover:scale-105 active:scale-95 ${
               isRunning
-                ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-200 dark:shadow-none'
-                : 'bg-blue-600 hover:bg-blue-700 shadow-blue-200 dark:shadow-none'
+                ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-900/20'
+                : 'bg-[#3d7a75] hover:bg-[#2f5f5b] shadow-[#3d7a75]/30'
             }`}
           >
             {isRunning ? <Pause size={20} /> : <Play size={20} className="ml-0.5" />}
@@ -220,7 +221,7 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
           <button
             onClick={handleTimerFinished}
             title="Complete Habit Now"
-            className="p-3 text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 rounded-xl transition-colors"
+            className="p-3 text-[#2f6b5c] dark:text-[#7fd1b9] bg-[#e3f3ee] dark:bg-[#1c3a32] hover:bg-[#d5eee5] dark:hover:bg-[#244b41] rounded-xl transition-colors"
           >
             <CheckCircle size={20} />
           </button>

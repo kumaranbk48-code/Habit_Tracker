@@ -1,4 +1,5 @@
 import supabase from './db-client.js';
+import { verifyUserToken } from './auth-helper.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,7 +10,7 @@ export default async function handler(req, res) {
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
 
-  const { data: { user }, error: userErr } = await supabase.auth.getUser(token);
+  const { user, error: userErr } = await verifyUserToken(token);
   if (userErr || !user) return res.status(401).json({ error: 'Invalid token' });
 
   try {

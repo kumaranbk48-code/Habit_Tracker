@@ -68,22 +68,22 @@ export default function DailyQuoteCard() {
   const isTodayQuote = currentIdx === dailyIdx;
 
   return (
-    <div className="bg-gradient-to-br from-blue-900 via-indigo-900 to-slate-900 text-white rounded-2xl p-6 shadow-md border border-indigo-800/50 flex flex-col justify-between relative overflow-hidden group">
+    <div className="bg-gradient-to-br from-[#14181c] via-[#1c2734] to-[#1f3a3a] text-white rounded-2xl p-6 shadow-md border border-[#2a343d] flex flex-col justify-between relative overflow-hidden group">
       {/* Background Glow Overlay */}
-      <div className="absolute -top-10 -right-10 w-40 h-40 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
-      <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+      <div className="absolute -top-10 -right-10 w-40 h-40 bg-[#3d7a75]/10 rounded-full blur-2xl pointer-events-none" />
+      <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-[#2d3f56]/10 rounded-full blur-2xl pointer-events-none" />
 
       {/* Top Header Row */}
       <div className="flex items-center justify-between gap-3 mb-4 z-10">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-300">
+          <div className="w-8 h-8 rounded-xl bg-[#3d7a75]/20 border border-[#3d7a75]/30 flex items-center justify-center text-[#8fd0c4]">
             <Quote size={16} />
           </div>
           <div>
             <h3 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
               Daily Motivation
               {isTodayQuote && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/30 text-blue-200 border border-blue-400/30">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#3d7a75]/30 text-[#8fd0c4] border border-[#3d7a75]/30">
                   Today's Quote
                 </span>
               )}
@@ -92,8 +92,8 @@ export default function DailyQuoteCard() {
           </div>
         </div>
 
-        <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white/10 text-indigo-200 border border-white/10 flex items-center gap-1">
-          <Sparkles size={12} className="text-amber-400" />
+        <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white/10 text-slate-200 border border-white/10 flex items-center gap-1">
+          <Sparkles size={12} className="text-[#b5934a]" />
           #{quote.category}
         </span>
       </div>
@@ -103,7 +103,7 @@ export default function DailyQuoteCard() {
         <blockquote className="text-base sm:text-lg font-medium text-slate-100 italic leading-relaxed">
           "{quote.text}"
         </blockquote>
-        <p className="text-xs font-semibold text-blue-300 mt-2.5 flex items-center gap-1">
+        <p className="text-xs font-semibold text-[#8fd0c4] mt-2.5 flex items-center gap-1">
           — {quote.author}
         </p>
       </div>
@@ -114,7 +114,7 @@ export default function DailyQuoteCard() {
           onClick={handleNextRandom}
           className="flex items-center gap-1.5 text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-xl border border-white/10 transition-colors"
         >
-          <RefreshCw size={13} className="text-blue-400" />
+          <RefreshCw size={13} className="text-[#8fd0c4]" />
           <span>New Inspiration</span>
         </button>
 
@@ -122,7 +122,7 @@ export default function DailyQuoteCard() {
           onClick={handleCopy}
           className="flex items-center gap-1.5 text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-xl border border-white/10 transition-colors"
         >
-          {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} className="text-blue-400" />}
+          {copied ? <Check size={13} className="text-[#7fd1b9]" /> : <Copy size={13} className="text-[#8fd0c4]" />}
           <span>{copied ? 'Copied!' : 'Copy'}</span>
         </button>
       </div>

@@ -10,6 +10,8 @@ import Reminders from './pages/Reminders';
 import Reports from './pages/Reports';
 import CalendarPage from './pages/CalendarPage';
 import Profile from './pages/Profile';
+import LearningHubDashboard from './pages/LearningHubDashboard';
+import LearningJourneyDetail from './pages/LearningJourneyDetail';
 import PWAInstallBanner from './components/PWAInstallBanner';
 
 function App() {
@@ -23,6 +25,12 @@ function App() {
           } />
           <Route path="/habits" element={
             <ProtectedRoute><Layout><Habits /></Layout></ProtectedRoute>
+          } />
+          <Route path="/learning" element={
+            <ProtectedRoute><Layout><LearningHubDashboard /></Layout></ProtectedRoute>
+          } />
+          <Route path="/learning/journey/:id" element={
+            <ProtectedRoute><Layout><LearningJourneyDetail /></Layout></ProtectedRoute>
           } />
           <Route path="/calendar" element={
             <ProtectedRoute><Layout><CalendarPage /></Layout></ProtectedRoute>

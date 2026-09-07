@@ -28,3 +28,20 @@ dist-ssr
 *.sw?
 .vite-source-tags.js
 .vercel
+
+# Playwright & Testing
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+.playwright-mcp/
+*.png
+
+# Local Scratch & Runtime Cache
+scratch/
+
+# OS Files
+Thumbs.db
+Desktop.ini
+

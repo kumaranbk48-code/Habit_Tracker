@@ -9,6 +9,7 @@ import {
 import XPLevelBar from '../components/XPLevelBar';
 import ThemeToggle from '../components/ThemeToggle';
 import Modal from '../components/Modal';
+import CustomSelect from '../components/CustomSelect';
 import { calculateXP } from '../hooks/useGamification';
 
 export default function Profile() {
@@ -158,12 +159,15 @@ export default function Profile() {
           onClick={handleExportData}
           className="hidden sm:inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-xs"
         >
-          <Download size={14} className="text-blue-600 dark:text-blue-400" /> Export Data JSON
+          <Download size={14} className="text-[#3d7a75] dark:text-[#5fae9e]" /> Export Data JSON
         </button>
       </div>
 
       {/* Main Profile Header Banner Card */}
-      <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
+      <div
+        className="rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden"
+        style={{ background: 'linear-gradient(120deg, #14181c 0%, #1c2734 45%, #1f3a3a 100%)' }}
+      >
         <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl pointer-events-none" />
         
         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 z-10 relative">
@@ -178,7 +182,7 @@ export default function Profile() {
             </div>
             <button
               onClick={() => setEditNameModal(true)}
-              className="absolute -bottom-2 -right-2 p-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl shadow-md border border-white/40 transition-transform active:scale-95"
+              className="absolute -bottom-2 -right-2 p-2 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white rounded-xl shadow-md border border-white/40 transition-transform active:scale-95"
               title="Edit Profile Name"
             >
               <Edit3 size={14} />
@@ -191,11 +195,11 @@ export default function Profile() {
               <h2 className="text-2xl font-bold text-white leading-tight">{displayName}</h2>
             </div>
 
-            <p className="text-sm text-blue-100/80 flex items-center justify-center sm:justify-start gap-1.5 mb-4">
-              <Mail size={14} className="text-blue-300" /> {user?.email}
+            <p className="text-sm text-[#cbd5e1] flex items-center justify-center sm:justify-start gap-1.5 mb-4">
+              <Mail size={14} className="text-[#8fd0c4]" /> {user?.email}
             </p>
 
-            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 text-xs text-blue-200">
+            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 text-xs text-[#cbd5e1]">
               <span className="px-3 py-1.5 rounded-xl bg-white/10 border border-white/10 flex items-center gap-1.5">
                 <Calendar size={13} /> Member since {joinedDate}
               </span>
@@ -243,38 +247,38 @@ export default function Profile() {
         {/* Habit & Schedule Preferences */}
         <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-100 dark:border-slate-700/80">
           <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
-            <Sliders size={18} className="text-blue-500" /> Habit Preferences
+            <Sliders size={18} className="text-[#3d7a75] dark:text-[#5fae9e]" /> Habit Preferences
           </h3>
 
           <form onSubmit={handleSavePreferences} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Week Start Day</label>
-              <select
+              <CustomSelect
                 value={weekStart}
                 onChange={(e) => setWeekStart(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-xs bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-xs bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-[#3d7a75]"
               >
                 <option value="Monday">Monday (Standard)</option>
                 <option value="Sunday">Sunday</option>
-              </select>
+              </CustomSelect>
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Daily Target Completion Goal</label>
-              <select
+              <CustomSelect
                 value={dailyTarget}
                 onChange={(e) => setDailyTarget(Number(e.target.value))}
-                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-xs bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-xs bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-[#3d7a75]"
               >
                 <option value={3}>3 Habits / day</option>
                 <option value={5}>5 Habits / day (Recommended)</option>
                 <option value={8}>8 Habits / day</option>
-              </select>
+              </CustomSelect>
             </div>
 
             <button
               type="submit"
-              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-xs"
+              className="w-full py-2.5 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white rounded-xl font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-xs"
             >
               {prefSaved ? <CheckCircle2 size={15} /> : <Save size={15} />}
               <span>{prefSaved ? 'Preferences Saved!' : 'Save Preferences'}</span>
@@ -286,7 +290,7 @@ export default function Profile() {
         <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-100 dark:border-slate-700/80 flex flex-col justify-between">
           <div>
             <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
-              <Settings size={18} className="text-indigo-500" /> Interface & Dark Mode
+              <Settings size={18} className="text-[#7570ab] dark:text-[#b0aee0]" /> Interface & Dark Mode
             </h3>
 
             <div className="space-y-4">
@@ -333,7 +337,7 @@ export default function Profile() {
               required
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-slate-100"
+              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-[#3d7a75] text-slate-900 dark:text-slate-100"
               placeholder="Your Name"
             />
           </div>
@@ -360,7 +364,7 @@ export default function Profile() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <label
                     htmlFor="avatar-device-input"
-                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white cursor-pointer transition-all shadow-xs active:scale-95"
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white cursor-pointer transition-all shadow-xs active:scale-95"
                   >
                     <Upload size={14} /> Choose Image File
                   </label>
@@ -391,7 +395,7 @@ export default function Profile() {
             <button
               type="submit"
               disabled={savingName}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl transition-colors shadow-xs"
+              className="px-4 py-2 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white font-semibold text-xs rounded-xl transition-colors shadow-xs"
             >
               {savingName ? 'Saving...' : 'Save Profile'}
             </button>

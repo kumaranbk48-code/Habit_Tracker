@@ -1,157 +1,266 @@
-import { useState } from 'react';
-import { Share2, Download, X } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Share2, Download, Copy, Check, Flame, Sparkles } from 'lucide-react';
+import Modal from './Modal';
 import { getLevelInfo, calculateXP } from '../hooks/useGamification';
 
 function drawCard(canvas, stats, displayName) {
-  const ctx    = canvas.getContext('2d');
-  const W = 480, H = 280;
-  canvas.width  = W;
-  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const dpr = 2;
+  const W = 520, H = 300;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
 
-  const streak  = stats?.currentStreak  || 0;
-  const xp      = calculateXP(stats);
+  const streak = stats?.currentStreak || 0;
+  const xp = calculateXP(stats);
   const { current } = getLevelInfo(xp);
-  const rate    = stats?.completionPercentage || 0;
-  const done    = stats?.completedToday || 0;
-  const total   = stats?.totalHabits   || 0;
+  const rate = stats?.completionPercentage || 0;
+  const done = stats?.completedToday || 0;
+  const total = stats?.totalHabits || 0;
 
   // Background gradient
   const bgGrad = ctx.createLinearGradient(0, 0, W, H);
   bgGrad.addColorStop(0, '#0f172a');
-  bgGrad.addColorStop(1, '#1e3a5f');
+  bgGrad.addColorStop(0.5, '#1e293b');
+  bgGrad.addColorStop(1, '#0f172a');
   ctx.fillStyle = bgGrad;
   ctx.beginPath();
-  ctx.roundRect(0, 0, W, H, 20);
+  if (ctx.roundRect) {
+    ctx.roundRect(0, 0, W, H, 24);
+  } else {
+    ctx.rect(0, 0, W, H);
+  }
   ctx.fill();
 
-  // Blue accent bar left
+  // Vibrant accent gradient bar
   const accentGrad = ctx.createLinearGradient(0, 0, 0, H);
-  accentGrad.addColorStop(0, '#3b82f6');
-  accentGrad.addColorStop(1, '#2563eb');
+  accentGrad.addColorStop(0, '#3d7a75');
+  accentGrad.addColorStop(1, '#5fae9e');
   ctx.fillStyle = accentGrad;
   ctx.beginPath();
-  ctx.roundRect(0, 0, 6, H, [20, 0, 0, 20]);
+  if (ctx.roundRect) {
+    ctx.roundRect(0, 0, 8, H, [24, 0, 0, 24]);
+  } else {
+    ctx.rect(0, 0, 8, H);
+  }
   ctx.fill();
 
-  // App name
-  ctx.fillStyle = '#3b82f6';
-  ctx.font = 'bold 13px Inter, sans-serif';
-  ctx.fillText('HABITTRACKER', 28, 36);
+  // App Logo Header
+  ctx.fillStyle = '#5fae9e';
+  ctx.font = 'bold 12px Inter, sans-serif';
+  ctx.fillText('HABITTRACKER 2.0', 32, 40);
 
-  // User name
-  ctx.fillStyle = '#f1f5f9';
-  ctx.font = 'bold 22px Inter, sans-serif';
-  ctx.fillText(displayName, 28, 68);
+  // User Display Name
+  ctx.fillStyle = '#f8fafc';
+  ctx.font = 'bold 24px Inter, sans-serif';
+  ctx.fillText(displayName, 32, 74);
 
-  // Level badge
-  ctx.fillStyle = current.color;
-  ctx.beginPath(); ctx.roundRect(28, 78, 80, 22, 6); ctx.fill();
-  ctx.fillStyle = '#fff';
+  // Level Badge
+  ctx.fillStyle = current.color || '#3d7a75';
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(32, 86, 110, 24, 8);
+  } else {
+    ctx.rect(32, 86, 110, 24);
+  }
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 11px Inter, sans-serif';
-  ctx.fillText(`Lv.${current.level} ${current.title}`, 36, 93);
+  ctx.fillText(`Lv.${current.level} ${current.title}`, 42, 102);
 
-  // Streak section
-  ctx.fillStyle = '#f97316';
-  ctx.font = 'bold 52px Inter, sans-serif';
-  ctx.fillText(`🔥 ${streak}`, 28, 170);
+  // Big Streak Counter
+  ctx.fillStyle = '#dcb579';
+  ctx.font = 'bold 56px Inter, sans-serif';
+  ctx.fillText(`🔥 ${streak}`, 32, 180);
   ctx.fillStyle = '#94a3b8';
-  ctx.font = '13px Inter, sans-serif';
-  ctx.fillText('day streak', 28, 192);
+  ctx.font = 'bold 14px Inter, sans-serif';
+  ctx.fillText('DAYS CONSISTENT', 32, 204);
 
-  // Stats row
-  const stats2 = [
-    { label: 'Today', value: `${done}/${total}` },
-    { label: 'Rate',  value: `${rate}%` },
-    { label: 'XP',    value: xp.toLocaleString() },
+  // Metrics Grid
+  const metrics = [
+    { label: 'Completed Today', value: `${done}/${total}` },
+    { label: 'Completion Rate', value: `${rate}%` },
+    { label: 'Total Earned XP', value: xp.toLocaleString() },
   ];
-  stats2.forEach((s, i) => {
-    const x = 28 + i * 140;
-    ctx.fillStyle = '#e2e8f0';
-    ctx.font = 'bold 20px Inter, sans-serif';
-    ctx.fillText(s.value, x, 230);
+  metrics.forEach((m, i) => {
+    const x = 32 + i * 150;
+    ctx.fillStyle = '#f1f5f9';
+    ctx.font = 'bold 18px Inter, sans-serif';
+    ctx.fillText(m.value, x, 248);
     ctx.fillStyle = '#64748b';
-    ctx.font = '12px Inter, sans-serif';
-    ctx.fillText(s.label, x, 248);
+    ctx.font = '11px Inter, sans-serif';
+    ctx.fillText(m.label, x, 266);
   });
 
-  // Watermark
-  ctx.fillStyle = '#334155';
+  // Footer Watermark
+  ctx.fillStyle = '#475569';
   ctx.font = '11px Inter, sans-serif';
-  ctx.fillText('Track your habits at HabitTracker', W - 230, H - 16);
+  ctx.fillText('habittracker.app', W - 120, H - 20);
 }
 
-export default function ShareCard({ stats, displayName = 'User' }) {
-  const [open,     setOpen]     = useState(false);
+export default function ShareCard({
+  open: externalOpen,
+  isOpen: externalIsOpen,
+  onClose: externalOnClose,
+  stats,
+  displayName = 'User',
+  showButton = false,
+}) {
+  const [internalOpen, setInternalOpen] = useState(false);
   const [imageUrl, setImageUrl] = useState('');
+  const [copied, setCopied] = useState(false);
 
-  const generate = () => {
-    const canvas = document.createElement('canvas');
-    drawCard(canvas, stats, displayName);
-    setImageUrl(canvas.toDataURL('image/png'));
-    setOpen(true);
+  const isControlled = externalOpen !== undefined || externalIsOpen !== undefined;
+  const isModalOpen = isControlled ? Boolean(externalOpen ?? externalIsOpen) : internalOpen;
+
+  const streak = stats?.currentStreak || 0;
+  const shareText = `🔥 I'm on a ${streak}-day streak on HabitTracker!\nBuilding better habits every single day. 💪\nJoin me at HabitTracker!`;
+
+  const handleClose = () => {
+    if (externalOnClose) externalOnClose();
+    if (!isControlled) setInternalOpen(false);
   };
 
-  const download = () => {
+  const generate = useCallback(() => {
+    try {
+      const canvas = document.createElement('canvas');
+      drawCard(canvas, stats, displayName);
+      setImageUrl(canvas.toDataURL('image/png'));
+    } catch (err) {
+      console.error('Failed to generate streak card preview:', err);
+    }
+  }, [stats, displayName]);
+
+  useEffect(() => {
+    if (isModalOpen) {
+      generate();
+    }
+  }, [isModalOpen, generate]);
+
+  const handleDownload = () => {
+    if (!imageUrl) return;
     const a = document.createElement('a');
-    a.href     = imageUrl;
-    a.download = `habittracker-streak.png`;
+    a.href = imageUrl;
+    a.download = `habittracker-streak-${streak}-days.png`;
     a.click();
   };
 
-  const share = async () => {
-    if (!navigator.share) { download(); return; }
+  const handleCopyText = async () => {
     try {
-      const blob = await (await fetch(imageUrl)).blob();
-      const file = new File([blob], 'habit-streak.png', { type: 'image/png' });
-      await navigator.share({ title: 'My HabitTracker Streak', files: [file] });
+      await navigator.clipboard.writeText(shareText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch {
-      download();
+      // Fallback copy
+      const el = document.createElement('textarea');
+      el.value = shareText;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleNativeShare = async () => {
+    if (navigator.share) {
+      try {
+        if (imageUrl) {
+          const blob = await (await fetch(imageUrl)).blob();
+          const file = new File([blob], 'habit-streak.png', { type: 'image/png' });
+          await navigator.share({
+            title: 'My HabitTracker Streak',
+            text: shareText,
+            files: [file],
+          });
+          return;
+        }
+        await navigator.share({
+          title: 'My HabitTracker Streak',
+          text: shareText,
+        });
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          handleCopyText();
+        }
+      }
+    } else {
+      handleCopyText();
     }
   };
 
   return (
     <>
-      <button
-        onClick={generate}
-        className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-md shadow-blue-500/20 transition-all active:scale-95"
-      >
-        <Share2 size={15} className="text-white" /> Share Streak
-      </button>
-
-      {open && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: 'rgba(15,23,42,0.7)', backdropFilter: 'blur(6px)' }}
-          onClick={e => { if (e.target === e.currentTarget) setOpen(false); }}
+      {showButton && (
+        <button
+          onClick={() => {
+            generate();
+            setInternalOpen(true);
+          }}
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white rounded-xl text-xs font-semibold shadow-md shadow-[#3d7a75]/20 transition-all active:scale-95 flex-shrink-0 cursor-pointer"
         >
-          <div className="bg-white rounded-2xl overflow-hidden shadow-2xl w-full max-w-lg">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-              <h3 className="font-semibold text-gray-900">Your Streak Card</h3>
-              <button onClick={() => setOpen(false)} className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100">
-                <X size={16} />
-              </button>
+          <Share2 size={15} /> Share Streak
+        </button>
+      )}
+
+      <Modal open={isModalOpen} onClose={handleClose} title="Share Your Progress" maxWidth="max-w-md">
+        <div className="space-y-5 py-1">
+          <div className="text-center">
+            <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+              You're on a <span className="text-[#3d7a75] dark:text-[#5fae9e] font-extrabold">{streak} Day Streak!</span> 🔥
+            </p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+              Keep the consistency going every single day.
+            </p>
+          </div>
+
+          {/* Visual Card Preview */}
+          {imageUrl ? (
+            <div className="relative rounded-2xl overflow-hidden shadow-md border border-[#e2e8ec] dark:border-[#2a343d] group bg-[#0f172a]">
+              <img
+                src={imageUrl}
+                alt="Habit streak progress card"
+                className="w-full h-auto max-h-[260px] object-contain rounded-2xl mx-auto block"
+              />
             </div>
-            <div className="p-5">
-              {imageUrl && (
-                <img src={imageUrl} alt="Streak card" className="w-full rounded-xl shadow-md" />
-              )}
-              <p className="text-xs text-gray-400 text-center mt-3 mb-4">
-                Screenshot or download to share your progress!
-              </p>
-              <div className="flex gap-3">
-                <button onClick={share}
-                  className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors">
-                  <Share2 size={15} /> Share
-                </button>
-                <button onClick={download}
-                  className="flex-1 flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-semibold transition-colors">
-                  <Download size={15} /> Download
-                </button>
-              </div>
+          ) : (
+            <div className="bg-[#14181c] text-white rounded-2xl p-6 text-center space-y-3 border border-[#2a343d]">
+              <Flame size={48} className="text-[#dcb579] mx-auto animate-bounce" />
+              <p className="text-3xl font-extrabold text-white">{streak} DAYS</p>
+              <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">CONSISTENT</p>
+              <p className="text-xs text-[#5fae9e] font-semibold">HabitTracker</p>
             </div>
+          )}
+
+          {/* Action Buttons Row */}
+          <div className="grid grid-cols-3 gap-2.5 pt-1">
+            <button
+              onClick={handleDownload}
+              className="flex flex-col items-center justify-center gap-1.5 p-3 bg-[#f1f3f5] hover:bg-[#e2e8ec] dark:bg-[#14181c] dark:hover:bg-[#2a343d] text-gray-700 dark:text-gray-200 border border-[#e2e8ec] dark:border-[#2a343d] rounded-2xl text-xs font-semibold transition-all active:scale-95 cursor-pointer"
+            >
+              <Download size={16} className="text-[#3d7a75] dark:text-[#5fae9e]" />
+              <span>Download</span>
+            </button>
+
+            <button
+              onClick={handleCopyText}
+              className="flex flex-col items-center justify-center gap-1.5 p-3 bg-[#f1f3f5] hover:bg-[#e2e8ec] dark:bg-[#14181c] dark:hover:bg-[#2a343d] text-gray-700 dark:text-gray-200 border border-[#e2e8ec] dark:border-[#2a343d] rounded-2xl text-xs font-semibold transition-all active:scale-95 relative cursor-pointer"
+            >
+              {copied ? <Check size={16} className="text-[#2f6b5c] dark:text-[#7fd1b9]" /> : <Copy size={16} className="text-[#3d7a75] dark:text-[#5fae9e]" />}
+              <span>{copied ? 'Copied!' : 'Copy Text'}</span>
+            </button>
+
+            <button
+              onClick={handleNativeShare}
+              className="flex flex-col items-center justify-center gap-1.5 p-3 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white rounded-2xl text-xs font-semibold transition-all shadow-md shadow-[#3d7a75]/20 active:scale-95 cursor-pointer"
+            >
+              <Share2 size={16} />
+              <span>Share</span>
+            </button>
           </div>
         </div>
-      )}
+      </Modal>
     </>
   );
 }

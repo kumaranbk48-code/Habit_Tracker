@@ -1,21 +1,21 @@
+import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import { triggerRestore } from './db-wake.js';
 
-// Fix: Vercel serverless functions use process.env directly.
-// The original code used NEXT_PUBLIC_ prefix vars which are fine here,
-// but we also support the VITE_ prefix fallback in case env vars are renamed.
+// Fix: Ensure process.env is populated before reading env vars in ES Modules
 const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  process.env.VITE_SUPABASE_URL;
+  process.env.VITE_SUPABASE_URL ||
+  'https://placeholder.supabase.co';
 
 const serviceRoleKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  'placeholder-key';
 
-if (!supabaseUrl || !serviceRoleKey) {
-  // Log clearly so Vercel function logs tell you exactly what's wrong
+if (!process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.VITE_SUPABASE_URL) {
   console.error('[db-client] Missing env vars:', {
-    hasUrl: !!supabaseUrl,
-    hasKey: !!serviceRoleKey,
+    hasUrl: false,
+    hasKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
   });
 }
 

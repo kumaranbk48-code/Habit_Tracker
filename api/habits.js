@@ -1,4 +1,5 @@
 import supabase from './db-client.js';
+import { verifyUserToken } from './auth-helper.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,9 +10,11 @@ export default async function handler(req, res) {
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: 'Unauthorized — no token provided' });
 
-  const { data: { user }, error: userErr } = await supabase.auth.getUser(token);
+  const { user, error: userErr } = await verifyUserToken(token);
   if (userErr || !user) return res.status(401).json({ error: 'Invalid or expired token — please sign in again' });
   const user_id = user.id;
+
+  const isOldBlue = (c) => !c || ['#3b82f6', '#2563eb', '#1d4ed8', '#60a5fa', '#93c5fd', '#1e40af', '#1e3a8a', '#0075ff', '#38bdf8', '#0284c7'].includes(String(c).toLowerCase().trim());
 
   try {
     if (req.method === 'GET') {
@@ -21,8 +24,11 @@ export default async function handler(req, res) {
         .eq('user_id', user_id)
         .order('created_at', { ascending: false });
       if (error) throw error;
-      // Fix: always return an array, never null
-      return res.status(200).json(data ?? []);
+      const sanitized = (data ?? []).map(h => ({
+        ...h,
+        color: isOldBlue(h.color) ? '#3d7a75' : h.color,
+      }));
+      return res.status(200).json(sanitized);
     }
 
     if (req.method === 'POST') {
@@ -58,7 +64,7 @@ export default async function handler(req, res) {
       };
 
       if (time_of_day !== undefined) insertObj.time_of_day = time_of_day;
-      if (color !== undefined) insertObj.color = color;
+      if (color !== undefined) insertObj.color = isOldBlue(color) ? '#3d7a75' : color;
       if (icon !== undefined) insertObj.icon = icon;
       if (is_archived !== undefined) insertObj.is_archived = is_archived;
       if (timer_duration !== undefined) insertObj.timer_duration = timer_duration ? Number(timer_duration) : null;
@@ -69,7 +75,8 @@ export default async function handler(req, res) {
         .select()
         .single();
       if (error) throw error;
-      return res.status(201).json(data);
+      const sanitizedResult = data ? { ...data, color: isOldBlue(data.color) ? '#3d7a75' : data.color } : data;
+      return res.status(201).json(sanitizedResult);
     }
 
     if (req.method === 'PUT') {
@@ -101,7 +108,7 @@ export default async function handler(req, res) {
       };
 
       if (time_of_day !== undefined) updateObj.time_of_day = time_of_day;
-      if (color !== undefined) updateObj.color = color;
+      if (color !== undefined) updateObj.color = isOldBlue(color) ? '#3d7a75' : color;
       if (icon !== undefined) updateObj.icon = icon;
       if (is_archived !== undefined) updateObj.is_archived = is_archived;
       if (timer_duration !== undefined) updateObj.timer_duration = timer_duration ? Number(timer_duration) : null;
@@ -116,7 +123,8 @@ export default async function handler(req, res) {
       if (error) throw error;
       // Fix: .single() returns null if the row didn't match (wrong id or wrong user)
       if (!data) return res.status(404).json({ error: 'Habit not found or access denied' });
-      return res.status(200).json(data);
+      const sanitizedResult = { ...data, color: isOldBlue(data.color) ? '#3d7a75' : data.color };
+      return res.status(200).json(sanitizedResult);
     }
 
     if (req.method === 'DELETE') {

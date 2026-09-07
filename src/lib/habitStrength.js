@@ -60,7 +60,7 @@ export function calculateOverallHabitStrength(habits, trackingLogs, days = 30) {
  */
 export function getStrengthBadge(score) {
   if (score >= 80) return { label: 'Mastered', color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-200' };
-  if (score >= 60) return { label: 'Strong', color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400 border-blue-200' };
+  if (score >= 60) return { label: 'Strong', color: 'text-[#2f5378] bg-[#e4ecf5] dark:bg-[#182a40] dark:text-[#8fb4d9] border-[#8fb4d9]/40' };
   if (score >= 35) return { label: 'Building', color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400 border-amber-200' };
   return { label: 'Forming', color: 'text-rose-600 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-400 border-rose-200' };
 }

@@ -160,7 +160,7 @@ export default function CalendarPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="w-8 h-8 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin" />
+        <div className="w-8 h-8 border-4 border-[#e2f0ef] border-t-[#3d7a75] dark:border-[#14302e] dark:border-t-[#5fae9e] rounded-full animate-spin" />
       </div>
     );
   }
@@ -214,7 +214,7 @@ export default function CalendarPage() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {/* Total Habits */}
         <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700/80 shadow-xs flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center flex-shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-[#e2f0ef] dark:bg-[#14302e] text-[#3d7a75] dark:text-[#5fae9e] flex items-center justify-center flex-shrink-0">
             <Target size={20} />
           </div>
           <div>
@@ -225,7 +225,7 @@ export default function CalendarPage() {
 
         {/* Scheduled Completion Rate */}
         <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700/80 shadow-xs flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center flex-shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-[#e3f3ee] dark:bg-[#1c3a32] text-[#2f6b5c] dark:text-[#7fd1b9] flex items-center justify-center flex-shrink-0">
             <CheckCircle2 size={20} />
           </div>
           <div>
@@ -263,11 +263,11 @@ export default function CalendarPage() {
       <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-100 dark:border-slate-700/80 shadow-xs space-y-2">
         <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
           <span>Monthly Completion Overview</span>
-          <span className="text-blue-600 dark:text-blue-400">{analytics.completionRate}%</span>
+          <span className="text-[#3d7a75] dark:text-[#5fae9e]">{analytics.completionRate}%</span>
         </div>
         <div className="h-3 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
           <div
-            className="h-full bg-blue-600 transition-all duration-700 rounded-full"
+            className="h-full bg-[#3d7a75] transition-all duration-700 rounded-full"
             style={{ width: `${analytics.completionRate}%` }}
           />
         </div>
@@ -289,7 +289,7 @@ export default function CalendarPage() {
       {/* Legend Footer Bar */}
       <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700/80 shadow-xs flex flex-wrap items-center justify-center gap-6 text-xs text-slate-600 dark:text-slate-300">
         <div className="flex items-center gap-1.5 font-medium">
-          <span className="w-5 h-5 rounded-lg bg-blue-600 text-white font-bold text-[10px] flex items-center justify-center">✓</span>
+          <span className="w-5 h-5 rounded-lg bg-[#3d7a75] text-white font-bold text-[10px] flex items-center justify-center">✓</span>
           <span>Completed</span>
         </div>
         <div className="flex items-center gap-1.5 font-medium">
@@ -301,11 +301,11 @@ export default function CalendarPage() {
           <span>Not Scheduled</span>
         </div>
         <div className="flex items-center gap-1.5 font-medium">
-          <span className="w-5 h-5 rounded-lg bg-amber-100 text-amber-600 font-bold text-[10px] flex items-center justify-center">◐</span>
+          <span className="w-5 h-5 rounded-lg bg-[#f5ecdb] text-[#8a5a24] dark:bg-[#3a2c14] dark:text-[#dcb579] font-bold text-[10px] flex items-center justify-center">◐</span>
           <span>Partial Progress</span>
         </div>
         <div className="flex items-center gap-1.5 font-medium">
-          <span className="w-5 h-5 rounded-lg border-2 border-blue-500 font-bold text-[10px] flex items-center justify-center">◉</span>
+          <span className="w-5 h-5 rounded-lg border-2 border-[#3d7a75] text-[#3d7a75] dark:border-[#5fae9e] dark:text-[#5fae9e] font-bold text-[10px] flex items-center justify-center">◉</span>
           <span>Today</span>
         </div>
       </div>

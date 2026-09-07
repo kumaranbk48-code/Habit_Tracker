@@ -1,4 +1,5 @@
 import supabase from './db-client.js';
+import { verifyUserToken } from './auth-helper.js';
 
 function getToday() { return new Date().toISOString().split('T')[0]; }
 function getDateDaysAgo(days) {
@@ -27,7 +28,7 @@ export default async function handler(req, res) {
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: 'Unauthorized — no token provided' });
 
-  const { data: { user }, error: userErr } = await supabase.auth.getUser(token);
+  const { user, error: userErr } = await verifyUserToken(token);
   if (userErr || !user) return res.status(401).json({ error: 'Invalid or expired token — please sign in again' });
   const user_id = user.id;
 

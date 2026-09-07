@@ -13,21 +13,35 @@ createRoot(document.getElementById('root')!).render(
 );
 
 // ── Service Worker Registration ─────────────────────────────────────────────
-// Registered AFTER React renders so it never blocks the initial paint.
-// The SW file lives at /sw.js (public folder) so it has root scope — it can
-// intercept fetch events for the entire app including /api/* routes.
+// In development mode (import.meta.env.DEV), unregister any active service worker
+// and clear stale caches so Vite HMR and page reloads always serve fresh code.
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker
-      .register('/sw.js', { scope: '/' })
-      .then((reg) => {
-        console.log('[SW] Registered, scope:', reg.scope);
-
-        // Check for updates on every page load
-        reg.update().catch(() => {});
-      })
-      .catch((err) => {
-        console.warn('[SW] Registration failed:', err);
+  if (import.meta.env.DEV) {
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      for (const registration of registrations) {
+        registration.unregister().then((success) => {
+          if (success) console.log('[SW] Unregistered development service worker');
+        });
+      }
+    });
+    if ('caches' in window) {
+      caches.keys().then((keys) => {
+        for (const key of keys) {
+          caches.delete(key);
+        }
       });
-  });
+    }
+  } else {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker
+        .register('/sw.js', { scope: '/' })
+        .then((reg) => {
+          console.log('[SW] Registered, scope:', reg.scope);
+          reg.update().catch(() => {});
+        })
+        .catch((err) => {
+          console.warn('[SW] Registration failed:', err);
+        });
+    });
+  }
 }

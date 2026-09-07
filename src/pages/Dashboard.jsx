@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import {
   ListChecks, CheckCircle2, Clock, Flame, Trophy, TrendingUp, AlertCircle, RefreshCw,
-  Activity, Timer, Sparkles, Sun, Moon, Sunset, Plus, Check
+  Activity, Timer, Sparkles, Sun, Moon, Sunset, Plus, Check, Share2
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import HabitHeatmap       from '../components/HabitHeatmap';
@@ -22,27 +22,27 @@ import { calculateOverallHabitStrength, getStrengthBadge } from '../lib/habitStr
 const StatCard = ({ label, value, icon: Icon, colorClass, bgClass, children, onClick }) => (
   <div
     onClick={onClick}
-    className={`bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700/80 transition-shadow duration-200 hover:shadow-md ${
-      onClick ? 'cursor-pointer hover:border-blue-100' : ''
+    className={`bg-white dark:bg-[#1a2129] rounded-2xl p-5 shadow-sm border border-[#e2e8ec] dark:border-[#2a343d] transition-shadow duration-200 hover:shadow-md ${
+      onClick ? 'cursor-pointer hover:border-[#3d7a75]/40' : ''
     }`}
   >
     <div className="flex items-center justify-between mb-3">
-      <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{label}</p>
+      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</p>
       <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${bgClass}`}>
         <Icon size={18} className={colorClass} />
       </div>
     </div>
-    {children || <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{value}</p>}
-    {onClick && <p className="text-[10px] text-blue-400 font-medium mt-1.5">Tap to view →</p>}
+    {children || <p className="text-3xl font-bold text-slate-900 dark:text-slate-100">{value}</p>}
+    {onClick && <p className="text-[10px] text-[#3d7a75] dark:text-[#5fae9e] font-medium mt-1.5">Tap to view →</p>}
   </div>
 );
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl shadow-lg px-3 py-2.5 text-sm">
-      <p className="font-semibold text-gray-800 dark:text-gray-200 mb-1">{label}</p>
-      <p className="text-blue-600 dark:text-blue-400">{payload[0].value} completed</p>
+    <div className="bg-white dark:bg-[#1a2129] border border-[#e2e8ec] dark:border-[#2a343d] rounded-xl shadow-lg px-3 py-2.5 text-sm">
+      <p className="font-semibold text-slate-800 dark:text-slate-200 mb-1">{label}</p>
+      <p className="text-[#3d7a75] dark:text-[#5fae9e] font-semibold">{payload[0].value} completed</p>
     </div>
   );
 };
@@ -70,6 +70,7 @@ export default function Dashboard() {
   const [timeFilter, setTimeFilter] = useState('all'); // 'all' | 'morning' | 'afternoon' | 'evening'
   const [timerOpen, setTimerOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [streakOpen, setStreakOpen] = useState(false);
 
   const prevStreak = useRef(null);
   const { fireMilestone, firePerfectDay, fireSmall } = useConfetti();
@@ -149,20 +150,11 @@ export default function Dashboard() {
       setUnlockedIds(allUnlocked);
       if (newBadges.length > 0) {
         setNewlyUnlocked(newBadges);
-        fireSmall();
         await saveNewBadges(newBadges);
       }
       setBadgesLoaded(true);
 
-      if (statsData.totalHabits > 0 && statsData.completedToday === statsData.totalHabits) {
-        firePerfectDay();
-      }
-
       const streak = statsData.currentStreak ?? 0;
-      if (prevStreak.current !== null && streak !== prevStreak.current && isMilestone(streak)) {
-        fireMilestone();
-        setMilestone(streak);
-      }
       prevStreak.current = streak;
     } catch (err) {
       console.error(err);
@@ -170,7 +162,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [session, fetchAchievements, saveNewBadges, firePerfectDay, fireMilestone, fireSmall]);
+  }, [session, fetchAchievements, saveNewBadges]);
 
   useEffect(() => {
     if (session) fetchAll();
@@ -181,6 +173,8 @@ export default function Dashboard() {
     window.addEventListener('habittracker-stats-updated', handleUpdate);
     return () => window.removeEventListener('habittracker-stats-updated', handleUpdate);
   }, [session, fetchAll]);
+
+  const lastCelebrationRef = useRef(0);
 
   const toggleHabit = async (habit) => {
     const isDone = todayCompletedIds.has(habit.id);
@@ -214,7 +208,17 @@ export default function Dashboard() {
       
       if (res.ok) {
         if (newStatus) {
-          fireSmall();
+          const now = Date.now();
+          if (now - lastCelebrationRef.current > 1500) {
+            lastCelebrationRef.current = now;
+            const currentDoneCount = todayCompletedIds.size;
+            const totalHabitsCount = stats?.totalHabits || habitsList.length;
+            if (totalHabitsCount > 0 && currentDoneCount + 1 >= totalHabitsCount) {
+              firePerfectDay();
+            } else {
+              fireSmall();
+            }
+          }
         }
         await fetchAll();
       } else {
@@ -228,7 +232,7 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="w-8 h-8 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin" />
+        <div className="w-8 h-8 border-4 border-[#e2f0ef] border-t-[#3d7a75] dark:border-[#14302e] dark:border-t-[#5fae9e] rounded-full animate-spin" />
       </div>
     );
   }
@@ -243,10 +247,16 @@ export default function Dashboard() {
             <p className="font-medium text-red-700">Unable to load dashboard</p>
             <p className="text-sm text-red-600 mt-0.5">{fetchError}</p>
           </div>
-          <button onClick={() => { setLoading(true); fetchAll(); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition-colors">
-            <RefreshCw size={14} /> Retry
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setLoading(true); fetchAll(); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition-colors">
+              <RefreshCw size={14} /> Retry
+            </button>
+            <button onClick={() => { supabase.auth.signOut().then(() => navigate('/login')); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors shadow-sm">
+              Sign Out & Login
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -304,7 +314,7 @@ export default function Dashboard() {
         </div>
         <div className="flex items-center gap-2.5 flex-wrap">
           {isPerfectDay && (
-            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-white text-xs font-semibold shimmer-bg shadow-lg shadow-blue-200">
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-white text-xs font-semibold shimmer-bg shadow-lg shadow-[#3d7a75]/20">
               🎉 Perfect Day!
             </div>
           )}
@@ -312,33 +322,44 @@ export default function Dashboard() {
           {/* Quick Action Buttons */}
           <button
             onClick={() => setTimerOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-md shadow-blue-500/20 transition-all active:scale-95"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white rounded-xl text-xs font-semibold shadow-md shadow-[#3d7a75]/20 transition-all active:scale-95"
           >
             <Timer size={15} className="text-white" /> Focus Timer
           </button>
 
           <button
             onClick={() => setAiOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-md shadow-blue-500/20 transition-all active:scale-95"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white rounded-xl text-xs font-semibold shadow-md shadow-[#3d7a75]/20 transition-all active:scale-95"
           >
             <Sparkles size={15} className="text-white" /> AI Assistant
           </button>
 
           {/* Share streak card button */}
-          <ShareCard stats={stats} displayName={displayName} />
+          <button
+            onClick={() => setStreakOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white rounded-xl text-xs font-semibold shadow-md shadow-[#3d7a75]/20 transition-all active:scale-95"
+          >
+            <Share2 size={15} className="text-white" /> Share Streak
+          </button>
         </div>
       </div>
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Habits"    icon={ListChecks}   colorClass="text-blue-600"   bgClass="bg-blue-50 dark:bg-blue-950/40"   value={stats?.totalHabits ?? 0} />
-        <StatCard label="Completed Today" icon={CheckCircle2} colorClass="text-green-600"  bgClass="bg-green-50 dark:bg-green-950/40"  value={completedHabitsToday.length} onClick={() => setListModal('completed')} />
-        <StatCard label="Current Streak"  icon={Flame}        colorClass="text-orange-600" bgClass="bg-orange-50 dark:bg-orange-950/40">
+        <StatCard label="Total Habits"    icon={ListChecks}   colorClass="text-[#3d7a75] dark:text-[#5fae9e]"   bgClass="bg-[#e2f0ef] dark:bg-[#14302e]"   value={stats?.totalHabits ?? 0} />
+        <StatCard label="Completed Today" icon={CheckCircle2} colorClass="text-[#2f6b5c] dark:text-[#7fd1b9]"  bgClass="bg-[#e3f3ee] dark:bg-[#1c3a32]"  value={completedHabitsToday.length} onClick={() => setListModal('completed')} />
+        <StatCard
+          label="Current Streak"
+          icon={Flame}
+          colorClass="text-[#8a5a24] dark:text-[#dcb579]"
+          bgClass="bg-[#f5ecdb] dark:bg-[#3a2c14]"
+          onClick={() => setStreakOpen(true)}
+        >
           <StreakCounter streak={stats?.currentStreak ?? 0} label="days" />
         </StatCard>
 
         {/* Habit Formation Strength Card */}
-        <StatCard label="Habit Strength Index" icon={Activity} colorClass="text-indigo-600" bgClass="bg-indigo-50 dark:bg-indigo-950/40">
+        <StatCard label="Habit Strength Index" icon={Activity} colorClass="text-[#7570ab] dark:text-[#b0aee0]" bgClass="bg-[#eae7f5] dark:bg-[#232042]">
           <div className="mt-1">
             <div className="flex items-baseline justify-between">
               <span className="text-3xl font-extrabold text-gray-900 dark:text-gray-100">{overallStrength}%</span>
@@ -352,7 +373,7 @@ export default function Dashboard() {
       </div>
 
       {/* Time of Day Routine Filters & Quick Check-in Bar */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700/80 space-y-4">
+      <div className="bg-white dark:bg-[#1a2129] rounded-2xl p-5 shadow-sm border border-[#e2e8ec] dark:border-[#2a343d] space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
@@ -364,7 +385,7 @@ export default function Dashboard() {
           </div>
 
           {/* Time of day tabs */}
-          <div className="flex bg-gray-100 dark:bg-gray-700/60 p-1 rounded-xl">
+          <div className="flex bg-[#f1f3f5] dark:bg-[#14181c] p-1 rounded-xl">
             {[
               { id: 'all', label: 'All', icon: ListChecks },
               { id: 'morning', label: 'Morning', icon: Sun },
@@ -378,7 +399,7 @@ export default function Dashboard() {
                   onClick={() => setTimeFilter(tab.id)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
                     timeFilter === tab.id
-                      ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                      ? 'bg-white dark:bg-[#1a2129] text-[#3d7a75] dark:text-[#5fae9e] shadow-xs'
                       : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'
                   }`}
                 >
@@ -400,12 +421,12 @@ export default function Dashboard() {
                 onClick={() => toggleHabit(h)}
                 className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-medium transition-all duration-200 cursor-pointer ${
                   isDone
-                    ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-900 text-blue-900 dark:text-blue-200 font-semibold'
-                    : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100'
+                    ? 'bg-[#e2f0ef] dark:bg-[#14302e] border-[#3d7a75]/30 text-[#2c6560] dark:text-[#7cc3bb] font-semibold'
+                    : 'bg-[#f7f9fa] dark:bg-[#22282d] border-[#e2e8ec] dark:border-[#2a343d] text-gray-700 dark:text-gray-300 hover:bg-[#eef2f4] dark:hover:bg-[#2a343d]'
                 }`}
               >
                 <div className={`w-4 h-4 rounded-md flex items-center justify-center text-[10px] font-bold ${
-                  isDone ? 'bg-blue-600 text-white' : 'border border-gray-400 text-transparent'
+                  isDone ? 'bg-[#3d7a75] text-white' : 'border border-gray-400 text-transparent'
                 }`}>
                   ✓
                 </div>
@@ -435,9 +456,9 @@ export default function Dashboard() {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+        <div className="lg:col-span-2 bg-white dark:bg-[#1a2129] rounded-2xl p-6 shadow-sm border border-[#e2e8ec] dark:border-[#2a343d]">
           <div className="flex items-center justify-between mb-5">
-            <h2 className="text-base font-semibold text-gray-900">Weekly Performance</h2>
+            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Weekly Performance</h2>
             <span className="text-xs text-gray-400 font-medium">Last 7 days</span>
           </div>
           {chartData.length > 0 ? (
@@ -448,7 +469,7 @@ export default function Dashboard() {
                   <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
                   <Tooltip content={<CustomTooltip />} cursor={{ fill: '#f3f4f6', radius: 6 }} />
                   <Bar dataKey="completed" radius={[6, 6, 0, 0]}>
-                    {chartData.map((_, i) => <Cell key={i} fill="#2563eb" fillOpacity={0.85} />)}
+                    {chartData.map((_, i) => <Cell key={i} fill="#3d7a75" fillOpacity={0.85} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
@@ -458,62 +479,62 @@ export default function Dashboard() {
           )}
         </div>
 
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h2 className="text-base font-semibold text-gray-900 mb-4">Goal Progress</h2>
+        <div className="bg-white dark:bg-[#1a2129] rounded-2xl p-6 shadow-sm border border-[#e2e8ec] dark:border-[#2a343d]">
+          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-4">Goal Progress</h2>
           <div className="flex flex-col items-center">
             <div className="relative w-36 h-36 mb-4">
               <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
-                <circle cx="60" cy="60" r="52" stroke="#f3f4f6" strokeWidth="10" fill="none" />
+                <circle cx="60" cy="60" r="52" stroke="#e2e8ec" strokeWidth="10" fill="none" className="dark:stroke-[#2a343d]" />
                 <circle cx="60" cy="60" r="52" stroke="url(#pg)" strokeWidth="10" fill="none"
                   strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" className="ring-progress" />
                 <defs>
                   <linearGradient id="pg" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#3b82f6" /><stop offset="100%" stopColor="#06b6d4" />
+                    <stop offset="0%" stopColor="#3d7a75" /><stop offset="100%" stopColor="#5fae9e" />
                   </linearGradient>
                 </defs>
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-3xl font-bold text-gray-900">{goalProgress}%</span>
+                <span className="text-3xl font-bold text-gray-900 dark:text-gray-100">{goalProgress}%</span>
                 <span className="text-xs text-gray-400 font-medium">complete</span>
               </div>
             </div>
             <div className="w-full space-y-2">
-              <div className="flex justify-between items-center text-sm py-2 border-b border-gray-50">
-                <span className="text-gray-500">Total Goals</span>
-                <span className="font-semibold text-gray-900">{stats?.totalGoals ?? 0}</span>
+              <div className="flex justify-between items-center text-sm py-2 border-b border-[#e2e8ec] dark:border-[#2a343d]">
+                <span className="text-gray-500 dark:text-gray-400">Total Goals</span>
+                <span className="font-semibold text-gray-900 dark:text-gray-100">{stats?.totalGoals ?? 0}</span>
               </div>
               <div className="flex justify-between items-center text-sm py-2">
-                <span className="text-gray-500">Completed</span>
-                <span className="font-semibold text-green-600">{stats?.completedGoals ?? 0}</span>
+                <span className="text-gray-500 dark:text-gray-400">Completed</span>
+                <span className="font-semibold text-[#2f6b5c] dark:text-[#7fd1b9]">{stats?.completedGoals ?? 0}</span>
               </div>
             </div>
 
             {/* Phase 3: each goal listed individually with its own status,
                 instead of only a combined percentage. */}
             {goalsList.length > 0 ? (
-              <div className="w-full mt-4 pt-4 border-t border-gray-50 dark:border-gray-700">
+              <div className="w-full mt-4 pt-4 border-t border-[#e2e8ec] dark:border-[#2a343d]">
                 <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase mb-2">Your Goals</p>
                 <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
                   {goalsList.map(g => {
                     const gMilestones = milestonesByGoal[g.id] || [];
                     const gDone = gMilestones.filter(m => m.completed).length;
                     return (
-                      <div key={g.id} className="px-2.5 py-2 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                      <div key={g.id} className="px-2.5 py-2 bg-[#f7f9fa] dark:bg-[#14181c] rounded-lg">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{g.goal_name}</span>
                           <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                            g.status === 'Completed'   ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
-                            g.status === 'In Progress' ? 'bg-blue-100 text-blue-700  dark:bg-blue-900/30 dark:text-blue-300'  :
-                                                          'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                            g.status === 'Completed'   ? 'bg-[#e3f3ee] text-[#2f6b5c] dark:bg-[#1c3a32] dark:text-[#7fd1b9]' :
+                            g.status === 'In Progress' ? 'bg-[#e4ecf5] text-[#2f5378] dark:bg-[#182a40] dark:text-[#8fb4d9]'  :
+                                                          'bg-[#f5ecdb] text-[#8a5a24] dark:bg-[#3a2c14] dark:text-[#dcb579]'
                           }`}>
                             {g.status}
                           </span>
                         </div>
                         {gMilestones.length > 0 && (
                           <div className="mt-1.5">
-                            <div className="h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                            <div className="h-1 bg-[#e2e8ec] dark:bg-[#2a343d] rounded-full overflow-hidden">
                               <div
-                                className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                                className="h-full bg-[#3d7a75] rounded-full transition-all duration-500"
                                 style={{ width: `${Math.round((gDone / gMilestones.length) * 100)}%` }}
                               />
                             </div>
@@ -526,7 +547,7 @@ export default function Dashboard() {
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-gray-400 dark:text-gray-500 text-center w-full mt-4 pt-4 border-t border-gray-50 dark:border-gray-700">
+              <p className="text-xs text-gray-400 dark:text-gray-500 text-center w-full mt-4 pt-4 border-t border-[#e2e8ec] dark:border-[#2a343d]">
                 No goals yet — add one on the Goals page.
               </p>
             )}
@@ -568,16 +589,16 @@ export default function Dashboard() {
                 onClick={() => toggleHabit(h)}
                 className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all duration-200 cursor-pointer text-left ${
                   isDone
-                    ? 'bg-blue-50 hover:bg-blue-100/70 border-blue-100 dark:bg-blue-950/30 dark:border-blue-900/40 hover:scale-[1.01] active:scale-[0.99]'
-                    : 'bg-amber-50 hover:bg-amber-100/70 border-amber-100 dark:bg-amber-950/20 dark:border-amber-900/40 hover:scale-[1.01] active:scale-[0.99]'
+                    ? 'bg-[#e2f0ef] hover:bg-[#d9ecea] border-[#3d7a75]/20 dark:bg-[#14302e] dark:border-[#3d7a75]/30 hover:scale-[1.01] active:scale-[0.99]'
+                    : 'bg-[#f5ecdb] hover:bg-[#ede0ca] border-[#c99a52]/20 dark:bg-[#3a2c14] dark:border-[#c99a52]/30 hover:scale-[1.01] active:scale-[0.99]'
                 }`}
                 style={{ animation: `fadeIn 0.2s ease ${i * 0.03}s both` }}
               >
                 <div className="flex items-center gap-3">
                   <div className={`w-6 h-6 rounded-md border flex items-center justify-center flex-shrink-0 transition-colors ${
                     isDone
-                      ? 'bg-blue-600 border-blue-600 text-white'
-                      : 'border-amber-400 text-amber-500 dark:border-amber-500'
+                      ? 'bg-[#3d7a75] border-[#3d7a75] text-white'
+                      : 'border-[#c99a52] text-[#c99a52] dark:border-[#c99a52]'
                   }`}>
                     {isDone ? '✓' : ''}
                   </div>
@@ -592,8 +613,8 @@ export default function Dashboard() {
                 </div>
                 <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold flex-shrink-0 ml-2 ${
                   isDone
-                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
-                    : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+                    ? 'bg-[#e3f3ee] text-[#2f6b5c] dark:bg-[#1c3a32] dark:text-[#7fd1b9]'
+                    : 'bg-[#f5ecdb] text-[#8a5a24] dark:bg-[#3a2c14] dark:text-[#dcb579]'
                 }`}>
                   {h.category}
                 </span>
@@ -620,6 +641,8 @@ export default function Dashboard() {
       <AIPromptModal
         open={aiOpen}
         onClose={() => setAiOpen(false)}
+        habits={habitsList}
+        trackingLogs={allTracking}
         onAddHabits={async (newHabits) => {
           for (const h of newHabits) {
             await fetch('/api/habits', {
@@ -630,6 +653,14 @@ export default function Dashboard() {
           }
           fetchAll();
         }}
+      />
+
+      {/* Share Streak Modal */}
+      <ShareCard
+        open={streakOpen}
+        onClose={() => setStreakOpen(false)}
+        stats={stats}
+        displayName={displayName}
       />
 
     </div>

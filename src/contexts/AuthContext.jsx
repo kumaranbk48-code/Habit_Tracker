@@ -9,18 +9,29 @@ window.fetch = async (...args) => {
   const response = await originalFetch(...args);
   if (response.status === 401) {
     try {
-      const clone = response.clone();
-      const body = await clone.json().catch(() => null);
-      if (body && body.error && (
-        body.error.includes('expired token') ||
-        body.error.includes('Unauthorized') ||
-        body.error.includes('Invalid token')
-      )) {
-        console.warn('[Auth] Session token is invalid or expired. Signing out...');
+      const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+      const headers = args[1]?.headers;
+      let hasAuth = false;
+      if (headers) {
+        if (typeof headers.get === 'function') {
+          hasAuth = !!headers.get('Authorization');
+        } else if (typeof headers === 'object') {
+          hasAuth = !!(headers.Authorization || headers.authorization);
+        }
+      }
+      if (hasAuth && url.includes('/api/')) {
+        console.warn('[Auth] Backend returned 401 for', url, '— clearing stale session token...');
+        // Clear local storage items related to auth
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.includes('sb-') || key.includes('supabase') || key.includes('auth'))) {
+            localStorage.removeItem(key);
+          }
+        }
         supabase.auth.signOut().catch(() => {});
       }
     } catch (e) {
-      // Ignore parsing errors for non-JSON or malformed responses
+      // Ignore parsing errors
     }
   }
   return response;
@@ -36,25 +47,43 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        // Force refresh to ensure token isn't expired before making API calls
-        supabase.auth.refreshSession().then(({ data: { session: refreshed } }) => {
-          setSession(refreshed);
-          setUser(refreshed?.user ?? null);
-          setLoading(false);
+        // Set session immediately so UI remains responsive and resilient to network blips
+        setSession(session);
+        setUser(session.user);
+        setLoading(false);
+
+        // Optional background verification without aggressively wiping on network errors
+        supabase.auth.getUser(session.access_token).then(({ data: userData, error }) => {
+          if (error && error.status === 401 && error.message?.toLowerCase().includes('invalid')) {
+            console.warn('[Auth] Session definitively invalid. Clearing session...');
+            supabase.auth.signOut().catch(() => {});
+            setSession(null);
+            setUser(null);
+          } else if (userData?.user) {
+            setUser(userData.user);
+          }
         }).catch(() => {
-          // Refresh failed — clear local session, ProtectedRoute will redirect to /login
-          setSession(null);
-          setUser(null);
-          setLoading(false);
+          // Keep active cached session on transient network error
         });
       } else {
         setLoading(false);
       }
+    }).catch(() => {
+      setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
+      if (!session) {
+        // Clear any auth items
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.includes('sb-') || key.includes('supabase') || key.includes('auth'))) {
+            localStorage.removeItem(key);
+          }
+        }
+      }
     });
 
     return () => subscription.unsubscribe();

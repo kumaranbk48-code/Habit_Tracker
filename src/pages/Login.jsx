@@ -5,45 +5,84 @@ import { signInWithGoogle } from '../lib/googleAuth';
 import { useAuth } from '../contexts/AuthContext';
 import { ListChecks, Mail, Lock, UserPlus, LogIn, Eye, EyeOff, Sparkles } from 'lucide-react';
 
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
 export default function Login() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState('');
+  const [emailError, setEmailError] = useState('');
   const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
 
-  // Fix: redirect to dashboard if the user is already authenticated.
-  // Without this, a logged-in user visiting /login gets stuck on the login page.
   useEffect(() => {
     if (!authLoading && user) {
       navigate('/', { replace: true });
     }
   }, [user, authLoading, navigate]);
 
+  const validateInputs = () => {
+    const cleanEmail = email.trim();
+    const cleanPassword = password;
+
+    if (!cleanEmail) {
+      return 'Please enter your email address.';
+    }
+    if (!EMAIL_REGEX.test(cleanEmail)) {
+      return 'Please enter a valid email address.';
+    }
+    if (!cleanPassword) {
+      return 'Password is required.';
+    }
+    if (isSignUp && cleanPassword.length < 6) {
+      return 'Password must be at least 6 characters long.';
+    }
+    return null;
+  };
+
+  const handleEmailBlur = () => {
+    const cleanEmail = email.trim();
+    if (cleanEmail && !EMAIL_REGEX.test(cleanEmail)) {
+      setEmailError('Please enter a valid email address.');
+    } else {
+      setEmailError('');
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setInfo('');
+    setEmailError('');
+
+    const validationErr = validateInputs();
+    if (validationErr) {
+      setError(validationErr);
+      return;
+    }
+
     setLoading(true);
+    const cleanEmail = email.trim();
+    const cleanPassword = password;
+
     if (isSignUp) {
-      const { data, error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({ email: cleanEmail, password: cleanPassword });
       if (error) {
         setError(error.message);
       } else if (data?.session) {
-        // Email confirmation is disabled in Supabase, user is automatically logged in
         navigate('/');
       } else {
-        setInfo('Account created! Check your email inbox/spam folder to confirm your account, or disable "Confirm email" in Supabase Auth settings to log in immediately.');
+        setInfo('Account created! Check your email inbox to confirm your account and sign in to HabitTracker.');
         setIsSignUp(false);
         setPassword('');
       }
     } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { error } = await supabase.auth.signInWithPassword({ email: cleanEmail, password: cleanPassword });
       if (error) {
         setError(error.message);
       } else {
@@ -76,19 +115,19 @@ export default function Login() {
   if (authLoading) return null;
 
   return (
-    <div className="min-h-screen flex bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900">
+    <div className="min-h-screen flex bg-gradient-to-br from-[#14181c] via-[#1c2734] to-[#1f3a3a]">
       {/* Left decorative panel — hidden on mobile */}
       <div className="hidden lg:flex flex-col justify-between w-1/2 p-12 relative overflow-hidden">
         {/* Background blobs */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute -top-32 -left-32 w-96 h-96 bg-blue-500/20 rounded-full blur-3xl" />
-          <div className="absolute top-1/2 -right-24 w-80 h-80 bg-indigo-500/20 rounded-full blur-3xl" />
-          <div className="absolute -bottom-24 left-1/3 w-72 h-72 bg-blue-400/10 rounded-full blur-3xl" />
+          <div className="absolute -top-32 -left-32 w-96 h-96 bg-[#3d7a75]/15 rounded-full blur-3xl" />
+          <div className="absolute top-1/2 -right-24 w-80 h-80 bg-[#2d3f56]/20 rounded-full blur-3xl" />
+          <div className="absolute -bottom-24 left-1/3 w-72 h-72 bg-[#5fae9e]/10 rounded-full blur-3xl" />
         </div>
 
         {/* Logo */}
         <div className="flex items-center gap-3 relative">
-          <div className="w-10 h-10 bg-gradient-to-br from-blue-400 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/30">
+          <div className="w-10 h-10 bg-gradient-to-br from-[#3d7a75] to-[#2d3f56] rounded-xl flex items-center justify-center shadow-lg shadow-black/30">
             <ListChecks className="text-white" size={22} />
           </div>
           <span className="text-white font-bold text-xl">HabitTracker</span>
@@ -96,13 +135,13 @@ export default function Login() {
 
         {/* Hero copy */}
         <div className="relative space-y-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-500/20 border border-blue-400/30 rounded-full">
-            <Sparkles size={14} className="text-blue-400" />
-            <span className="text-blue-300 text-xs font-medium">Build habits that stick</span>
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#3d7a75]/20 border border-[#3d7a75]/30 rounded-full">
+            <Sparkles size={14} className="text-[#8fd0c4]" />
+            <span className="text-[#8fd0c4] text-xs font-medium">Build habits that stick</span>
           </div>
           <h2 className="text-4xl font-bold text-white leading-tight">
             Small habits,<br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#8fd0c4] to-[#5fae9e]">
               massive results.
             </span>
           </h2>
@@ -114,8 +153,8 @@ export default function Login() {
           <ul className="space-y-3">
             {['Daily habit tracking with streaks', 'Smart reminders & notifications', 'Visual progress reports'].map((f) => (
               <li key={f} className="flex items-center gap-3 text-slate-300 text-sm">
-                <div className="w-5 h-5 rounded-full bg-blue-500/30 flex items-center justify-center flex-shrink-0">
-                  <div className="w-2 h-2 rounded-full bg-blue-400" />
+                <div className="w-5 h-5 rounded-full bg-[#3d7a75]/30 flex items-center justify-center flex-shrink-0">
+                  <div className="w-2 h-2 rounded-full bg-[#8fd0c4]" />
                 </div>
                 {f}
               </li>
@@ -129,7 +168,7 @@ export default function Login() {
             "HabitTracker changed how I approach my daily routine. My productivity has never been higher."
           </p>
           <div className="flex items-center gap-2 mt-3">
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-purple-400 flex items-center justify-center">
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#3d7a75] to-[#5fae9e] flex items-center justify-center">
               <span className="text-white text-xs font-bold">A</span>
             </div>
             <span className="text-slate-400 text-xs">Alex M. · Product Designer</span>
@@ -141,13 +180,13 @@ export default function Login() {
       <div className="flex-1 flex items-center justify-center p-6 lg:p-12">
         <div className="w-full max-w-md">
           {/* Card */}
-          <div className="bg-white rounded-3xl shadow-2xl shadow-black/30 p-8">
+          <div className="bg-white dark:bg-[#1a2129] rounded-3xl shadow-2xl shadow-black/30 p-8 border border-transparent dark:border-[#2a343d]">
             {/* Mobile logo */}
             <div className="flex items-center gap-2.5 mb-7 lg:hidden">
-              <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl flex items-center justify-center">
+              <div className="w-9 h-9 bg-gradient-to-br from-[#3d7a75] to-[#2d3f56] rounded-xl flex items-center justify-center">
                 <ListChecks className="text-white" size={19} />
               </div>
-              <span className="font-bold text-gray-900 text-lg">HabitTracker</span>
+              <span className="font-bold text-gray-900 dark:text-white text-lg">HabitTracker</span>
             </div>
 
             <h2 className="text-2xl font-bold text-gray-900 mb-1">
@@ -192,18 +231,27 @@ export default function Login() {
                 <div className="relative">
                   <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
                   <input
-                    type="email"
-                    required
+                    type="text"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm transition-colors bg-gray-50 focus:bg-white"
+                    onBlur={handleEmailBlur}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (emailError) setEmailError('');
+                      if (error) setError('');
+                    }}
+                    className={`w-full pl-10 pr-4 py-3 border ${
+                      emailError ? 'border-red-400 focus:ring-red-500' : 'border-gray-200 dark:border-[#2a343d] focus:ring-[#3d7a75] focus:border-[#3d7a75]'
+                    } rounded-xl focus:ring-2 outline-none text-sm transition-colors bg-gray-50 dark:bg-[#14181c] focus:bg-white dark:focus:bg-[#1a2129] text-gray-900 dark:text-white`}
                     placeholder="you@example.com"
                   />
                 </div>
+                {emailError && (
+                  <p className="text-xs text-red-500 font-medium mt-1">{emailError}</p>
+                )}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Password</label>
                 <div className="relative">
                   <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
                   <input
@@ -211,7 +259,7 @@ export default function Login() {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full pl-10 pr-10 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm transition-colors bg-gray-50 focus:bg-white"
+                    className="w-full pl-10 pr-10 py-3 border border-gray-200 dark:border-[#2a343d] rounded-xl focus:ring-2 focus:ring-[#3d7a75] focus:border-[#3d7a75] outline-none text-sm transition-colors bg-gray-50 dark:bg-[#14181c] focus:bg-white dark:focus:bg-[#1a2129] text-gray-900 dark:text-white"
                     placeholder="••••••••"
                     minLength={isSignUp ? 6 : undefined}
                   />
@@ -246,7 +294,7 @@ export default function Login() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white py-3 rounded-xl font-semibold text-sm transition-all duration-150 shadow-md shadow-blue-200 hover:shadow-blue-300 disabled:opacity-60 mt-1"
+                className="w-full flex items-center justify-center gap-2 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white py-3 rounded-xl font-semibold text-sm transition-all duration-150 shadow-md shadow-[#3d7a75]/20 hover:shadow-[#3d7a75]/30 disabled:opacity-60 mt-1"
               >
                 {loading ? (
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -262,7 +310,7 @@ export default function Login() {
               {isSignUp ? 'Already have an account?' : "Don't have an account?"}{' '}
               <button
                 onClick={switchMode}
-                className="text-blue-600 font-semibold hover:underline"
+                className="text-[#3d7a75] dark:text-[#5fae9e] font-semibold hover:underline"
               >
                 {isSignUp ? 'Sign In' : 'Sign Up'}
               </button>

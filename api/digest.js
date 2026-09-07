@@ -22,10 +22,10 @@ function buildEmailHtml({ displayName, streak, longestStreak, completionsThisWee
   <div style="max-width:520px;margin:32px auto;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
 
     <!-- Header -->
-    <div style="background:linear-gradient(135deg,#1d4ed8,#2563eb);padding:36px 32px 28px;">
-      <div style="font-size:13px;font-weight:700;color:#93c5fd;letter-spacing:1px;margin-bottom:8px;">HABITTRACKER</div>
+    <div style="background:linear-gradient(135deg,#2f5378,#3d7a75);padding:36px 32px 28px;">
+      <div style="font-size:13px;font-weight:700;color:#cde3e1;letter-spacing:1px;margin-bottom:8px;">HABITTRACKER</div>
       <div style="font-size:26px;font-weight:800;color:#fff;margin-bottom:4px;">Weekly Digest 📊</div>
-      <div style="font-size:14px;color:#bfdbfe;">Here's how you did this week, ${displayName}!</div>
+      <div style="font-size:14px;color:#e2f0ef;">Here's how you did this week, ${displayName}!</div>
     </div>
 
     <!-- Streak hero -->
@@ -42,10 +42,10 @@ function buildEmailHtml({ displayName, streak, longestStreak, completionsThisWee
 
     <!-- Stats grid -->
     <div style="padding:24px 32px;display:grid;grid-template-columns:1fr 1fr;gap:16px;border-bottom:1px solid #f1f5f9;">
-      <div style="background:#eff6ff;border-radius:12px;padding:16px;">
-        <div style="font-size:28px;font-weight:800;color:#1d4ed8;">${completionsThisWeek}</div>
-        <div style="font-size:12px;color:#60a5fa;font-weight:600;margin-top:2px;">HABITS COMPLETED</div>
-        <div style="font-size:11px;color:#93c5fd;">this week</div>
+      <div style="background:#e4ecf5;border-radius:12px;padding:16px;">
+        <div style="font-size:28px;font-weight:800;color:#2f5378;">${completionsThisWeek}</div>
+        <div style="font-size:12px;color:#3d7a75;font-weight:600;margin-top:2px;">HABITS COMPLETED</div>
+        <div style="font-size:11px;color:#5fae9e;">this week</div>
       </div>
       <div style="background:#f0fdf4;border-radius:12px;padding:16px;">
         <div style="font-size:28px;font-weight:800;color:#16a34a;">${completedGoals}/${totalGoals}</div>
@@ -66,8 +66,8 @@ function buildEmailHtml({ displayName, streak, longestStreak, completionsThisWee
 
     <!-- Motivational message -->
     <div style="padding:24px 32px;border-bottom:1px solid #f1f5f9;">
-      <div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #2563eb;">
-        <div style="font-size:13px;font-weight:700;color:#1e40af;margin-bottom:4px;">💡 This Week's Insight</div>
+      <div style="background:#f8fafc;border-radius:12px;padding:16px;border-left:4px solid #3d7a75;">
+        <div style="font-size:13px;font-weight:700;color:#2f5378;margin-bottom:4px;">💡 This Week's Insight</div>
         <div style="font-size:13px;color:#475569;line-height:1.6;">
           ${streak >= 7
             ? `You're on a ${streak}-day streak — that's exceptional! Research shows habits maintained for 21+ days become automatic. You're building something lasting.`
@@ -82,12 +82,12 @@ function buildEmailHtml({ displayName, streak, longestStreak, completionsThisWee
     <!-- CTA -->
     <div style="padding:28px 32px;text-align:center;">
       <a href="${process.env.VITE_APP_URL || 'https://your-app.vercel.app'}"
-        style="display:inline-block;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;text-decoration:none;padding:14px 36px;border-radius:12px;font-weight:700;font-size:15px;box-shadow:0 4px 12px rgba(37,99,235,0.3);">
+        style="display:inline-block;background:linear-gradient(135deg,#3d7a75,#2f5378);color:#fff;text-decoration:none;padding:14px 36px;border-radius:12px;font-weight:700;font-size:15px;box-shadow:0 4px 12px rgba(61,122,117,0.3);">
         Open HabitTracker →
       </a>
       <div style="font-size:11px;color:#9ca3af;margin-top:20px;">
         You're receiving this because you enabled weekly digests.<br/>
-        <a href="${process.env.VITE_APP_URL || 'https://your-app.vercel.app'}/reminders" style="color:#60a5fa;">Manage preferences</a>
+        <a href="${process.env.VITE_APP_URL || 'https://your-app.vercel.app'}/reminders" style="color:#3d7a75;">Manage preferences</a>
       </div>
     </div>
   </div>

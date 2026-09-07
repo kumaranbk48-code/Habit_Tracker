@@ -46,17 +46,17 @@ export default function PWAInstallBanner() {
 
   return (
     <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[150] w-[calc(100%-2rem)] max-w-sm toast-enter">
-      <div className="bg-white border border-blue-100 rounded-2xl shadow-2xl shadow-blue-100 p-4 flex items-center gap-3">
-        <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0">
+      <div className="bg-white dark:bg-[#1a2129] border border-[#e2e8ec] dark:border-[#2a343d] rounded-2xl shadow-2xl p-4 flex items-center gap-3">
+        <div className="w-10 h-10 bg-[#3d7a75] rounded-xl flex items-center justify-center flex-shrink-0">
           <Download size={18} className="text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-gray-900 text-sm">Install HabitTracker</p>
-          <p className="text-xs text-gray-500 mt-0.5">Add to home screen for offline access</p>
+          <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Install HabitTracker</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Add to home screen for offline access</p>
         </div>
         <button
           onClick={handleInstall}
-          className="flex-shrink-0 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors install-pulse"
+          className="flex-shrink-0 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors install-pulse"
         >
           Install
         </button>

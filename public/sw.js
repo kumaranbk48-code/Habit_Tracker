@@ -1,7 +1,7 @@
 // ─── HabitTracker Service Worker ──────────────────────────────────────────────
 // Handles: offline caching, push notifications, notification click routing
 // Version bump forces browsers to install the updated SW
-const SW_VERSION = 'habittracker-v1';
+const SW_VERSION = 'habittracker-v2';
 const STATIC_CACHE = `${SW_VERSION}-static`;
 const API_CACHE    = `${SW_VERSION}-api`;
 

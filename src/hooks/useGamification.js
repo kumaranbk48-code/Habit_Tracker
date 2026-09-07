@@ -5,16 +5,16 @@
 
 // ── XP / Level config ────────────────────────────────────────────────────────
 export const LEVELS = [
-  { level: 1,  xpRequired: 0,     title: 'Beginner',   color: '#6b7280' },
-  { level: 2,  xpRequired: 100,   title: 'Apprentice', color: '#3b82f6' },
-  { level: 3,  xpRequired: 250,   title: 'Consistent', color: '#8b5cf6' },
-  { level: 4,  xpRequired: 500,   title: 'Dedicated',  color: '#f59e0b' },
-  { level: 5,  xpRequired: 1000,  title: 'Motivated',  color: '#f97316' },
-  { level: 6,  xpRequired: 2000,  title: 'Committed',  color: '#ef4444' },
-  { level: 7,  xpRequired: 3500,  title: 'Habitual',   color: '#ec4899' },
-  { level: 8,  xpRequired: 5500,  title: 'Master',     color: '#14b8a6' },
-  { level: 9,  xpRequired: 8000,  title: 'Elite',      color: '#22c55e' },
-  { level: 10, xpRequired: 11000, title: 'Legend',     color: '#f59e0b' },
+  { level: 1,  xpRequired: 0,     title: 'Beginner',   color: '#7c8894' },
+  { level: 2,  xpRequired: 100,   title: 'Apprentice', color: '#5c7fa3' },
+  { level: 3,  xpRequired: 250,   title: 'Consistent', color: '#7570ab' },
+  { level: 4,  xpRequired: 500,   title: 'Dedicated',  color: '#c99a52' },
+  { level: 5,  xpRequired: 1000,  title: 'Motivated',  color: '#c07b52' },
+  { level: 6,  xpRequired: 2000,  title: 'Committed',  color: '#b3574f' },
+  { level: 7,  xpRequired: 3500,  title: 'Habitual',   color: '#b6708f' },
+  { level: 8,  xpRequired: 5500,  title: 'Master',     color: '#3d7a75' },
+  { level: 9,  xpRequired: 8000,  title: 'Elite',      color: '#6b8e6a' },
+  { level: 10, xpRequired: 11000, title: 'Legend',     color: '#b5934a' },
 ];
 
 export function calculateXP(stats) {
@@ -44,10 +44,10 @@ export function getLevelInfo(xp) {
 
 // ── Tier metadata (visual only — colors for the badge grid) ───────────────────
 export const TIERS = {
-  bronze:   { label: 'Bronze',   bg: '#fef3c7', ring: '#f59e0b', text: '#b45309' },
-  silver:   { label: 'Silver',   bg: '#f1f5f9', ring: '#94a3b8', text: '#475569' },
-  gold:     { label: 'Gold',     bg: '#fef9c3', ring: '#eab308', text: '#a16207' },
-  platinum: { label: 'Platinum', bg: '#f3e8ff', ring: '#a855f7', text: '#7c3aed' },
+  bronze:   { label: 'Bronze',   bg: '#f5ecdb', ring: '#c99a52', text: '#8a5a24' },
+  silver:   { label: 'Silver',   bg: '#eef1f3', ring: '#94a0aa', text: '#4b5563' },
+  gold:     { label: 'Gold',     bg: '#faf3d9', ring: '#b5934a', text: '#8a6d24' },
+  platinum: { label: 'Platinum', bg: '#eae7f5', ring: '#7570ab', text: '#4b4a8a' },
 };
 
 // ── Badge definitions ─────────────────────────────────────────────────────────
