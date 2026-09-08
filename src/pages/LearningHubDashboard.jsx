@@ -42,10 +42,18 @@ export default function LearningHubDashboard() {
       if (res.ok) {
         const json = await res.json();
         setData(json);
-        // Show onboarding if no journeys exist and user hasn't seen it
-        const hasSeen = localStorage.getItem('has_seen_learning_onboarding');
-        if ((!json.journeys || json.journeys.length === 0) && !hasSeen) {
-          setOnboardingOpen(true);
+        // Show onboarding only once when user first visits and has no journeys
+        try {
+          const hasSeen = localStorage.getItem('has_seen_learning_onboarding');
+          if (!hasSeen) {
+            if (!json.journeys || json.journeys.length === 0) {
+              setOnboardingOpen(true);
+            }
+            // Mark as seen immediately so it never pops up again on subsequent visits or refreshes
+            localStorage.setItem('has_seen_learning_onboarding', 'true');
+          }
+        } catch (e) {
+          console.error('Error accessing localStorage:', e);
         }
       } else {
         setFetchError('Failed to load Learning Hub data');
@@ -126,6 +134,25 @@ export default function LearningHubDashboard() {
     } catch (err) {
       console.error('Failed to delete journey:', err);
     }
+  };
+
+  const handleCloseOnboarding = () => {
+    try {
+      localStorage.setItem('has_seen_learning_onboarding', 'true');
+    } catch (err) {
+      console.error('Error saving onboarding state:', err);
+    }
+    setOnboardingOpen(false);
+  };
+
+  const handleStartCreateFromOnboarding = () => {
+    try {
+      localStorage.setItem('has_seen_learning_onboarding', 'true');
+    } catch (err) {
+      console.error('Error saving onboarding state:', err);
+    }
+    setOnboardingOpen(false);
+    setCreateModalOpen(true);
   };
 
   if (loading) {
@@ -402,8 +429,8 @@ export default function LearningHubDashboard() {
       {/* MODALS */}
       <LearningOnboardingModal
         isOpen={onboardingOpen}
-        onClose={() => setOnboardingOpen(false)}
-        onStartCreate={() => setCreateModalOpen(true)}
+        onClose={handleCloseOnboarding}
+        onStartCreate={handleStartCreateFromOnboarding}
       />
 
       <CreateJourneyModal

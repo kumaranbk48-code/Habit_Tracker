@@ -71,9 +71,24 @@ export default function LearningOnboardingModal({ isOpen, onClose, onStartCreate
 
   if (!isOpen) return null;
 
+  const markSeen = () => {
+    try {
+      localStorage.setItem('has_seen_learning_onboarding', 'true');
+    } catch (e) {
+      console.error('Failed to save onboarding state:', e);
+    }
+  };
+
+  const handleClose = () => {
+    markSeen();
+    onClose();
+  };
+
   const handleNext = () => {
-    if (step < 3) setStep(step + 1);
-    else {
+    if (step < 3) {
+      setStep(step + 1);
+    } else {
+      markSeen();
       onClose();
       if (onStartCreate) onStartCreate();
     }
@@ -82,7 +97,7 @@ export default function LearningOnboardingModal({ isOpen, onClose, onStartCreate
   const selectedExample = EXAMPLE_JOURNEYS[selectedExampleIndex];
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="How Learning Hub Works" maxWidth="max-w-2xl">
+    <Modal isOpen={isOpen} onClose={handleClose} title="How Learning Hub Works" maxWidth="max-w-2xl">
       <div className="py-1">
         {/* Step Navigation Pills */}
         <div className="flex items-center justify-between mb-6 px-2 border-b border-gray-100 dark:border-gray-800 pb-3">
@@ -329,7 +344,7 @@ export default function LearningOnboardingModal({ isOpen, onClose, onStartCreate
         {/* Modal Action Footer */}
         <div className="flex items-center justify-between pt-4 border-t border-gray-100 dark:border-gray-800 mt-4">
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="text-xs font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 px-3 py-2"
           >
             Explore Dashboard
