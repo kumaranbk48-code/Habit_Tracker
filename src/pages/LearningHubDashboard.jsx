@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import TodaysFocusCard from '../components/learning/TodaysFocusCard';
@@ -25,13 +25,15 @@ export default function LearningHubDashboard() {
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [fetchError, setFetchError] = useState('');
+  const initialLoadDone = useRef(false);
 
   const fetchDashboardData = useCallback(async (silent = false) => {
     if (!session) {
       setLoading(false);
       return;
     }
-    if (!silent) {
+    // Only show full loading spinner on initial mount; keep background refetches seamless
+    if (!silent && !initialLoadDone.current) {
       setLoading(true);
     }
     setFetchError('');
@@ -62,9 +64,8 @@ export default function LearningHubDashboard() {
       console.error(err);
       setFetchError('Network error');
     } finally {
-      if (!silent) {
-        setLoading(false);
-      }
+      initialLoadDone.current = true;
+      setLoading(false);
     }
   }, [session]);
 

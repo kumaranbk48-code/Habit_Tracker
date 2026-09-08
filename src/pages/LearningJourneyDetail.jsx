@@ -26,13 +26,15 @@ export default function LearningJourneyDetail() {
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [fetchError, setFetchError] = useState('');
   const menuRef = useRef(null);
+  const initialLoadDone = useRef(false);
 
   const fetchJourneyDetail = useCallback(async (silent = false) => {
     if (!session || !id) {
       setLoading(false);
       return;
     }
-    if (!silent) {
+    // Only show full loading spinner on initial mount; keep background refetches seamless
+    if (!silent && !initialLoadDone.current) {
       setLoading(true);
     }
     try {
@@ -55,9 +57,8 @@ export default function LearningJourneyDetail() {
       console.error(err);
       setFetchError('Network error');
     } finally {
-      if (!silent) {
-        setLoading(false);
-      }
+      initialLoadDone.current = true;
+      setLoading(false);
     }
   }, [session, id]);
 
