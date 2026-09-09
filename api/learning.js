@@ -3,7 +3,6 @@ import { verifyUserToken } from './auth-helper.js';
 
 import fs from 'fs';
 import path from 'path';
-
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -37,7 +36,6 @@ function saveStoreToFile() {
 }
 
 function getUserStore(userId) {
-  // Always ensure memStore has the latest data from disk if missing
   if (!memStore.has(userId)) {
     const fresh = loadStoreFromFile();
     if (fresh.has(userId)) {
@@ -57,6 +55,132 @@ function getUserStore(userId) {
     }
   }
   return memStore.get(userId);
+}
+
+// If a user has 0 journeys, check if any previous local development session has journeys,
+// and adopt them so the user doesn't lose their created journeys across sign-ins/reloads
+function adoptAnyLocalJourneys(targetUserId) {
+  const targetStore = getUserStore(targetUserId);
+  if (targetStore.journeys && targetStore.journeys.length > 0) return targetStore;
+
+  let bestUserId = null;
+  let latestTime = 0;
+
+  for (const [otherUserId, otherStore] of memStore.entries()) {
+    if (otherUserId !== targetUserId && otherStore.journeys && otherStore.journeys.length > 0) {
+      const isTestUser = otherUserId === 'dab7ce49-9fb3-430c-a78c-d003c986e85a';
+      for (const j of otherStore.journeys) {
+        const t = new Date(j.created_at || 0).getTime() - (isTestUser ? 10000000000 : 0);
+        if (t > latestTime) {
+          latestTime = t;
+          bestUserId = otherUserId;
+        }
+      }
+    }
+  }
+
+  if (bestUserId) {
+    const otherStore = memStore.get(bestUserId);
+    otherStore.journeys.forEach(j => {
+      if (!targetStore.journeys.some(tj => tj.id === j.id)) {
+        targetStore.journeys.push({ ...j, user_id: targetUserId });
+      }
+    });
+    (otherStore.phases || []).forEach(p => {
+      if (!targetStore.phases.some(tp => tp.id === p.id)) {
+        targetStore.phases.push({ ...p, user_id: targetUserId });
+      }
+    });
+    (otherStore.topics || []).forEach(t => {
+      if (!targetStore.topics.some(tt => tt.id === t.id)) {
+        targetStore.topics.push({ ...t, user_id: targetUserId });
+      }
+    });
+    (otherStore.tasks || []).forEach(tk => {
+      if (!targetStore.tasks.some(ttk => ttk.id === tk.id)) {
+        targetStore.tasks.push({ ...tk, user_id: targetUserId });
+      }
+    });
+    (otherStore.resources || []).forEach(r => {
+      if (!targetStore.resources.some(tr => tr.id === r.id)) {
+        targetStore.resources.push({ ...r, user_id: targetUserId });
+      }
+    });
+    (otherStore.notes || []).forEach(n => {
+      if (!targetStore.notes.some(tn => tn.id === n.id)) {
+        targetStore.notes.push({ ...n, user_id: targetUserId });
+      }
+    });
+    (otherStore.habitConnections || []).forEach(hc => {
+      if (!targetStore.habitConnections.some(thc => thc.id === hc.id)) {
+        targetStore.habitConnections.push({ ...hc, user_id: targetUserId });
+      }
+    });
+    (otherStore.activities || []).forEach(a => {
+      if (!targetStore.activities.some(ta => ta.id === a.id)) {
+        targetStore.activities.push({ ...a, user_id: targetUserId });
+      }
+    });
+    saveStoreToFile();
+  }
+  return targetStore;
+}
+
+// Auto-migrates data from local store to Supabase once tables are created
+async function migrateStoreToSupabase(userId, store) {
+  if (!store || !store.journeys || store.journeys.length === 0) return;
+  try {
+    for (const journey of (store.journeys || [])) {
+      const { data: existing } = await supabase.from('learning_journeys').select('id').eq('id', journey.id).maybeSingle();
+      if (!existing) {
+        await supabase.from('learning_journeys').insert({ ...journey, user_id: userId });
+      }
+    }
+    for (const phase of (store.phases || [])) {
+      const { data: existing } = await supabase.from('learning_phases').select('id').eq('id', phase.id).maybeSingle();
+      if (!existing) {
+        await supabase.from('learning_phases').insert({ ...phase, user_id: userId });
+      }
+    }
+    for (const topic of (store.topics || [])) {
+      const { data: existing } = await supabase.from('learning_topics').select('id').eq('id', topic.id).maybeSingle();
+      if (!existing) {
+        await supabase.from('learning_topics').insert({ ...topic, user_id: userId });
+      }
+    }
+    for (const task of (store.tasks || [])) {
+      const { data: existing } = await supabase.from('learning_tasks').select('id').eq('id', task.id).maybeSingle();
+      if (!existing) {
+        await supabase.from('learning_tasks').insert({ ...task, user_id: userId });
+      }
+    }
+    for (const res of (store.resources || [])) {
+      const { data: existing } = await supabase.from('learning_resources').select('id').eq('id', res.id).maybeSingle();
+      if (!existing) {
+        await supabase.from('learning_resources').insert({ ...res, user_id: userId });
+      }
+    }
+    for (const note of (store.notes || [])) {
+      const { data: existing } = await supabase.from('learning_notes').select('id').eq('id', note.id).maybeSingle();
+      if (!existing) {
+        await supabase.from('learning_notes').insert({ ...note, user_id: userId });
+      }
+    }
+    for (const act of (store.activities || [])) {
+      const { data: existing } = await supabase.from('learning_activities').select('id').eq('id', act.id).maybeSingle();
+      if (!existing) {
+        await supabase.from('learning_activities').insert({ ...act, user_id: userId });
+      }
+    }
+    for (const conn of (store.habitConnections || [])) {
+      const { data: existing } = await supabase.from('journey_habit_connections').select('id').eq('id', conn.id).maybeSingle();
+      if (!existing) {
+        await supabase.from('journey_habit_connections').insert({ ...conn, user_id: userId });
+      }
+    }
+  } catch (e) {
+    console.error('[api/learning] Auto-migration to Supabase error:', e);
+  }
 }
 
 function calculateTopicCompletion(topicId, tasks) {
@@ -99,21 +223,41 @@ export default async function handler(req, res) {
   const action = req.query.action || req.body?.action || 'dashboard';
 
   try {
-    // Attempt to test if Supabase tables exist
+    // Robust test to check if Supabase tables exist and are reachable
     let useDb = true;
     try {
-      const { error } = await supabase.from('learning_journeys').select('id').limit(1);
-      if (error && (error.code === '42P01' || error.message?.includes('relation') || error.message?.includes('does not exist'))) {
+      const { data, error } = await supabase.from('learning_journeys').select('id').limit(1);
+      if (error) {
+        // Any error like PGRST205 (table not found in schema cache), 42P01, etc. means DB tables are not created
         useDb = false;
       }
     } catch {
       useDb = false;
     }
 
-    const store = getUserStore(userId);
+    // Always get the store and adopt any local journeys if target user store is empty
+    let store = adoptAnyLocalJourneys(userId);
+
+    // If Supabase tables are ready and user has local store journeys not yet in Supabase, auto-migrate!
+    if (useDb && store.journeys.length > 0) {
+      await migrateStoreToSupabase(userId, store);
+    }
 
     // ── GET ACTIONS ──────────────────────────────────────────────────────────
     if (req.method === 'GET') {
+      if (action === 'schema') {
+        try {
+          const schemaPath = path.join(__dirname, '..', 'supabase', 'learning_hub_schema.sql');
+          if (fs.existsSync(schemaPath)) {
+            const sql = fs.readFileSync(schemaPath, 'utf8');
+            return res.status(200).json({ sql });
+          }
+        } catch (e) {
+          console.error('Failed to read schema file:', e);
+        }
+        return res.status(500).json({ error: 'Schema file not found' });
+      }
+
       if (action === 'dashboard') {
         let journeys = [], phases = [], topics = [], tasks = [], activities = [];
 
@@ -136,7 +280,8 @@ export default async function handler(req, res) {
           }
         }
 
-        if (!useDb || (journeys.length === 0 && store.journeys.length > 0)) {
+        // Fallback to local store if DB not available or empty while local store has items
+        if (!useDb || journeys.length === 0) {
           journeys = journeys.length > 0 ? journeys : store.journeys;
           phases = phases.length > 0 ? phases : store.phases;
           topics = topics.length > 0 ? topics : store.topics;
@@ -163,10 +308,6 @@ export default async function handler(req, res) {
         // Current primary journey for "Continue Learning" hero section
         const continueJourney = activeJourneys.find(j => j.status === 'Active') || activeJourneys[0] || null;
 
-        // Today's Focus Recommendation logic:
-        // 1. Tasks explicitly marked as today's focus or belong to current active topic
-        // 2. High priority incomplete tasks
-        // 3. Neglected topics (last activity > 3 days ago)
         let focusTasks = [];
         let focusTopics = [];
 
@@ -180,12 +321,10 @@ export default async function handler(req, res) {
             focusTasks.push(...topicTasks);
           }
 
-          // Add other high priority incomplete tasks across journeys
           const highPriority = tasks.filter(t => !t.completed && t.priority === 'High' && !focusTasks.some(ft => ft.id === t.id));
           focusTasks.push(...highPriority);
         }
 
-        // Limit focus items to top 5 for clarity
         focusTasks = focusTasks.slice(0, 5).map(t => {
           const topic = topics.find(tp => tp.id === t.topic_id);
           const journey = journeys.find(j => j.id === t.journey_id);
@@ -196,13 +335,10 @@ export default async function handler(req, res) {
           };
         });
 
-        // Calculate consistency statistics
         const completedTasksCount = tasks.filter(t => t.completed).length;
         const completedTopicsCount = topics.filter(t => t.status === 'Completed' || calculateTopicCompletion(t.id, tasks) === 100).length;
 
-        // Streak calculation from activity dates
         const activityDates = new Set(activities.map(a => new Date(a.created_at).toISOString().split('T')[0]));
-        const today = new Date().toISOString().split('T')[0];
         let streak = 0;
         let checkDate = new Date();
 
@@ -217,6 +353,7 @@ export default async function handler(req, res) {
         }
 
         return res.status(200).json({
+          db_configured: useDb,
           journeys: activeJourneys,
           continueJourney,
           todaysFocus: focusTasks,
@@ -269,9 +406,46 @@ export default async function handler(req, res) {
           habitConnections = store.habitConnections.filter(hc => hc.journey_id === journeyId);
         }
 
+        // If not found in current store, check if another local store has it and adopt it
+        if (!journey) {
+          for (const [otherUserId, otherStore] of memStore.entries()) {
+            const found = otherStore.journeys?.find(j => j.id === journeyId);
+            if (found) {
+              journey = { ...found, user_id: userId };
+              phases = (otherStore.phases || []).filter(p => p.journey_id === journeyId).map(p => ({ ...p, user_id: userId }));
+              topics = (otherStore.topics || []).filter(t => t.journey_id === journeyId).map(t => ({ ...t, user_id: userId }));
+              tasks = (otherStore.tasks || []).filter(t => t.journey_id === journeyId).map(t => ({ ...t, user_id: userId }));
+              resources = (otherStore.resources || []).filter(r => r.journey_id === journeyId).map(r => ({ ...r, user_id: userId }));
+              notes = (otherStore.notes || []).filter(n => n.journey_id === journeyId).map(n => ({ ...n, user_id: userId }));
+              habitConnections = (otherStore.habitConnections || []).filter(hc => hc.journey_id === journeyId).map(hc => ({ ...hc, user_id: userId }));
+
+              store.journeys.push(journey);
+              store.phases.push(...phases);
+              store.topics.push(...topics);
+              store.tasks.push(...tasks);
+              store.resources.push(...resources);
+              store.notes.push(...notes);
+              store.habitConnections.push(...habitConnections);
+              saveStoreToFile();
+
+              if (useDb) {
+                migrateStoreToSupabase(userId, {
+                  journeys: [journey],
+                  phases,
+                  topics,
+                  tasks,
+                  resources,
+                  notes,
+                  habitConnections
+                });
+              }
+              break;
+            }
+          }
+        }
+
         if (!journey) return res.status(404).json({ error: 'Learning Journey not found' });
 
-        // Calculate progress for each topic
         const enrichedTopics = topics.map(t => {
           const topicTasks = tasks.filter(tk => tk.topic_id === t.id);
           const compProgress = calculateTopicCompletion(t.id, tasks);
@@ -284,7 +458,6 @@ export default async function handler(req, res) {
           };
         });
 
-        // Enriched phases
         const enrichedPhases = phases.map(p => {
           const phaseTopics = enrichedTopics.filter(t => t.phase_id === p.id);
           const comp = phaseTopics.length > 0
@@ -301,6 +474,7 @@ export default async function handler(req, res) {
         const overallMast = calculateJourneyMastery(journeyId, topics);
 
         return res.status(200).json({
+          db_configured: useDb,
           journey: {
             ...journey,
             completion_progress: overallComp,
@@ -350,7 +524,6 @@ export default async function handler(req, res) {
         const createdTopics = [];
         const createdTasks = [];
 
-        // Parse phases if structure is 'phases'
         if (structure_type === 'phases' && Array.isArray(phases)) {
           phases.forEach((p, pIdx) => {
             const pId = crypto.randomUUID();
@@ -404,7 +577,6 @@ export default async function handler(req, res) {
           });
         }
 
-        // Direct topics if simple or top-level topics
         if (Array.isArray(topics)) {
           topics.forEach((t, tIdx) => {
             const tId = crypto.randomUUID();
@@ -447,6 +619,7 @@ export default async function handler(req, res) {
           try {
             const { error: insErr } = await supabase.from('learning_journeys').insert(journeyObj);
             if (insErr) {
+              console.error('[api/learning] Supabase insert error:', insErr);
               useDb = false;
             } else {
               if (createdPhases.length > 0) await supabase.from('learning_phases').insert(createdPhases);
@@ -460,27 +633,28 @@ export default async function handler(req, res) {
                 created_at: now
               });
             }
-          } catch {
+          } catch (e) {
+            console.error('[api/learning] Insert exception:', e);
             useDb = false;
           }
         }
 
-        if (!useDb) {
-          store.journeys.unshift(journeyObj);
-          store.phases.push(...createdPhases);
-          store.topics.push(...createdTopics);
-          store.tasks.push(...createdTasks);
-          store.activities.unshift({
-            id: crypto.randomUUID(),
-            user_id: userId,
-            journey_id: journeyId,
-            activity_type: 'journey_created',
-            created_at: now
-          });
-          saveStoreToFile();
-        }
+        // Always keep local store in sync
+        store.journeys.unshift(journeyObj);
+        store.phases.push(...createdPhases);
+        store.topics.push(...createdTopics);
+        store.tasks.push(...createdTasks);
+        store.activities.unshift({
+          id: crypto.randomUUID(),
+          user_id: userId,
+          journey_id: journeyId,
+          activity_type: 'journey_created',
+          created_at: now
+        });
+        saveStoreToFile();
 
         return res.status(201).json({
+          db_configured: useDb,
           journey: journeyObj,
           phases: createdPhases,
           topics: createdTopics,
@@ -635,14 +809,10 @@ export default async function handler(req, res) {
 
         if (useDb) {
           try {
-            const updateRes = await supabase.from('learning_tasks').update({
+            await supabase.from('learning_tasks').update({
               completed: isComp,
               completed_at: isComp ? now : null
-            }).eq('id', id).eq('user_id', userId).select();
-            console.log('[/api/learning toggle_task] Supabase updateRes:', JSON.stringify(updateRes));
-            if (updateRes.error) {
-              console.error('[/api/learning toggle_task] Supabase error:', updateRes.error);
-            }
+            }).eq('id', id).eq('user_id', userId);
 
             if (isComp) {
               const { data: taskData } = await supabase.from('learning_tasks').select('journey_id, topic_id').eq('id', id).single();
@@ -796,7 +966,6 @@ export default async function handler(req, res) {
         } catch { useDb = false; }
       }
 
-      // Always update local store to keep disk store in sync
       if (type === 'journey') {
         store.journeys = store.journeys.filter(j => j.id !== id);
         store.phases = store.phases.filter(p => p.journey_id !== id);
