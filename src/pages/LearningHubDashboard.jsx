@@ -4,12 +4,10 @@ import { useAuth } from '../contexts/AuthContext';
 import TodaysFocusCard from '../components/learning/TodaysFocusCard';
 import LearningOnboardingModal from '../components/learning/LearningOnboardingModal';
 import CreateJourneyModal from '../components/learning/CreateJourneyModal';
-import SqlSchemaModal from '../components/learning/SqlSchemaModal';
 import ContextualInfo from '../components/learning/ContextualInfo';
 import {
   Compass, Plus, Sparkles, Flame, CheckCircle2, BookOpen, Layers,
-  ArrowRight, HelpCircle, AlertCircle, PlayCircle, Clock, Calendar, BarChart2, Trash2,
-  Database, Code2
+  ArrowRight, HelpCircle, AlertCircle, PlayCircle, Clock, Calendar, BarChart2, Trash2
 } from 'lucide-react';
 
 export default function LearningHubDashboard() {
@@ -27,7 +25,6 @@ export default function LearningHubDashboard() {
 
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [sqlModalOpen, setSqlModalOpen] = useState(false);
   const [fetchError, setFetchError] = useState('');
   const initialLoadDone = useRef(false);
 
@@ -216,34 +213,6 @@ export default function LearningHubDashboard() {
       {fetchError && (
         <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-2xl text-xs text-red-600 dark:text-red-300">
           {fetchError}
-        </div>
-      )}
-
-      {/* SUPABASE SETUP NOTICE BANNER */}
-      {data.db_configured === false && (
-        <div className="p-5 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 rounded-3xl text-amber-900 dark:text-amber-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-start gap-3.5">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
-              <Database size={20} />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-amber-900 dark:text-amber-100 flex items-center gap-2">
-                Supabase Tables Not Detected
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-200/80 dark:bg-amber-800/80 text-amber-800 dark:text-amber-200">
-                  Setup Required
-                </span>
-              </h4>
-              <p className="text-xs text-amber-800/80 dark:text-amber-300/80 mt-1 max-w-2xl leading-relaxed">
-                Your journeys are currently stored in local cache. To ensure your journeys permanently persist across reloads, sign-ins, and all devices, run the provided SQL script in your Supabase SQL Editor.
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => setSqlModalOpen(true)}
-            className="self-start sm:self-center shrink-0 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-2xl shadow transition-all flex items-center gap-2"
-          >
-            <Code2 size={15} /> View & Copy SQL Schema
-          </button>
         </div>
       )}
 
@@ -473,13 +442,6 @@ export default function LearningHubDashboard() {
         isOpen={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         onCreate={handleCreateJourney}
-      />
-
-      <SqlSchemaModal
-        isOpen={sqlModalOpen}
-        onClose={() => setSqlModalOpen(false)}
-        isConfigured={data.db_configured}
-        onVerify={() => fetchDashboardData(true)}
       />
     </div>
   );
