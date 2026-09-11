@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ChevronLeft, ChevronRight, Check, Calendar as CalIcon,
   Sparkles, Flame, Clock, Target, Info, CheckCircle2, RotateCcw
@@ -14,7 +15,7 @@ export default function CalendarMatrix({
   setViewDate,
   showArchived = false,
 }) {
-  const [activeCellTooltip, setActiveCellTooltip] = useState(null);
+  const [tooltipData, setTooltipData] = useState(null);
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -111,7 +112,7 @@ export default function CalendarMatrix({
                       <div className="flex flex-col items-center justify-center gap-0.5 py-1">
                         <span className="text-[11px]">{day}</span>
                         {isAllDone && (
-                          <span className="w-3.5 h-3.5 rounded-full bg-[#3d7a75] dark:bg-[#5fae9e] text-white dark:text-[#0e2320] text-[9px] flex items-center justify-center font-bold shadow-xs">
+                          <span className="w-3.5 h-3.5 rounded-full bg-[#3d7a75] text-white text-[9px] flex items-center justify-center font-bold shadow-xs">
                             ✓
                           </span>
                         )}
@@ -158,12 +159,21 @@ export default function CalendarMatrix({
                           onClick={() => {
                             if (isToday && onToggleHabit) {
                               onToggleHabit(habit, dateStr);
-                            } else {
-                              setActiveCellTooltip(activeCellTooltip === `${habit.id}_${dateStr}` ? null : `${habit.id}_${dateStr}`);
                             }
                           }}
-                          onMouseEnter={() => setActiveCellTooltip(`${habit.id}_${dateStr}`)}
-                          onMouseLeave={() => setActiveCellTooltip(null)}
+                          onMouseEnter={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setTooltipData({
+                              habit,
+                              dateStr,
+                              status,
+                              isPast,
+                              isToday,
+                              note: log?.note,
+                              rect,
+                            });
+                          }}
+                          onMouseLeave={() => setTooltipData(null)}
                           className={`w-9 h-9 rounded-xl mx-auto flex items-center justify-center text-xs font-bold transition-all duration-150 ${
                             isToday ? 'ring-2 ring-[#3d7a75] ring-offset-1 dark:ring-offset-[#1a2129] cursor-pointer active:scale-95' : 'cursor-default'
                           } ${
@@ -172,7 +182,7 @@ export default function CalendarMatrix({
                               : status.isNotScheduled
                               ? 'bg-[#f7f9fa] dark:bg-[#1a2129] text-[#94a0aa] dark:text-[#5b6672]'
                               : status.isDone
-                              ? 'bg-[#3d7a75] dark:bg-[#5fae9e] text-white dark:text-[#0e2320] shadow-xs scale-100'
+                              ? 'bg-[#3d7a75] text-white shadow-xs scale-100'
                               : status.isPartial
                               ? 'bg-[#f5ecdb] dark:bg-[#3a2c14] text-[#8a5a24] dark:text-[#dcb579] border border-[#c99a52]/40 dark:border-[#c99a52]/40'
                               : status.isMissed
@@ -187,23 +197,6 @@ export default function CalendarMatrix({
                         >
                           <span>{status.symbol}</span>
                         </button>
-
-                        {/* Cell Details Tooltip on Hover / Tap */}
-                        {activeCellTooltip === `${habit.id}_${dateStr}` && (
-                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30 w-48 p-3 bg-[#14181c] text-white text-left rounded-xl shadow-xl border border-[#2a343d] text-[11px] pointer-events-none animate-fadeIn">
-                            <div className="flex items-center gap-1.5 font-bold mb-1" style={{ color: getHabitColor(habit, '#5fae9e') }}>
-                              <span>{habit.habit_name}</span>
-                            </div>
-                            <div className="text-slate-300 font-semibold">{dateStr} {isPast ? '(Auto History)' : isToday ? '(Today)' : ''}</div>
-                            <div className="mt-1 pt-1 border-t border-[#2a343d] space-y-0.5 text-slate-300">
-                              <div>Status: <span className="font-bold text-white">{status.label}</span></div>
-                              {habit.tracking_type === 'quantity' && (
-                                <div>Progress: {status.quantityDone} / {status.targetQuantity} {habit.unit} ({status.progressPct}%)</div>
-                              )}
-                              {log?.note && <div className="italic text-slate-400 mt-1">"{log.note}"</div>}
-                            </div>
-                          </div>
-                        )}
                       </td>
                     );
                   })}
@@ -247,6 +240,75 @@ export default function CalendarMatrix({
             </tfoot>
           </table>
         </div>
+      )}
+
+      {/* Viewport-Safe Floating Tooltip with Portal to document.body */}
+      {tooltipData && typeof document !== 'undefined' && createPortal(
+        (() => {
+          const tooltipWidth = 230;
+          const tooltipHeight = 125;
+          // Default position: above cell button
+          let top = tooltipData.rect.top - tooltipHeight - 8;
+          // If near top of screen or header, place below cell button
+          if (top < 70) {
+            top = tooltipData.rect.bottom + 8;
+          }
+          // Center horizontally
+          let left = tooltipData.rect.left + tooltipData.rect.width / 2 - tooltipWidth / 2;
+          if (left < 10) left = 10;
+          if (left + tooltipWidth > window.innerWidth - 10) {
+            left = window.innerWidth - tooltipWidth - 10;
+          }
+
+          return (
+            <div
+              className="fixed z-50 w-[230px] p-3.5 bg-[#14181c] text-white text-left rounded-2xl shadow-2xl border border-[#2a343d] text-xs pointer-events-none animate-fadeIn"
+              style={{ left: `${left}px`, top: `${top}px` }}
+            >
+              <div className="flex items-center justify-between gap-1.5 font-bold mb-1">
+                <span className="truncate max-w-[160px] text-white font-bold">
+                  {tooltipData.habit.habit_name}
+                </span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 font-mono text-slate-300">
+                  Day {tooltipData.dateStr.slice(8)}
+                </span>
+              </div>
+              <div className="text-slate-300 font-medium text-[11px] mb-1.5">
+                {tooltipData.dateStr} {tooltipData.isPast ? '· History' : tooltipData.isToday ? '· Today' : ''}
+              </div>
+              <div className="pt-2 border-t border-[#2a343d] space-y-1.5 text-slate-200 text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 font-medium">Status:</span>
+                  <span className={`font-bold px-2 py-0.5 rounded text-[10px] ${
+                    tooltipData.status.isDone
+                      ? 'bg-[#3d7a75] text-white'
+                      : tooltipData.status.isPartial
+                      ? 'bg-[#3a2c14] text-[#dcb579] border border-[#c99a52]/40'
+                      : tooltipData.status.isMissed
+                      ? 'bg-red-500/20 text-red-300 border border-red-500/30'
+                      : 'bg-white/10 text-slate-300'
+                  }`}>
+                    {tooltipData.status.label}
+                  </span>
+                </div>
+                {tooltipData.habit.tracking_type === 'quantity' && (
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="text-slate-400">Progress:</span>
+                    <span className="font-semibold text-white">
+                      {tooltipData.status.quantityDone || 0} / {tooltipData.status.targetQuantity || tooltipData.habit.target_quantity || 1} {tooltipData.habit.unit || ''} ({tooltipData.status.progressPct || 0}%)
+                    </span>
+                  </div>
+                )}
+                {tooltipData.note && (
+                  <div className="italic text-slate-300 text-[10px] mt-1 bg-white/5 p-1.5 rounded-lg border border-white/5">
+                    "{tooltipData.note}"
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })(),
+        document.body
       )}
     </div>
   );

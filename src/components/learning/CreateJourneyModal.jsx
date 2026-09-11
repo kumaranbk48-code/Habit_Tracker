@@ -547,7 +547,7 @@ export default function CreateJourneyModal({ isOpen, onClose, onCreate }) {
                 setStep(step + 1);
               }}
               disabled={step === 1 && !form.title.trim()}
-              className="flex items-center gap-1.5 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] disabled:opacity-50 text-white dark:text-[#0e2320] px-5 py-2.5 rounded-xl shadow-sm transition-all"
+              className="flex items-center gap-1.5 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] disabled:opacity-50 text-white px-5 py-2.5 rounded-xl shadow-sm transition-all"
             >
               Next <ArrowRight size={14} />
             </button>
@@ -556,7 +556,7 @@ export default function CreateJourneyModal({ isOpen, onClose, onCreate }) {
               type="button"
               onClick={handleSubmit}
               disabled={submitting}
-              className="flex items-center gap-1.5 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] px-6 py-2.5 rounded-xl shadow-md transition-all"
+              className="flex items-center gap-1.5 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-6 py-2.5 rounded-xl shadow-md transition-all"
             >
               {submitting ? 'Creating...' : 'Create Journey'} <Check size={14} />
             </button>

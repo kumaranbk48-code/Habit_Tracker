@@ -119,7 +119,7 @@ export default function Reports() {
                 key={t}
                 onClick={() => setReportType(t)}
                 className={`px-4 py-2 text-sm font-medium capitalize transition-colors ${
-                  reportType === t ? 'bg-[#3d7a75] text-white dark:bg-[#5fae9e] dark:text-[#0e2320]' : 'text-gray-600 dark:text-gray-300 hover:bg-[#eef2f4] dark:hover:bg-[#222b33]'
+                  reportType === t ? 'bg-[#3d7a75] text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-[#eef2f4] dark:hover:bg-[#222b33]'
                 }`}
               >
                 {t}
@@ -130,11 +130,11 @@ export default function Reports() {
           <button
             onClick={exportPDF}
             disabled={!data || pdfLoading}
-            className="flex items-center gap-2 bg-white dark:bg-[#1a2129] border border-[#e2e8ec] dark:border-[#2a343d] hover:bg-[#eef2f4] dark:hover:bg-[#222b33] text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-4 py-2 rounded-xl text-sm font-semibold transition-all shadow-md shadow-[#3d7a75]/20 disabled:opacity-50"
           >
             {pdfLoading
-              ? <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
-              : <Download size={16} />
+              ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              : <Download size={16} className="text-white" />
             }
             PDF
           </button>

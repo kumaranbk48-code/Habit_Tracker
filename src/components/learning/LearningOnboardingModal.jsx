@@ -108,7 +108,7 @@ export default function LearningOnboardingModal({ isOpen, onClose, onStartCreate
                 onClick={() => setStep(s)}
                 className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl transition-all ${
                   s === step
-                    ? 'bg-[#3d7a75] text-white dark:bg-[#5fae9e] dark:text-[#0e2320] shadow-sm'
+                    ? 'bg-[#3d7a75] text-white shadow-sm'
                     : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-[#eef2f4] dark:hover:bg-[#222b33]'
                 }`}
               >
@@ -361,7 +361,7 @@ export default function LearningOnboardingModal({ isOpen, onClose, onStartCreate
             )}
             <button
               onClick={handleNext}
-              className="flex items-center gap-1.5 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] px-5 py-2.5 rounded-xl shadow-sm transition-all"
+              className="flex items-center gap-1.5 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-5 py-2.5 rounded-xl shadow-sm transition-all"
             >
               {step === 3 ? 'Start Creating Journey' : 'Next'} <ArrowRight size={14} />
             </button>

@@ -26,24 +26,57 @@ export default async function handler(req, res) {
     const currentTime = `${hh}:${mm}`;
 
     // Find all active reminders matching current time
-    const { data: reminders, error: remErr } = await supabase
-      .from('reminders')
-      .select('*, habits(habit_name)')
-      .eq('notification_status', 'Active')
-      .eq('reminder_time', currentTime);
+    let reminders = [];
+    try {
+      const { data, error: remErr } = await supabase
+        .from('reminders')
+        .select(`
+          *,
+          habits(id, habit_name),
+          goals(id, goal_name, target_date, status),
+          learning_journeys:journey_id(id, title, target_date, status),
+          learning_topics:topic_id(id, title, target_date, status)
+        `)
+        .eq('notification_status', 'Active')
+        .eq('reminder_time', currentTime);
 
-    if (remErr) {
-      console.error('[/api/push-send] reminders query error:', remErr);
-      return res.status(500).json({ error: 'Failed to retrieve active reminders' });
+      if (remErr) {
+        // Fallback to legacy habits schema if enhanced polymorphic query fails
+        console.warn('[/api/push-send] Enhanced query failed, falling back to legacy habits query:', remErr.message);
+        const legacyRes = await supabase
+          .from('reminders')
+          .select('*, habits(habit_name)')
+          .eq('notification_status', 'Active')
+          .eq('reminder_time', currentTime);
+        reminders = (legacyRes.data || []).map(r => ({ ...r, target_type: 'habit' }));
+      } else {
+        reminders = data || [];
+      }
+    } catch (queryEx) {
+      console.error('[/api/push-send] Query exception:', queryEx);
+      return res.status(500).json({ error: 'Failed to query reminders' });
     }
 
     if (!reminders?.length) return res.status(200).json({ sent: 0 });
 
-    // Validate days_of_week for the current day
+    // Validate days_of_week and deadline proximity
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const currentDay = dayNames[now.getUTCDay()];
+    const todayYMD = now.toISOString().split('T')[0];
 
     const activeReminders = reminders.filter(r => {
+      // If deadline proximity mode, check if target date matches today + days_before_deadline
+      if (r.reminder_mode === 'deadline_proximity') {
+        const targetDateStr = r.goals?.target_date || r.learning_topics?.target_date || r.learning_journeys?.target_date;
+        if (!targetDateStr) return false;
+        const days = r.days_before_deadline || 0;
+        const checkDate = new Date(now);
+        checkDate.setDate(checkDate.getDate() + days);
+        const checkYMD = checkDate.toISOString().split('T')[0];
+        return targetDateStr === checkYMD;
+      }
+
+      // Scheduled routine check
       if (!r.days_of_week || !Array.isArray(r.days_of_week) || r.days_of_week.length === 0) {
         return true;
       }
@@ -74,16 +107,59 @@ export default async function handler(req, res) {
     let sent = 0;
     const stale = [];
 
-    for (const reminder of reminders) {
+    for (const reminder of activeReminders) {
       const userSubs = subsByUser[reminder.user_id] || [];
+      if (!userSubs.length) continue;
+
+      let title = '🔔 Reminder';
+      let body = reminder.custom_text || 'You have an active reminder scheduled.';
+      let url = '/dashboard';
+
+      const type = reminder.target_type || 'habit';
+
+      if (type === 'habit') {
+        title = '🔔 Habit Reminder';
+        body = reminder.custom_text || `Time for: ${reminder.habits?.habit_name || 'your habit'}!`;
+        url = '/habits';
+      } else if (type === 'goal') {
+        if (reminder.reminder_mode === 'deadline_proximity') {
+          const days = reminder.days_before_deadline || 0;
+          title = '⚠️ Goal Deadline Alert';
+          body = days === 0
+            ? `🚨 Today is the target deadline for "${reminder.goals?.goal_name || 'your goal'}"!`
+            : days === 1
+            ? `🚨 Tomorrow is the final day for "${reminder.goals?.goal_name || 'your goal'}"!`
+            : `⏳ Only ${days} days remaining for "${reminder.goals?.goal_name || 'your goal'}"!`;
+        } else {
+          title = '🎯 Goal Check-in';
+          body = reminder.custom_text || `Time to log progress for: ${reminder.goals?.goal_name || 'your goal'}!`;
+        }
+        url = '/goals';
+      } else if (type === 'learning_journey' || type === 'learning_topic') {
+        const itemTitle = reminder.learning_topics?.title || reminder.learning_journeys?.title || 'your learning roadmap';
+        if (reminder.reminder_mode === 'deadline_proximity') {
+          const days = reminder.days_before_deadline || 0;
+          title = '⏳ Roadmap Deadline';
+          body = days === 0
+            ? `📚 Due Today: Complete "${itemTitle}" in your Learning Hub!`
+            : `⏳ Due Tomorrow: Keep up the pace on "${itemTitle}"!`;
+        } else {
+          title = '📚 Study Session Reminder';
+          body = reminder.custom_text || `Ready to learn? Continue: "${itemTitle}"!`;
+        }
+        url = '/learning';
+      }
+
       for (const sub of userSubs) {
         const payload = JSON.stringify({
-          title: '🔔 Habit Reminder',
-          body: `Time for: ${reminder.habits?.habit_name || 'your habit'}!`,
+          title,
+          body,
           tag: `reminder-${reminder.id}`,
-          url: '/habits',
-          habitId: reminder.habit_id,
+          url,
+          reminderId: reminder.id,
+          targetType: type,
         });
+
         try {
           await webPush.sendNotification(sub.subscription, payload);
           sent++;

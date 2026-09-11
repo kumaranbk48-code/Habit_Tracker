@@ -8,7 +8,7 @@ import ContextualInfo from '../components/learning/ContextualInfo';
 import CustomSelect from '../components/CustomSelect';
 import {
   ArrowLeft, Plus, Play, Pause, CheckCircle2, Link, FileText, Globe,
-  Sliders, Trash2, Edit3, Layers, BookOpen, Sparkles, MoreVertical
+  Sliders, Trash2, Edit3, Layers, BookOpen, Sparkles, MoreVertical, Bell
 } from 'lucide-react';
 
 export default function LearningJourneyDetail() {
@@ -448,6 +448,17 @@ export default function LearningJourneyDetail() {
                 <CheckCircle2 size={13} />
                 {journey.status === 'Completed' ? 'Undo Complete' : 'Mark Complete'}
               </button>
+
+              {/* Quick Study Reminder Button */}
+              <button
+                type="button"
+                onClick={() => navigate('/reminders', { state: { openAdd: true, prefillType: 'learning', prefillId: journey.id } })}
+                className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#f0f4f8] dark:bg-[#182a40] text-[#2f5378] dark:text-[#8fb4d9] hover:bg-[#e4ecf5] dark:hover:bg-[#203650] transition-colors cursor-pointer"
+                title="Set Study Schedule or Deadline Reminder"
+              >
+                <Bell size={13} />
+                <span>Study Reminder</span>
+              </button>
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight">
@@ -585,7 +596,7 @@ export default function LearningJourneyDetail() {
           <button
             type="button"
             onClick={() => handleAddTopic()}
-            className="text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] px-4 py-2 rounded-xl cursor-pointer"
+            className="text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-4 py-2 rounded-xl cursor-pointer shadow-xs transition-colors"
           >
             Add Topic
           </button>

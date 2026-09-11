@@ -2,6 +2,35 @@ import supabase from './db-client.js';
 import { verifyUserToken } from './auth-helper.js';
 import { applyCors } from './cors.js';
 
+const columnCache = new Map();
+
+async function hasColumn(table, column) {
+  const cacheKey = `${table}.${column}`;
+  if (columnCache.has(cacheKey)) return columnCache.get(cacheKey);
+
+  const { error } = await supabase.from(table).select(column).limit(0);
+  const exists = !error;
+  columnCache.set(cacheKey, exists);
+  return exists;
+}
+
+async function sanitizePayload(table, payload) {
+  const sanitized = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (value === undefined) continue;
+    // Always keep standard base columns
+    if (key === 'user_id' || key === 'id' || key === 'goal_name' || key === 'target_date' || key === 'status') {
+      sanitized[key] = value;
+      continue;
+    }
+    const exists = await hasColumn(table, key);
+    if (exists) {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
 
@@ -54,7 +83,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'target_value must be greater than 0' });
       }
 
-      const payload = {
+      const rawPayload = {
         user_id,
         goal_name: goal_name.trim(),
         target_date,
@@ -68,18 +97,34 @@ export default async function handler(req, res) {
         bad_habit: Boolean(bad_habit)
       };
 
-      const { data, error } = await supabase
+      const payload = await sanitizePayload('goals', rawPayload);
+
+      let { data, error } = await supabase
         .from('goals')
         .insert(payload)
         .select()
         .single();
+
+      // Retry without extended columns if schema cache error occurs
+      if (error && (error.code === 'PGRST204' || error.code === '42703')) {
+        console.warn('[/api/goals] POST schema mismatch, retrying with base columns:', error.message);
+        const basePayload = {
+          user_id,
+          goal_name: goal_name.trim(),
+          target_date,
+          status: status || 'Pending'
+        };
+        const retryRes = await supabase.from('goals').insert(basePayload).select().single();
+        data = retryRes.data;
+        error = retryRes.error;
+      }
 
       if (error) {
         console.error('[/api/goals] POST error:', error);
         return res.status(500).json({ error: 'Failed to create goal in database' });
       }
 
-      return res.status(201).json(data);
+      return res.status(201).json({ ...rawPayload, ...data });
     }
 
     if (req.method === 'PUT') {
@@ -104,8 +149,8 @@ export default async function handler(req, res) {
         finalStatus = done === milestones.length ? 'Completed' : done > 0 ? 'In Progress' : 'Pending';
       }
 
-      // Preserve omitted fields to prevent accidental resets on partial updates (e.g. progress updates)
-      const updatePayload = {
+      // Preserve omitted fields to prevent accidental resets on partial updates
+      const rawUpdatePayload = {
         ...(goal_name !== undefined && { goal_name: goal_name.trim() }),
         ...(target_date !== undefined && { target_date }),
         ...(finalStatus !== undefined && { status: finalStatus }),
@@ -118,7 +163,9 @@ export default async function handler(req, res) {
         ...(bad_habit !== undefined && { bad_habit: Boolean(bad_habit) })
       };
 
-      const { data, error } = await supabase
+      const updatePayload = await sanitizePayload('goals', rawUpdatePayload);
+
+      let { data, error } = await supabase
         .from('goals')
         .update(updatePayload)
         .eq('id', id)
@@ -126,13 +173,32 @@ export default async function handler(req, res) {
         .select()
         .single();
 
+      // Retry with minimal columns if schema cache error occurs
+      if (error && (error.code === 'PGRST204' || error.code === '42703')) {
+        console.warn('[/api/goals] PUT schema mismatch, retrying with core columns:', error.message);
+        const fallbackUpdate = {
+          ...(goal_name !== undefined && { goal_name: goal_name.trim() }),
+          ...(target_date !== undefined && { target_date }),
+          ...(finalStatus !== undefined && { status: finalStatus })
+        };
+        const retryRes = await supabase
+          .from('goals')
+          .update(fallbackUpdate)
+          .eq('id', id)
+          .eq('user_id', user_id)
+          .select()
+          .single();
+        data = retryRes.data;
+        error = retryRes.error;
+      }
+
       if (error) {
         console.error('[/api/goals] PUT error:', error);
-        return res.status(500).json({ error: 'Failed to update goal in database' });
+        return res.status(500).json({ error: error.message || 'Failed to update goal in database' });
       }
 
       if (!data) return res.status(404).json({ error: 'Goal not found or access denied' });
-      return res.status(200).json(data);
+      return res.status(200).json({ ...rawUpdatePayload, ...data });
     }
 
     if (req.method === 'DELETE') {

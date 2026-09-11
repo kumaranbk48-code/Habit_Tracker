@@ -161,7 +161,7 @@ export default function TopicWorkspaceModal({
             onClick={() => setActiveTab('tasks')}
             className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
               activeTab === 'tasks'
-                ? 'bg-[#3d7a75] text-white dark:bg-[#5fae9e] dark:text-[#0e2320] shadow-sm'
+                ? 'bg-[#3d7a75] text-white shadow-sm'
                 : 'text-gray-600 dark:text-gray-300 hover:bg-[#eef2f4] dark:hover:bg-[#222b33]'
             }`}
           >
@@ -171,7 +171,7 @@ export default function TopicWorkspaceModal({
             onClick={() => setActiveTab('resources')}
             className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
               activeTab === 'resources'
-                ? 'bg-[#3d7a75] text-white dark:bg-[#5fae9e] dark:text-[#0e2320] shadow-sm'
+                ? 'bg-[#3d7a75] text-white shadow-sm'
                 : 'text-gray-600 dark:text-gray-300 hover:bg-[#eef2f4] dark:hover:bg-[#222b33]'
             }`}
           >
@@ -181,7 +181,7 @@ export default function TopicWorkspaceModal({
             onClick={() => setActiveTab('notes')}
             className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
               activeTab === 'notes'
-                ? 'bg-[#3d7a75] text-white dark:bg-[#5fae9e] dark:text-[#0e2320] shadow-sm'
+                ? 'bg-[#3d7a75] text-white shadow-sm'
                 : 'text-gray-600 dark:text-gray-300 hover:bg-[#eef2f4] dark:hover:bg-[#222b33]'
             }`}
           >
@@ -202,7 +202,7 @@ export default function TopicWorkspaceModal({
               />
               <button
                 type="submit"
-                className="flex items-center gap-1 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] px-4 py-2 rounded-xl transition-all"
+                className="flex items-center gap-1 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-4 py-2 rounded-xl transition-all"
               >
                 <Plus size={14} /> Add Task
               </button>
@@ -293,7 +293,7 @@ export default function TopicWorkspaceModal({
               </div>
               <button
                 type="submit"
-                className="w-full text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] py-2 rounded-lg transition-colors flex items-center justify-center gap-1"
+                className="w-full text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white py-2 rounded-lg transition-colors flex items-center justify-center gap-1"
               >
                 <Plus size={14} /> Add Resource Link
               </button>
@@ -349,7 +349,7 @@ export default function TopicWorkspaceModal({
               />
               <button
                 type="submit"
-                className="text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] px-4 py-2 rounded-xl transition-colors flex items-center gap-1"
+                className="text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-4 py-2 rounded-xl transition-colors flex items-center gap-1"
               >
                 <Plus size={14} /> Save Note
               </button>

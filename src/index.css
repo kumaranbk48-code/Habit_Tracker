@@ -461,7 +461,7 @@ select option:hover {
 .dark .fixed.inset-0.z-50 .border-b {
   border-color: #2a343d !important;
 }
-.dark .fixed.inset-0.z-50 button:hover {
+.dark .fixed.inset-0.z-50 button:not(.bg-\[\#3d7a75\]):not(.bg-\[\#2f5f5b\]):not(.btn-primary):hover {
   background-color: #222b33 !important;
 }
 
@@ -524,3 +524,35 @@ select option:hover {
   border-color: #5fae9e !important;
   box-shadow: 0 0 0 3px rgba(95, 174, 158, 0.3) !important;
 }
+
+/* ── Unified Green Brand Theme Buttons (#3d7a75) with Crisp White Letters ────────────────── */
+button.bg-\[\#3d7a75\],
+a.bg-\[\#3d7a75\],
+.btn-primary {
+  background-color: #3d7a75 !important;
+  color: #ffffff !important;
+}
+button.bg-\[\#3d7a75\]:hover,
+a.bg-\[\#3d7a75\]:hover,
+.btn-primary:hover {
+  background-color: #2f5f5b !important;
+  color: #ffffff !important;
+}
+.dark button.bg-\[\#3d7a75\],
+.dark a.bg-\[\#3d7a75\],
+.dark .btn-primary {
+  background-color: #3d7a75 !important;
+  color: #ffffff !important;
+}
+.dark button.bg-\[\#3d7a75\]:hover,
+.dark a.bg-\[\#3d7a75\]:hover,
+.dark .btn-primary:hover {
+  background-color: #2f5f5b !important;
+  color: #ffffff !important;
+}
+button.bg-\[\#3d7a75\] *,
+a.bg-\[\#3d7a75\] *,
+.btn-primary * {
+  color: #ffffff !important;
+}
+

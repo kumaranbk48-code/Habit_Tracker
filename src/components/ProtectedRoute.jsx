@@ -8,7 +8,7 @@ export default function ProtectedRoute({ children }) {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-[#f7f9fa] dark:bg-[#14181c] gap-4">
-        <div className="w-14 h-14 bg-[#3d7a75] dark:bg-[#5fae9e] rounded-2xl flex items-center justify-center shadow-md shadow-[#3d7a75]/20 text-white dark:text-[#0e2320]">
+        <div className="w-14 h-14 bg-[#3d7a75] rounded-2xl flex items-center justify-center shadow-md shadow-[#3d7a75]/20 text-white">
           <ListChecks size={28} />
         </div>
         <div className="flex gap-1.5">

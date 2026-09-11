@@ -213,7 +213,7 @@ export default function CustomDatePicker({
                   onClick={() => handleSelectDay(dayNum)}
                   className={`h-7 w-7 text-xs rounded-lg flex items-center justify-center font-medium transition-colors cursor-pointer mx-auto ${
                     isSelected
-                      ? 'bg-[#3d7a75] text-white font-bold dark:bg-[#5fae9e] dark:text-[#0e2320]'
+                      ? 'bg-[#3d7a75] text-white font-bold'
                       : isToday
                       ? 'border border-[#3d7a75] text-[#3d7a75] dark:border-[#5fae9e] dark:text-[#5fae9e] font-semibold hover:bg-[#e2f0ef] dark:hover:bg-[#14302e]'
                       : 'text-slate-700 dark:text-slate-300 hover:bg-[#e2f0ef] hover:text-[#2c6560] dark:hover:bg-[#14302e] dark:hover:text-[#7fd1b9]'

@@ -230,8 +230,9 @@ export default function Habits() {
         setTracking((prev) => prev.map((t) => t.habit_id === habitId ? { ...t, ...saved } : t));
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
       } else {
+        const errJson = await res.json().catch(() => ({}));
         setTracking(previousTracking);
-        setToast({ message: 'Could not save habit status. Reverted change.', type: 'error' });
+        setToast({ message: errJson.error || 'Could not save habit status. Reverted change.', type: 'error' });
       }
     } catch {
       setTracking(previousTracking);
@@ -283,8 +284,9 @@ export default function Habits() {
         setTracking((prev) => prev.map((t) => t.habit_id === habitId ? { ...t, ...saved } : t));
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
       } else {
+        const errJson = await res.json().catch(() => ({}));
         setTracking(previousTracking);
-        setToast({ message: 'Failed to update progress. Reverted.', type: 'error' });
+        setToast({ message: errJson.error || 'Failed to update progress. Reverted.', type: 'error' });
       }
     } catch {
       setTracking(previousTracking);
@@ -330,16 +332,16 @@ export default function Habits() {
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setFocusModalOpen(true)}
-            className="inline-flex items-center gap-1.5 bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] px-3.5 py-2 rounded-xl font-semibold text-xs transition-all shadow-md shadow-[#3d7a75]/20 active:scale-95"
+            className="inline-flex items-center gap-1.5 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-3.5 py-2 rounded-xl font-semibold text-xs transition-all shadow-md shadow-[#3d7a75]/20 active:scale-95"
           >
-            <Play size={14} className="fill-current" /> Focus Timer
+            <Play size={14} className="fill-current text-white" /> Focus Timer
           </button>
 
           <button
             onClick={() => setTemplatesOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700/80 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors border border-slate-200/60 dark:border-slate-600/60"
+            className="inline-flex items-center gap-1.5 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-3.5 py-2 rounded-xl font-semibold text-xs transition-all shadow-md shadow-[#3d7a75]/20 active:scale-95"
           >
-            <Sparkles size={14} className="text-[#3d7a75] dark:text-[#5fae9e]" /> Preset Templates
+            <Sparkles size={14} className="text-white" /> Preset Templates
           </button>
           <button
             onClick={openAdd}
@@ -546,11 +548,11 @@ export default function Habits() {
                           onClick={() => toggleHabit(habit.id)}
                           className={`flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 border active:scale-95 ${
                             done
-                              ? 'bg-[#3d7a75] dark:bg-[#5fae9e] border-[#3d7a75] dark:border-[#5fae9e] text-white dark:text-[#0e2320] shadow-md shadow-[#3d7a75]/20'
-                              : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
+                              ? 'bg-[#3d7a75] border-[#3d7a75] text-white shadow-md shadow-[#3d7a75]/20'
+                              : 'bg-[#3d7a75]/15 hover:bg-[#3d7a75] border-[#3d7a75]/30 text-[#3d7a75] hover:text-white dark:bg-[#3d7a75]/25 dark:text-[#7fd1b9] dark:hover:text-white dark:hover:bg-[#3d7a75]'
                           }`}
                         >
-                          <Check size={16} className={done ? 'text-white' : 'text-slate-400'} />
+                          <Check size={16} className={done ? 'text-white' : 'text-current'} />
                           {done ? 'Completed ✓' : 'Mark Done'}
                         </button>
                       )}
@@ -777,7 +779,7 @@ export default function Habits() {
             <button
               type="submit"
               disabled={formLoading}
-              className="px-5 py-2 text-xs font-semibold text-white bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] dark:text-[#0e2320] rounded-xl transition-colors disabled:opacity-60 flex items-center gap-2 shadow-xs"
+              className="px-5 py-2 text-xs font-semibold text-white bg-[#3d7a75] hover:bg-[#2f5f5b] rounded-xl transition-colors disabled:opacity-60 flex items-center gap-2 shadow-xs"
             >
               {formLoading && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
               {editing ? 'Update Habit' : 'Save Habit'}

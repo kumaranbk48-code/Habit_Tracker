@@ -178,7 +178,7 @@ export default function CustomSelect({
                     opt.disabled
                       ? 'opacity-40 cursor-not-allowed'
                       : isSelected
-                      ? 'bg-[#3d7a75] text-white font-semibold dark:bg-[#5fae9e] dark:text-[#0e2320]'
+                      ? 'bg-[#3d7a75] text-white font-semibold'
                       : 'text-slate-700 dark:text-slate-200 hover:bg-[#e2f0ef] hover:text-[#2c6560] dark:hover:bg-[#14302e] dark:hover:text-[#7cc3bb]'
                   }`}
                 >

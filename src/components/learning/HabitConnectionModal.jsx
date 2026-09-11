@@ -152,7 +152,7 @@ export default function HabitConnectionModal({ isOpen, onClose, journey, onConne
           <button
             type="submit"
             disabled={submitting || (mode === 'existing' && !selectedHabitId) || (mode === 'new' && !newHabitName.trim())}
-            className="flex items-center gap-1 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] disabled:opacity-50 text-white dark:text-[#0e2320] px-5 py-2.5 rounded-xl shadow-sm transition-all"
+            className="flex items-center gap-1 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] disabled:opacity-50 text-white px-5 py-2.5 rounded-xl shadow-sm transition-all"
           >
             {submitting ? 'Connecting...' : 'Connect Habit'} <Link size={14} />
           </button>

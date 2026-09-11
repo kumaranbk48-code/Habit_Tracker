@@ -67,26 +67,57 @@ export default async function handler(req, res) {
         newStatus = newQuantity >= target;
       }
 
-      // Atomic upsert with unique conflict resolution to prevent race conditions
-      const upsertObj = {
+      // Save tracking record: update existing record if found, otherwise insert
+      const recordPayload = {
         user_id,
         habit_id,
         completion_date,
         status: newStatus,
         quantity_completed: newQuantity
       };
-      if (note !== undefined) upsertObj.note = note;
-      if (mood !== undefined) upsertObj.mood = mood;
+      if (note !== undefined) recordPayload.note = note;
+      if (mood !== undefined) recordPayload.mood = mood;
 
-      const { data, error } = await supabase
-        .from('habit_tracking')
-        .upsert(upsertObj, { onConflict: 'habit_id,completion_date,user_id' })
-        .select()
-        .single();
+      let data, error;
+
+      if (existing?.id) {
+        const updateRes = await supabase
+          .from('habit_tracking')
+          .update(recordPayload)
+          .eq('id', existing.id)
+          .select()
+          .single();
+        data = updateRes.data;
+        error = updateRes.error;
+      } else {
+        // Try insert first
+        const insertRes = await supabase
+          .from('habit_tracking')
+          .insert(recordPayload)
+          .select()
+          .single();
+
+        if (insertRes.error && (insertRes.error.code === '23505' || insertRes.error.message?.includes('duplicate'))) {
+          // In case a row was created concurrently, update it
+          const fallbackUpdate = await supabase
+            .from('habit_tracking')
+            .update(recordPayload)
+            .eq('habit_id', habit_id)
+            .eq('completion_date', completion_date)
+            .eq('user_id', user_id)
+            .select()
+            .single();
+          data = fallbackUpdate.data;
+          error = fallbackUpdate.error;
+        } else {
+          data = insertRes.data;
+          error = insertRes.error;
+        }
+      }
 
       if (error) {
-        console.error('[/api/tracking] UPSERT error:', error);
-        return res.status(500).json({ error: 'Failed to save tracking record' });
+        console.error('[/api/tracking] Save error:', error);
+        return res.status(500).json({ error: error.message || 'Failed to save tracking record' });
       }
 
       return res.status(200).json(data);

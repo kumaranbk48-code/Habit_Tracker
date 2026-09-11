@@ -194,16 +194,16 @@ export default function LearningHubDashboard() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setOnboardingOpen(true)}
-            className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 px-3.5 py-2.5 rounded-2xl transition-colors border border-gray-200 dark:border-gray-700"
+            className="flex items-center gap-1.5 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-3.5 py-2.5 rounded-2xl transition-all shadow-md shadow-[#3d7a75]/20"
           >
-            <HelpCircle size={15} /> How it Works
+            <HelpCircle size={15} className="text-white" /> How it Works
           </button>
           <button
             onClick={() => {
               setOnboardingOpen(false);
               setCreateModalOpen(true);
             }}
-            className="flex items-center gap-1.5 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] px-4 py-2.5 rounded-2xl shadow-md shadow-[#3d7a75]/20 transition-all"
+            className="flex items-center gap-1.5 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-4 py-2.5 rounded-2xl shadow-md shadow-[#3d7a75]/20 transition-all"
           >
             <Plus size={16} /> New Journey
           </button>
@@ -229,7 +229,7 @@ export default function LearningHubDashboard() {
           <div className="flex flex-wrap justify-center gap-3">
             <button
               onClick={() => setCreateModalOpen(true)}
-              className="flex items-center gap-2 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] px-6 py-3 rounded-2xl shadow-md transition-all"
+              className="flex items-center gap-2 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-6 py-3 rounded-2xl shadow-md transition-all"
             >
               <Plus size={16} /> Create Your First Journey
             </button>

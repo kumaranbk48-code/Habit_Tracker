@@ -271,7 +271,7 @@ export default function JourneyTimelineView({
                     />
                     <button
                       type="submit"
-                      className="px-3 py-1.5 bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] text-xs font-semibold rounded-lg flex items-center gap-1 transition-all cursor-pointer"
+                      className="px-3 py-1.5 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white text-xs font-semibold rounded-lg flex items-center gap-1 transition-all cursor-pointer"
                     >
                       <Plus size={12} /> Add
                     </button>

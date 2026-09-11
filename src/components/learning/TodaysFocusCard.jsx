@@ -50,7 +50,7 @@ export default function TodaysFocusCard({ focusItems = [], onCompleteTask, onSki
               <div className="flex items-center gap-2 flex-shrink-0">
                 <button
                   onClick={() => handleComplete(item.id)}
-                  className="flex items-center gap-1.5 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] px-3.5 py-1.5 rounded-xl shadow-sm transition-all"
+                  className="flex items-center gap-1.5 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-3.5 py-1.5 rounded-xl shadow-sm transition-all"
                 >
                   <CheckCircle size={14} /> Complete
                 </button>

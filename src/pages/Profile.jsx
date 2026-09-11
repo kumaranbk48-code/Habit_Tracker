@@ -187,9 +187,9 @@ export default function Profile() {
         </div>
         <button
           onClick={handleExportData}
-          className="hidden sm:inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-xs"
+          className="hidden sm:inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white transition-all shadow-md shadow-[#3d7a75]/20 active:scale-95"
         >
-          <Download size={14} className="text-[#3d7a75] dark:text-[#5fae9e]" /> Export Data JSON
+          <Download size={14} className="text-white" /> Export Data JSON
         </button>
       </div>
 

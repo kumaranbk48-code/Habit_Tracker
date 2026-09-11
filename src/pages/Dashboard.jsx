@@ -618,7 +618,7 @@ export default function Dashboard() {
       )}
 
       {/* Heatmap */}
-      <HabitHeatmap data={heatmap.data} totalHabits={heatmap.totalHabits} />
+      <HabitHeatmap data={heatmap.data} totalHabits={heatmap.totalHabits || habitsList.length || 0} />
 
       {/* Completed / Pending list modal (from clicking a stat card) */}
       <Modal

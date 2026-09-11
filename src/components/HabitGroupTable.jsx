@@ -100,12 +100,12 @@ export default function HabitGroupTable({
                           onClick={() => onToggle(habit.id)}
                           className={`flex items-center justify-center gap-1.5 min-h-[44px] px-3.5 py-2 rounded-xl text-sm font-medium transition-all duration-200 active:scale-95 ${
                             done
-                              ? 'bg-[#e3f3ee] dark:bg-[#1c3a32] text-[#2f6b5c] dark:text-[#7fd1b9] shadow-sm font-semibold'
-                              : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                              ? 'bg-[#3d7a75] text-white shadow-sm font-semibold'
+                              : 'bg-[#3d7a75]/15 hover:bg-[#3d7a75] text-[#3d7a75] hover:text-white dark:bg-[#3d7a75]/25 dark:text-[#7fd1b9] dark:hover:text-white dark:hover:bg-[#3d7a75]'
                           }`}
                         >
-                          {done ? <Check size={16} className="text-[#2f6b5c] dark:text-[#7fd1b9]" /> : <Calendar size={16} />}
-                          {done ? 'Done ✓' : 'Mark'}
+                          {done ? <Check size={16} className="text-white" /> : <Calendar size={16} className="text-current" />}
+                          {done ? 'Done ✓' : 'Mark Done'}
                         </button>
                       )}
                     </td>

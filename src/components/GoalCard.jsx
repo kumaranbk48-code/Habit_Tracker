@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Pencil, Trash2, Target, Plus, Minus, Check, X, TrendingUp, TrendingDown,
-  Calendar, Layers, Activity, Flame, AlertCircle, ShieldAlert, CheckCircle2, Undo2
+  Calendar, Layers, Activity, Flame, AlertCircle, ShieldAlert, CheckCircle2, Undo2,
+  Bell
 } from 'lucide-react';
 
 const statusColors = {
@@ -39,6 +41,7 @@ export default function GoalCard({
   const [adding, setAdding] = useState(false);
   const [logValue, setLogValue] = useState('');
   const [showLogInput, setShowLogInput] = useState(false);
+  const navigate = useNavigate();
 
   const goalType = goal.goal_type || 'Target';
   const IconComponent = goalTypeIcons[goalType] || Target;
@@ -143,6 +146,13 @@ export default function GoalCard({
         </div>
 
         <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={() => navigate('/reminders', { state: { openAdd: true, prefillType: 'goal', prefillId: goal.id } })}
+            className="p-1.5 text-slate-400 hover:text-[#3d7a75] dark:hover:text-[#5fae9e] hover:bg-[#eaf4f2] dark:hover:bg-[#1c3733] rounded-lg transition-colors"
+            title="Set Deadline or Check-in Reminder"
+          >
+            <Bell size={15} />
+          </button>
           <button
             onClick={() => onEdit(goal)}
             className="p-1.5 text-slate-400 hover:text-[#3d7a75] dark:hover:text-[#5fae9e] hover:bg-[#eaf4f2] dark:hover:bg-[#1c3733] rounded-lg transition-colors"

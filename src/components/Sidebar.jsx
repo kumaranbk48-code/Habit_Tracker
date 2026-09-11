@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import XPLevelBar from './XPLevelBar';
 import ThemeToggle from './ThemeToggle';
+import NotificationCenter from './NotificationCenter';
 import { calculateXP } from '../hooks/useGamification';
 
 const NAV = [
@@ -72,23 +73,23 @@ export default function Sidebar() {
       className={({ isActive }) =>
         `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 group ${
           isActive
-            ? 'bg-[#3d7a75] text-white dark:bg-[#5fae9e] dark:text-[#0e2320] shadow-sm'
+            ? 'bg-[#3d7a75] text-white shadow-sm'
             : 'text-[#4b5563] dark:text-[#cbd5e1] hover:bg-[#eef2f4] dark:hover:bg-[#222b33] hover:text-[#1e293b] dark:hover:text-[#f1f5f9]'
         }`
       }
     >
       {({ isActive }) => (
         <>
-          <item.icon size={18} className={isActive ? 'text-white dark:text-[#0e2320]' : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300'} />
+          <item.icon size={18} className={isActive ? 'text-white' : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300'} />
           <span className="flex-1">{item.label}</span>
           {item.label === 'My Habits' && streak > 0 && (
             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-              isActive ? 'bg-white/20 text-white dark:bg-[#0e2320]/20 dark:text-[#0e2320]' : 'bg-[#fbeedc] text-[#a9660f] dark:bg-[#3a2c14] dark:text-[#dcb579]'
+              isActive ? 'bg-white/20 text-white' : 'bg-[#fbeedc] text-[#a9660f] dark:bg-[#3a2c14] dark:text-[#dcb579]'
             }`}>
               🔥{streak}
             </span>
           )}
-          {isActive && <ChevronRight size={14} className="text-white/70 dark:text-[#0e2320]/70 ml-auto" />}
+          {isActive && <ChevronRight size={14} className="text-white/70 ml-auto" />}
         </>
       )}
     </NavLink>
@@ -105,8 +106,9 @@ export default function Sidebar() {
           <div className="font-bold text-gray-900 dark:text-white text-sm leading-tight">HabitTracker</div>
           <div className="text-[10px] text-gray-400 dark:text-gray-400 font-medium">Build Better Habits</div>
         </div>
-        {/* Dark mode toggle — compact icon, desktop only */}
-        <div className="ml-auto hidden md:block">
+        {/* Desktop top controls: Notification Center & Dark mode toggle */}
+        <div className="ml-auto hidden md:flex items-center gap-1">
+          <NotificationCenter />
           <ThemeToggle compact />
         </div>
       </div>
@@ -167,9 +169,16 @@ export default function Sidebar() {
       <button
         onClick={() => setOpen(true)}
         className="md:hidden fixed top-4 left-4 z-40 w-10 h-10 bg-white dark:bg-[#1a2129] rounded-xl shadow-md border border-[#e2e8ec] dark:border-[#2a343d] flex items-center justify-center text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
+        aria-label="Open menu"
       >
         <Menu size={20} />
       </button>
+
+      {/* Mobile top-right quick controls */}
+      <div className="md:hidden fixed top-4 right-4 z-40 flex items-center gap-1 bg-white/90 dark:bg-[#1a2129]/90 backdrop-blur-sm px-1.5 py-1 rounded-xl shadow-md border border-[#e2e8ec] dark:border-[#2a343d]">
+        <NotificationCenter />
+        <ThemeToggle compact />
+      </div>
 
       {open && (
         <div
@@ -188,7 +197,7 @@ export default function Sidebar() {
         <SidebarContent />
       </div>
 
-      <aside className="hidden md:flex fixed top-0 left-0 h-full w-64 bg-white dark:bg-[#14181c] border-r border-[#e2e8ec] dark:border-[#2a343d] flex-col shadow-sm">
+      <aside className="hidden md:flex fixed top-0 left-0 h-full w-64 bg-white dark:bg-[#14181c] border-r border-[#e2e8ec] dark:border-[#2a343d] flex-col shadow-sm z-30">
         <SidebarContent />
       </aside>
     </>

@@ -83,10 +83,17 @@ CREATE TABLE IF NOT EXISTS goal_milestones (
 CREATE INDEX IF NOT EXISTS idx_goal_milestones_user_goal ON goal_milestones(user_id, goal_id);
 
 -- Reminders Table
+-- Reminders Table (Polymorphic: Habits, Goals, Learning Roadmaps)
 CREATE TABLE IF NOT EXISTS reminders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL,
-  habit_id UUID NOT NULL REFERENCES habits(id) ON DELETE CASCADE,
+  target_type TEXT NOT NULL DEFAULT 'habit',
+  habit_id UUID REFERENCES habits(id) ON DELETE CASCADE,
+  goal_id UUID REFERENCES goals(id) ON DELETE CASCADE,
+  journey_id UUID REFERENCES learning_journeys(id) ON DELETE CASCADE,
+  topic_id UUID REFERENCES learning_topics(id) ON DELETE CASCADE,
+  reminder_mode TEXT NOT NULL DEFAULT 'scheduled',
+  days_before_deadline INTEGER DEFAULT 0,
   reminder_time TEXT NOT NULL,
   notification_status TEXT DEFAULT 'Active',
   alerts TEXT[],
@@ -94,9 +101,21 @@ CREATE TABLE IF NOT EXISTS reminders (
   routine_window TEXT DEFAULT 'Morning',
   days_of_week TEXT[],
   created_at TIMESTAMPTZ DEFAULT now(),
-  CONSTRAINT check_reminder_time_format CHECK (reminder_time ~ '^([01]?[0-9]|2[0-3]):[0-5][0-9]$')
+  CONSTRAINT check_reminder_time_format CHECK (reminder_time ~ '^([01]?[0-9]|2[0-3]):[0-5][0-9]$'),
+  CONSTRAINT check_reminder_target_type CHECK (target_type IN ('habit', 'goal', 'learning_journey', 'learning_topic')),
+  CONSTRAINT check_reminder_mode CHECK (reminder_mode IN ('scheduled', 'deadline_proximity', 'smart_nudge')),
+  CONSTRAINT check_reminder_target CHECK (
+    (target_type = 'habit' AND habit_id IS NOT NULL) OR
+    (target_type = 'goal' AND goal_id IS NOT NULL) OR
+    (target_type = 'learning_journey' AND journey_id IS NOT NULL) OR
+    (target_type = 'learning_topic' AND topic_id IS NOT NULL)
+  )
 );
 CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id);
+CREATE INDEX IF NOT EXISTS idx_reminders_target ON reminders(user_id, target_type);
+CREATE INDEX IF NOT EXISTS idx_reminders_goal ON reminders(goal_id);
+CREATE INDEX IF NOT EXISTS idx_reminders_journey ON reminders(journey_id);
+CREATE INDEX IF NOT EXISTS idx_reminders_topic ON reminders(topic_id);
 
 -- User Achievements Table
 CREATE TABLE IF NOT EXISTS user_achievements (

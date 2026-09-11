@@ -173,7 +173,7 @@ export default function CustomTimePicker({
                   }}
                   className={`py-1 px-1 text-[10px] font-semibold rounded-lg transition-colors text-center ${
                     isActive
-                      ? 'bg-[#3d7a75] text-white dark:bg-[#5fae9e] dark:text-[#0e2320]'
+                      ? 'bg-[#3d7a75] text-white'
                       : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-[#e2f0ef] hover:text-[#2c6560] dark:hover:bg-[#14302e] dark:hover:text-[#7fd1b9]'
                   }`}
                 >
@@ -196,7 +196,7 @@ export default function CustomTimePicker({
                       onClick={() => handleSelectHour(h)}
                       className={`py-1 rounded-md text-xs cursor-pointer transition-colors ${
                         isSel
-                          ? 'bg-[#3d7a75] text-white font-bold dark:bg-[#5fae9e] dark:text-[#0e2320]'
+                          ? 'bg-[#3d7a75] text-white font-bold'
                           : 'text-slate-700 dark:text-slate-300 hover:bg-[#e2f0ef] hover:text-[#2c6560] dark:hover:bg-[#14302e] dark:hover:text-[#7fd1b9]'
                       }`}
                     >
@@ -218,7 +218,7 @@ export default function CustomTimePicker({
                       onClick={() => handleSelectMinute(m)}
                       className={`py-1 rounded-md text-xs cursor-pointer transition-colors ${
                         isSel
-                          ? 'bg-[#3d7a75] text-white font-bold dark:bg-[#5fae9e] dark:text-[#0e2320]'
+                          ? 'bg-[#3d7a75] text-white font-bold'
                           : 'text-slate-700 dark:text-slate-300 hover:bg-[#e2f0ef] hover:text-[#2c6560] dark:hover:bg-[#14302e] dark:hover:text-[#7fd1b9]'
                       }`}
                     >
@@ -235,7 +235,7 @@ export default function CustomTimePicker({
             <button
               type="button"
               onClick={() => setIsOpen(false)}
-              className="px-3 py-1 bg-[#3d7a75] hover:bg-[#2f5f5b] dark:bg-[#5fae9e] dark:hover:bg-[#4c9484] text-white dark:text-[#0e2320] text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+              className="px-3 py-1 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
             >
               Done
             </button>
