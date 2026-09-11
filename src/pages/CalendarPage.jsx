@@ -76,8 +76,23 @@ export default function CalendarPage() {
   // Toggle single cell completion (Today only)
   const handleToggleHabitDate = async (habit, completionDate) => {
     if (completionDate !== todayStr) return;
+    const prevLogs = [...trackingLogs];
     const existing = trackingLogs.find(t => t.habit_id === habit.id && t.completion_date === completionDate);
     const newStatus = existing ? !existing.status : true;
+
+    // Optimistic instant update
+    let nextLogs;
+    if (existing) {
+      nextLogs = trackingLogs.map(t =>
+        t.habit_id === habit.id && t.completion_date === completionDate
+          ? { ...t, status: newStatus }
+          : t
+      );
+    } else {
+      nextLogs = [...trackingLogs, { habit_id: habit.id, completion_date: completionDate, status: newStatus }];
+    }
+    setTrackingLogs(nextLogs);
+    if (newStatus) fireSmall();
 
     try {
       const res = await fetch('/api/tracking', {
@@ -87,13 +102,14 @@ export default function CalendarPage() {
       });
 
       if (res.ok) {
-        if (newStatus) fireSmall();
-        fetchData();
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
       } else {
-        setToast({ message: 'Failed to update habit on date.', type: 'error' });
+        setTrackingLogs(prevLogs);
+        setToast({ message: 'Failed to update habit on date. Reverted.', type: 'error' });
       }
     } catch {
-      setToast({ message: 'Network error.', type: 'error' });
+      setTrackingLogs(prevLogs);
+      setToast({ message: 'Network connection error.', type: 'error' });
     }
   };
 

@@ -1,19 +1,22 @@
-// Called by external cron (e.g. cron-job.org every minute, free plan) or manually.
-// Checks reminders whose time matches the current minute and fires push notifications.
 import webPush from 'web-push';
 import supabase from './db-client.js';
+import { applyCors } from './cors.js';
 
-webPush.setVapidDetails(
-  process.env.VAPID_EMAIL,
-  process.env.VITE_VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY
-);
+if (process.env.VAPID_EMAIL && process.env.VITE_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+  webPush.setVapidDetails(
+    process.env.VAPID_EMAIL,
+    process.env.VITE_VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  );
+}
 
 export default async function handler(req, res) {
-  // Secure with a secret so random people can't spam your users
+  if (applyCors(req, res)) return;
+
+  // Secure with a secret so unauthorized callers cannot trigger mass push notifications
   const secret = req.headers['x-cron-secret'] || req.query.secret;
-  if (secret !== process.env.CRON_SECRET && process.env.CRON_SECRET) {
-    return res.status(401).json({ error: 'Forbidden' });
+  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized — invalid or missing cron secret' });
   }
 
   try {
@@ -25,14 +28,31 @@ export default async function handler(req, res) {
     // Find all active reminders matching current time
     const { data: reminders, error: remErr } = await supabase
       .from('reminders')
-      .select('*, habits(habit_name), users:user_id(id)')
+      .select('*, habits(habit_name)')
       .eq('notification_status', 'Active')
       .eq('reminder_time', currentTime);
 
-    if (remErr) throw remErr;
+    if (remErr) {
+      console.error('[/api/push-send] reminders query error:', remErr);
+      return res.status(500).json({ error: 'Failed to retrieve active reminders' });
+    }
+
     if (!reminders?.length) return res.status(200).json({ sent: 0 });
 
-    const userIds = [...new Set(reminders.map(r => r.user_id))];
+    // Validate days_of_week for the current day
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const currentDay = dayNames[now.getUTCDay()];
+
+    const activeReminders = reminders.filter(r => {
+      if (!r.days_of_week || !Array.isArray(r.days_of_week) || r.days_of_week.length === 0) {
+        return true;
+      }
+      return r.days_of_week.includes(currentDay);
+    });
+
+    if (!activeReminders.length) return res.status(200).json({ sent: 0, dayFiltered: true });
+
+    const userIds = [...new Set(activeReminders.map(r => r.user_id))];
 
     // Get push subscriptions for these users
     const { data: subs, error: subErr } = await supabase
@@ -40,7 +60,10 @@ export default async function handler(req, res) {
       .select('*')
       .in('user_id', userIds);
 
-    if (subErr) throw subErr;
+    if (subErr) {
+      console.error('[/api/push-send] subscriptions query error:', subErr);
+      return res.status(500).json({ error: 'Failed to retrieve push subscriptions' });
+    }
 
     const subsByUser = {};
     for (const s of subs || []) {
@@ -66,7 +89,6 @@ export default async function handler(req, res) {
           sent++;
         } catch (err) {
           if (err.statusCode === 410 || err.statusCode === 404) {
-            // Subscription is gone — mark for cleanup
             stale.push(sub.endpoint);
           } else {
             console.error('[push-send] webPush error:', err.message);
@@ -82,7 +104,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ sent, staleCleaned: stale.length });
   } catch (err) {
-    console.error('[/api/push-send] error:', err);
-    return res.status(500).json({ error: err.message });
+    console.error('[/api/push-send] unexpected error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }

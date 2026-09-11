@@ -3,8 +3,18 @@
 // Uses Resend free tier (3,000 emails/month — more than enough).
 import { Resend } from 'resend';
 import supabase from './db-client.js';
+import { applyCors } from './cors.js';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
+
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
 function getDateDaysAgo(days) {
   const d = new Date();
@@ -14,6 +24,7 @@ function getDateDaysAgo(days) {
 
 // Beautiful HTML email template
 function buildEmailHtml({ displayName, streak, longestStreak, completionsThisWeek, totalHabits, completedGoals, totalGoals, level, xp }) {
+  const safeName = escapeHtml(displayName);
   return `
 <!DOCTYPE html>
 <html>
@@ -25,7 +36,7 @@ function buildEmailHtml({ displayName, streak, longestStreak, completionsThisWee
     <div style="background:linear-gradient(135deg,#2f5378,#3d7a75);padding:36px 32px 28px;">
       <div style="font-size:13px;font-weight:700;color:#cde3e1;letter-spacing:1px;margin-bottom:8px;">HABITTRACKER</div>
       <div style="font-size:26px;font-weight:800;color:#fff;margin-bottom:4px;">Weekly Digest 📊</div>
-      <div style="font-size:14px;color:#e2f0ef;">Here's how you did this week, ${displayName}!</div>
+      <div style="font-size:14px;color:#e2f0ef;">Here's how you did this week, ${safeName}!</div>
     </div>
 
     <!-- Streak hero -->
@@ -96,15 +107,12 @@ function buildEmailHtml({ displayName, streak, longestStreak, completionsThisWee
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-cron-secret');
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (applyCors(req, res)) return;
 
   // Secure the endpoint
   const secret = req.headers['x-cron-secret'] || req.query.secret;
-  if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
-    return res.status(401).json({ error: 'Forbidden' });
+  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized — invalid or missing cron secret' });
   }
 
   if (!process.env.RESEND_API_KEY) {

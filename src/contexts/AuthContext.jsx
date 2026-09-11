@@ -6,11 +6,32 @@ import supabase from '../lib/supabase';
 // we sign the user out client-side to trigger onAuthStateChange and redirect them to the login page.
 const originalFetch = window.fetch;
 window.fetch = async (...args) => {
+  let [resource, config] = args;
+  const url = typeof resource === 'string' ? resource : resource?.url || '';
+
+  if (typeof url === 'string' && url.includes('/api/')) {
+    config = config ? { ...config } : {};
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+    if (config.headers instanceof Headers) {
+      if (!config.headers.has('x-timezone')) config.headers.set('x-timezone', tz);
+    } else if (Array.isArray(config.headers)) {
+      if (!config.headers.some(([k]) => k.toLowerCase() === 'x-timezone')) {
+        config.headers.push(['x-timezone', tz]);
+      }
+    } else {
+      config.headers = {
+        'x-timezone': tz,
+        ...(config.headers || {}),
+      };
+    }
+    args[1] = config;
+  }
+
   const response = await originalFetch(...args);
   if (response.status === 401) {
     try {
-      const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
-      const headers = args[1]?.headers;
+      const headers = config?.headers;
       let hasAuth = false;
       if (headers) {
         if (typeof headers.get === 'function') {
@@ -20,14 +41,7 @@ window.fetch = async (...args) => {
         }
       }
       if (hasAuth && url.includes('/api/')) {
-        console.warn('[Auth] Backend returned 401 for', url, '— clearing stale session token...');
-        // Clear local storage items related to auth
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && (key.includes('sb-') || key.includes('supabase') || key.includes('auth'))) {
-            localStorage.removeItem(key);
-          }
-        }
+        console.warn('[Auth] Backend returned 401 for', url, '— signing out...');
         supabase.auth.signOut().catch(() => {});
       }
     } catch (e) {

@@ -1,27 +1,30 @@
 import supabase from './db-client.js';
 import { verifyUserToken } from './auth-helper.js';
+import { applyCors } from './cors.js';
+import { getUserTimeZone, getDateInTimeZone, getDateDaysAgoInTimeZone } from './date-utils.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (applyCors(req, res)) return;
 
   const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  if (!token) return res.status(401).json({ error: 'Unauthorized — no token provided' });
 
   const { user, error: userErr } = await verifyUserToken(token);
-  if (userErr || !user) return res.status(401).json({ error: 'Invalid token' });
+  if (userErr || !user) return res.status(401).json({ error: 'Invalid or expired token' });
 
   try {
-    // Last 365 days
-    const today = new Date().toISOString().split('T')[0];
-    const yearAgo = new Date();
-    yearAgo.setFullYear(yearAgo.getFullYear() - 1);
-    const fromDate = yearAgo.toISOString().split('T')[0];
+    const timeZone = getUserTimeZone(req, user);
+    const today = getDateInTimeZone(new Date(), timeZone);
+    const fromDate = getDateDaysAgoInTimeZone(365, timeZone);
 
-    const { data: habits } = await supabase
+    const { data: habits, error: hErr } = await supabase
       .from('habits').select('id').eq('user_id', user.id);
+
+    if (hErr) {
+      console.error('[/api/heatmap] habits error:', hErr);
+      return res.status(500).json({ error: 'Failed to retrieve habits' });
+    }
+
     const totalHabits = habits?.length || 0;
     const habitIds = habits?.map(h => h.id) || [];
 
@@ -38,7 +41,10 @@ export default async function handler(req, res) {
       .gte('completion_date', fromDate)
       .lte('completion_date', today);
 
-    if (tErr) throw tErr;
+    if (tErr) {
+      console.error('[/api/heatmap] tracking error:', tErr);
+      return res.status(500).json({ error: 'Failed to retrieve heatmap tracking' });
+    }
 
     // Aggregate by date
     const byDate = {};
@@ -51,7 +57,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ data: byDate, totalHabits });
   } catch (err) {
-    console.error('[/api/heatmap] error:', err);
-    return res.status(500).json({ error: err.message });
+    console.error('[/api/heatmap] unexpected error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }

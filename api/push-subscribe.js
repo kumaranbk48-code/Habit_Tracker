@@ -1,16 +1,15 @@
 import supabase from './db-client.js';
+import { verifyUserToken } from './auth-helper.js';
+import { applyCors } from './cors.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (applyCors(req, res)) return;
 
   const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  if (!token) return res.status(401).json({ error: 'Unauthorized — no token provided' });
 
-  const { data: { user }, error: userErr } = await supabase.auth.getUser(token);
-  if (userErr || !user) return res.status(401).json({ error: 'Invalid token' });
+  const { user, error: userErr } = await verifyUserToken(token);
+  if (userErr || !user) return res.status(401).json({ error: 'Invalid or expired token' });
 
   try {
     if (req.method === 'POST') {
@@ -26,7 +25,12 @@ export default async function handler(req, res) {
           { user_id: user.id, endpoint: subscription.endpoint, subscription },
           { onConflict: 'endpoint' }
         );
-      if (error) throw error;
+
+      if (error) {
+        console.error('[/api/push-subscribe] POST error:', error);
+        return res.status(500).json({ error: 'Failed to save push subscription' });
+      }
+
       return res.status(200).json({ ok: true });
     }
 
@@ -39,13 +43,18 @@ export default async function handler(req, res) {
         .delete()
         .eq('user_id', user.id)
         .eq('endpoint', endpoint);
-      if (error) throw error;
+
+      if (error) {
+        console.error('[/api/push-subscribe] DELETE error:', error);
+        return res.status(500).json({ error: 'Failed to remove push subscription' });
+      }
+
       return res.status(200).json({ ok: true });
     }
 
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (err) {
-    console.error('[/api/push-subscribe] error:', err);
-    return res.status(500).json({ error: err.message || 'Internal server error' });
+    console.error('[/api/push-subscribe] unexpected error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }

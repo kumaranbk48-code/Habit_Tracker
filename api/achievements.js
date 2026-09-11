@@ -1,17 +1,15 @@
 import supabase from './db-client.js';
 import { verifyUserToken } from './auth-helper.js';
+import { applyCors } from './cors.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (applyCors(req, res)) return;
 
   const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  if (!token) return res.status(401).json({ error: 'Unauthorized — no token provided' });
 
   const { user, error: userErr } = await verifyUserToken(token);
-  if (userErr || !user) return res.status(401).json({ error: 'Invalid token' });
+  if (userErr || !user) return res.status(401).json({ error: 'Invalid or expired token' });
 
   try {
     if (req.method === 'GET') {
@@ -20,7 +18,12 @@ export default async function handler(req, res) {
         .select('badge_id, earned_at')
         .eq('user_id', user.id)
         .order('earned_at', { ascending: true });
-      if (error) throw error;
+
+      if (error) {
+        console.error('[/api/achievements] GET error:', error);
+        return res.status(500).json({ error: 'Failed to retrieve achievements' });
+      }
+
       return res.status(200).json(data ?? []);
     }
 
@@ -35,13 +38,18 @@ export default async function handler(req, res) {
         .from('user_achievements')
         .upsert(rows, { onConflict: 'user_id,badge_id', ignoreDuplicates: true })
         .select('badge_id, earned_at');
-      if (error) throw error;
+
+      if (error) {
+        console.error('[/api/achievements] POST error:', error);
+        return res.status(500).json({ error: 'Failed to save achievements' });
+      }
+
       return res.status(200).json(data ?? []);
     }
 
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (err) {
-    console.error('[/api/achievements] error:', err);
-    return res.status(500).json({ error: err.message || 'Internal server error' });
+    console.error('[/api/achievements] unexpected error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }

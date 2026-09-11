@@ -231,7 +231,7 @@ export default function Login() {
                 <div className="relative">
                   <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
                   <input
-                    type="text"
+                    type="email"
                     value={email}
                     onBlur={handleEmailBlur}
                     onChange={(e) => {

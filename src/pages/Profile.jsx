@@ -24,6 +24,10 @@ export default function Profile() {
   const [fullName, setFullName] = useState(initialName);
   const [avatarUrl, setAvatarUrl] = useState(initialAvatar);
   const [nameSuccess, setNameSuccess] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [deleteModal, setDeleteModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (user?.user_metadata) {
@@ -105,29 +109,55 @@ export default function Profile() {
     }
   };
 
-  // Handle Export Habit Data
+  // Handle Complete Data Export
   const handleExportData = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
+    setExporting(true);
     try {
-      const res = await fetch('/api/dashboard', {
+      const res = await fetch('/api/account', {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
+      if (!res.ok) throw new Error('Export request failed');
       const data = await res.json();
-      const exportObject = {
-        exportDate: new Date().toISOString(),
-        user: { email: user?.email, id: user?.id },
-        stats: data,
-      };
-      const blob = new Blob([JSON.stringify(exportObject, null, 2)], { type: 'application/json' });
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `HabitTracker_Export_${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `HabitTracker_Full_Archive_${new Date().toISOString().split('T')[0]}.json`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      alert('Failed to export data');
+      alert('Failed to export data: ' + e.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Handle Permanent Account Deletion
+  const handleDeleteAccount = async (e) => {
+    e.preventDefault();
+    if (deleteConfirmText.trim() !== 'DELETE') {
+      alert('Please type DELETE to confirm account deletion.');
+      return;
+    }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    setDeleting(true);
+    try {
+      const res = await fetch('/api/account', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Deletion failed');
+      }
+      await supabase.auth.signOut();
+      window.location.href = '/login';
+    } catch (e) {
+      alert('Failed to delete account: ' + e.message);
+      setDeleting(false);
     }
   };
 
@@ -304,14 +334,28 @@ export default function Profile() {
 
               <div className="flex items-center justify-between p-3.5 bg-slate-50 dark:bg-slate-700/50 rounded-xl border border-slate-100 dark:border-slate-700">
                 <div>
-                  <h4 className="text-xs font-semibold text-slate-800 dark:text-slate-200">Export Backup Data</h4>
-                  <p className="text-[11px] text-slate-400 dark:text-slate-400">Download complete habit history & stats in JSON format</p>
+                  <h4 className="text-xs font-semibold text-slate-800 dark:text-slate-200">Export Full Archive</h4>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-400">Download complete habit history, goals & learning data (JSON)</p>
                 </div>
                 <button
                   onClick={handleExportData}
+                  disabled={exporting}
                   className="px-3 py-1.5 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 transition-colors"
                 >
-                  Export
+                  {exporting ? 'Exporting...' : 'Export JSON'}
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-3.5 bg-red-50/50 dark:bg-red-950/20 rounded-xl border border-red-100 dark:border-red-900/40">
+                <div>
+                  <h4 className="text-xs font-semibold text-red-700 dark:text-red-400">Delete Account & Data</h4>
+                  <p className="text-[11px] text-red-500/80 dark:text-red-400/70">Permanently erase your user profile and all tracked items</p>
+                </div>
+                <button
+                  onClick={() => { setDeleteConfirmText(''); setDeleteModal(true); }}
+                  className="px-3 py-1.5 text-xs font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-xs"
+                >
+                  Delete
                 </button>
               </div>
             </div>
@@ -398,6 +442,47 @@ export default function Profile() {
               className="px-4 py-2 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white font-semibold text-xs rounded-xl transition-colors shadow-xs"
             >
               {savingName ? 'Saving...' : 'Save Profile'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete Account Confirmation Modal */}
+      <Modal open={deleteModal} onClose={() => !deleting && setDeleteModal(false)} title="Delete Account & All Data">
+        <form onSubmit={handleDeleteAccount} className="space-y-4">
+          <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 rounded-2xl text-xs text-red-700 dark:text-red-300 space-y-2">
+            <p className="font-bold text-sm">Warning: This action is permanent and irreversible!</p>
+            <p>All your habits, streak history, goals, milestones, reminders, and learning journeys will be permanently erased.</p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Type <span className="font-mono font-bold text-red-600">DELETE</span> to confirm:
+            </label>
+            <input
+              required
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="DELETE"
+              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-500 text-slate-900 dark:text-slate-100 font-mono"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={() => setDeleteModal(false)}
+              className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={deleting || deleteConfirmText.trim() !== 'DELETE'}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-semibold text-xs rounded-xl transition-colors shadow-xs"
+            >
+              {deleting ? 'Erasing Account...' : 'Permanently Delete My Account'}
             </button>
           </div>
         </form>

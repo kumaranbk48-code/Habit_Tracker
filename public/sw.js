@@ -1,9 +1,8 @@
 // ─── HabitTracker Service Worker ──────────────────────────────────────────────
 // Handles: offline caching, push notifications, notification click routing
 // Version bump forces browsers to install the updated SW
-const SW_VERSION = 'habittracker-v2';
+const SW_VERSION = 'habittracker-v3';
 const STATIC_CACHE = `${SW_VERSION}-static`;
-const API_CACHE    = `${SW_VERSION}-api`;
 
 // Files to pre-cache for offline use
 const PRECACHE_ASSETS = ['/', '/index.html', '/manifest.json'];
@@ -29,7 +28,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then(keys =>
       Promise.all(
         keys
-          .filter(k => isLocalhost || (k !== STATIC_CACHE && k !== API_CACHE))
+          .filter(k => isLocalhost || k !== STATIC_CACHE)
           .map(k => caches.delete(k))
       )
     ).then(() => self.clients.claim()) // take control of all open tabs
@@ -38,8 +37,9 @@ self.addEventListener('activate', (event) => {
 
 // ── Fetch Strategy ─────────────────────────────────────────────────────────────
 // Localhost: Bypass caching/intercepting to prevent stale assets in development
-// API/Navigation: Network-first → fallback to cache
+// Navigation: Network-first → fallback to cache
 // Static assets: Cache-first → fallback to network
+// API requests: NEVER cached or intercepted — go straight to network
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -52,24 +52,12 @@ self.addEventListener('fetch', (event) => {
   );
   if (isLocalhost) return;
 
-  // Don't intercept non-GET or external requests
+  // Don't intercept non-GET, external requests, or authenticated API calls
   if (request.method !== 'GET') return;
-  if (!url.origin.startsWith(self.location.origin) && !url.pathname.startsWith('/api/')) return;
+  if (url.pathname.startsWith('/api/')) return;
+  if (!url.origin.startsWith(self.location.origin)) return;
 
-  if (url.pathname.startsWith('/api/')) {
-    // Network-first for API
-    event.respondWith(
-      fetch(request)
-        .then(response => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(API_CACHE).then(c => c.put(request, clone));
-          }
-          return response;
-        })
-        .catch(() => caches.match(request))
-    );
-  } else if (request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {
+  if (request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {
     // Network-first for navigation requests (HTML pages) so changes show up immediately when online
     event.respondWith(
       fetch(request)

@@ -192,11 +192,32 @@ export default function Habits() {
   };
 
   const toggleHabit = async (habitId) => {
+    const previousTracking = [...tracking];
     const existing = tracking.find((t) => t.habit_id === habitId);
     const newStatus = existing ? !existing.status : true;
 
     setPoppingHabit(habitId);
     setTimeout(() => setPoppingHabit(null), 400);
+
+    // Instant optimistic update
+    let updatedTracking;
+    if (existing) {
+      updatedTracking = tracking.map((t) => t.habit_id === habitId ? { ...t, status: newStatus } : t);
+    } else {
+      updatedTracking = [...tracking, { habit_id: habitId, completion_date: today, status: newStatus, quantity_completed: 0 }];
+    }
+    setTracking(updatedTracking);
+
+    const completedCount = updatedTracking.filter((t) => t.status === true).length;
+    setPerfectDay(habits.length > 0 && completedCount >= habits.length);
+
+    if (newStatus) {
+      if (habits.length > 0 && completedCount >= habits.length) {
+        firePerfectDay();
+      } else {
+        fireSmall();
+      }
+    }
 
     try {
       const res = await fetch('/api/tracking', {
@@ -205,25 +226,47 @@ export default function Habits() {
         body: JSON.stringify({ habit_id: habitId, completion_date: today, status: newStatus }),
       });
       if (res.ok) {
-        if (newStatus) {
-          const completedCount = tracking.filter((t) => t.status === true && t.habit_id !== habitId).length;
-          if (habits.length > 0 && completedCount + 1 >= habits.length) {
-            firePerfectDay();
-          } else {
-            fireSmall();
-          }
-        }
-        fetchData();
+        const saved = await res.json();
+        setTracking((prev) => prev.map((t) => t.habit_id === habitId ? { ...t, ...saved } : t));
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
       } else {
-        setToast({ message: 'Failed to update habit status.', type: 'error' });
+        setTracking(previousTracking);
+        setToast({ message: 'Could not save habit status. Reverted change.', type: 'error' });
       }
     } catch {
-      setToast({ message: 'Network error.', type: 'error' });
+      setTracking(previousTracking);
+      setToast({ message: 'Network connection error — could not save progress.', type: 'error' });
     }
   };
 
   const handleLogQuantity = async (habitId, amount, reset = false) => {
-    const wasComplete = tracking.find((t) => t.habit_id === habitId)?.status === true;
+    const previousTracking = [...tracking];
+    const habit = habits.find((h) => h.id === habitId);
+    const existing = tracking.find((t) => t.habit_id === habitId);
+    const oldQty = existing?.quantity_completed || 0;
+    const newQty = reset ? 0 : Math.max(0, oldQty + Number(amount));
+    const target = Number(habit?.target_quantity) || 1;
+    const newStatus = newQty >= target;
+
+    // Instant optimistic update
+    let updatedTracking;
+    if (existing) {
+      updatedTracking = tracking.map((t) => t.habit_id === habitId ? { ...t, quantity_completed: newQty, status: newStatus } : t);
+    } else {
+      updatedTracking = [...tracking, { habit_id: habitId, completion_date: today, status: newStatus, quantity_completed: newQty }];
+    }
+    setTracking(updatedTracking);
+
+    const wasComplete = existing?.status === true;
+    if (!wasComplete && newStatus) {
+      const completedCount = updatedTracking.filter((t) => t.status === true).length;
+      if (habits.length > 0 && completedCount >= habits.length) {
+        firePerfectDay();
+      } else {
+        fireSmall();
+      }
+    }
+
     try {
       const res = await fetch('/api/tracking', {
         method: 'POST',
@@ -236,21 +279,15 @@ export default function Habits() {
         }),
       });
       if (res.ok) {
-        const updated = await res.json();
-        if (!wasComplete && updated.status === true) {
-          const completedCount = tracking.filter((t) => t.status === true && t.habit_id !== habitId).length;
-          if (habits.length > 0 && completedCount + 1 >= habits.length) {
-            firePerfectDay();
-          } else {
-            fireSmall();
-          }
-        }
-        fetchData();
+        const saved = await res.json();
+        setTracking((prev) => prev.map((t) => t.habit_id === habitId ? { ...t, ...saved } : t));
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
       } else {
-        const e = await res.json().catch(() => ({}));
-        setToast({ message: e.error || 'Failed to update progress.', type: 'error' });
+        setTracking(previousTracking);
+        setToast({ message: 'Failed to update progress. Reverted.', type: 'error' });
       }
     } catch {
+      setTracking(previousTracking);
       setToast({ message: 'Network error — check your connection.', type: 'error' });
     }
   };
@@ -507,13 +544,13 @@ export default function Habits() {
                       ) : (
                         <button
                           onClick={() => toggleHabit(habit.id)}
-                          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-200 border ${
+                          className={`flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 border active:scale-95 ${
                             done
                               ? 'bg-[#3d7a75] dark:bg-[#5fae9e] border-[#3d7a75] dark:border-[#5fae9e] text-white dark:text-[#0e2320] shadow-md shadow-[#3d7a75]/20'
                               : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
                           }`}
                         >
-                          <Check size={15} className={done ? 'text-white' : 'text-slate-400'} />
+                          <Check size={16} className={done ? 'text-white' : 'text-slate-400'} />
                           {done ? 'Completed ✓' : 'Mark Done'}
                         </button>
                       )}
@@ -521,15 +558,17 @@ export default function Habits() {
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => openEdit(habit)}
-                          className="p-1.5 text-slate-400 hover:text-[#3d7a75] dark:hover:text-[#5fae9e] hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                          className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 text-slate-400 hover:text-[#3d7a75] dark:hover:text-[#5fae9e] hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors"
                           title="Edit Habit"
+                          aria-label={`Edit ${habit.habit_name}`}
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => handleDelete(habit.id)}
-                          className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                          className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors"
                           title="Delete Habit"
+                          aria-label={`Delete ${habit.habit_name}`}
                         >
                           Delete
                         </button>

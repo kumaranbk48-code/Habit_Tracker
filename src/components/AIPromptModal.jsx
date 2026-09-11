@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import Modal from './Modal';
-import { Sparkles, Bot, Plus, Loader2, Check, AlertCircle, RefreshCw, Layers, Calendar, Target, Flame, Lightbulb } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { getAiCoaching } from '../lib/aiClient';
+import { Sparkles, Bot, Plus, Loader2, Check, AlertCircle, RefreshCw, Layers, Calendar, Target, Flame, Lightbulb, Zap } from 'lucide-react';
 
 const STARTER_PROMPTS = [
   { id: 'habit_plan', label: 'Create a habit plan', prompt: 'I want to build a balanced daily habit plan for productivity and health.' },
@@ -11,116 +13,100 @@ const STARTER_PROMPTS = [
 ];
 
 export default function AIPromptModal({ open, onClose, onAddHabits, habits = [], trackingLogs = [] }) {
+  const { session } = useAuth();
   const [promptText, setPromptText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiResult, setAiResult] = useState(null);
   const [errorState, setErrorState] = useState(false);
   const [selectedHabitIndices, setSelectedHabitIndices] = useState([]);
 
-  const runCoachAnalysis = (inputPrompt) => {
-    const text = inputPrompt.trim().toLowerCase();
+  const runCoachAnalysis = async (inputPrompt) => {
+    const text = inputPrompt.trim();
     if (!text) return;
 
     setIsGenerating(true);
     setErrorState(false);
     setAiResult(null);
 
-    setTimeout(() => {
-      try {
-        // Calculate user context metrics if available
-        const totalHabits = habits.length;
-        const totalLogs = trackingLogs.length;
-        const completedLogs = trackingLogs.filter(t => t.status === true).length;
-        const overallRate = totalLogs > 0 ? Math.round((completedLogs / totalLogs) * 100) : null;
+    const totalHabits = habits.length;
+    const totalLogs = trackingLogs.length;
+    const completedLogs = trackingLogs.filter(t => t.status === true).length;
+    const overallRate = totalLogs > 0 ? Math.round((completedLogs / totalLogs) * 100) : 0;
 
-        let result = {
-          insightMessage: '',
-          suggestedHabits: [],
-          routinePlan: null,
-          consistencyInsights: null,
-        };
+    try {
+      // Call backend which securely communicates with Kie AI (GPT-6 Astra)
+      const data = await getAiCoaching(session?.access_token, {
+        habits: habits.map(h => ({ habit_name: h.habit_name, category: h.category })),
+        streak: habits[0]?.streak || 0,
+        completionRate: overallRate,
+        question: text
+      });
 
-        if (text.includes('exercise') || text.includes('workout') || text.includes('fitness')) {
-          result.insightMessage = "Starting with 4 days per week creates a sustainable routine while giving your body recovery days.";
-          result.suggestedHabits = [
-            {
-              habit_name: 'Morning Exercise',
-              target_frequency: '4x per week',
-              time_of_day: 'morning',
-              target_quantity: 30,
-              unit: 'minutes',
-              category: 'Fitness',
-              color: '#10b981',
-              tracking_type: 'quantity',
-              rationale: 'Starting with 4 days per week creates a sustainable routine without burnout.'
-            }
-          ];
-        } else if (text.includes('routine') || text.includes('college') || text.includes('work') || text.includes('dsa')) {
-          result.insightMessage = "Here is a realistic structured routine balancing work/study hours with health and skill growth.";
-          result.routinePlan = [
-            { time: 'Morning (7:00 AM)', habit: 'Exercise / Stretches', tip: 'Boosts energy before study hours' },
-            { time: 'Evening (6:00 PM)', habit: 'DSA Practice & Problem Solving', tip: 'Dedicated 60-min deep work block' },
-            { time: 'Night (10:30 PM)', habit: 'Prepare for Tomorrow & Wind Down', tip: 'Ensures quality sleep and clear morning focus' }
-          ];
-          result.suggestedHabits = [
-            { habit_name: 'Morning Stretches', category: 'Health', target_frequency: 'Daily', time_of_day: 'morning', color: '#10b981', tracking_type: 'boolean', rationale: 'Quick morning energy booster' },
-            { habit_name: 'DSA Practice', category: 'Learning', target_frequency: '5x per week', time_of_day: 'evening', color: '#3d7a75', tracking_type: 'quantity', target_quantity: 60, unit: 'minutes', rationale: 'Consistent skill progression' },
-            { habit_name: 'Wind Down at 10:30 PM', category: 'Health', target_frequency: 'Daily', time_of_day: 'evening', color: '#8b5cf6', tracking_type: 'boolean', rationale: 'Protects 7-8 hrs sleep' }
-          ];
-        } else if (text.includes('health') || text.includes('break') || text.includes('goal')) {
-          result.insightMessage = "Breaking 'Become Healthier' into actionable micro-habits makes execution effortless.";
-          result.suggestedHabits = [
-            { habit_name: '💧 Drink 3L Water', category: 'Health', target_frequency: 'Daily', time_of_day: 'anytime', color: '#06b6d4', tracking_type: 'quantity', target_quantity: 3, unit: 'liters', rationale: 'Hydration improves focus and stamina' },
-            { habit_name: '🏃 Exercise 30 Mins', category: 'Fitness', target_frequency: '4x per week', time_of_day: 'morning', color: '#10b981', tracking_type: 'quantity', target_quantity: 30, unit: 'minutes', rationale: 'Builds cardiovascular health' },
-            { habit_name: '😴 Sleep before 11 PM', category: 'Health', target_frequency: 'Daily', time_of_day: 'evening', color: '#6366f1', tracking_type: 'boolean', rationale: 'Crucial for muscle and mental recovery' },
-            { habit_name: '🥗 Eat Vegetables', category: 'Health', target_frequency: '5x per week', time_of_day: 'afternoon', color: '#059669', tracking_type: 'boolean', rationale: 'Provides essential micronutrients' }
-          ];
-        } else if (text.includes('consistency') || text.includes('streak') || text.includes('miss')) {
-          if (totalHabits > 0 && overallRate !== null) {
-            result.insightMessage = `Based on your tracking history across ${totalHabits} active habit(s), your overall completion rate is ${overallRate}%.`;
-            result.consistencyInsights = [
-              { point: 'Weekend Slump', details: 'Completion drops on weekends due to unstructured free time.' },
-              { point: 'Evening Fatigue', details: 'Habits scheduled for late evening are 2.5x more likely to be missed.' },
-              { point: 'Recommendation', details: 'Shift high-priority habits to morning slots or reduce target duration on busy days.' }
-            ];
-          } else {
-            result.insightMessage = "Here is a consistency breakdown and optimization strategy for your routine.";
-            result.consistencyInsights = [
-              { point: 'Identify Trigger Times', details: 'Habits missed on Mondays are often scheduled too early.' },
-              { point: 'Anchor to Existing Habits', details: 'Attach new habits right after established daily triggers (e.g. after morning coffee).' },
-              { point: 'Action Plan', details: 'Lower initial target volume to maintain momentum during busy weeks.' }
-            ];
-          }
-          result.suggestedHabits = [
-            { habit_name: '10 Min Morning Review', category: 'Productivity', target_frequency: 'Daily', time_of_day: 'morning', color: '#f59e0b', tracking_type: 'quantity', target_quantity: 10, unit: 'minutes', rationale: 'Keeps goals top-of-mind' }
-          ];
-        } else {
-          // General Smart Parser
-          const cleanName = promptText.trim().replace(/i want to|help me|start|build/gi, '').trim();
-          const habitName = cleanName.length > 0 ? cleanName.charAt(0).toUpperCase() + cleanName.slice(1) : 'Daily Mindful Practice';
-          result.insightMessage = `HabitTracker AI Coach recommendation for "${habitName}":`;
-          result.suggestedHabits = [
-            {
-              habit_name: habitName,
-              category: 'Productivity',
-              target_frequency: 'Daily',
-              time_of_day: 'morning',
-              color: '#3d7a75',
-              tracking_type: 'boolean',
-              rationale: 'Small daily steps build lifelong consistency.'
-            }
-          ];
-        }
+      // Transform backend response into component presentation format
+      const suggestedHabits = Array.isArray(data.recommendations) && data.recommendations.length > 0
+        ? data.recommendations.map(r => ({
+            habit_name: r.title,
+            category: 'Productivity',
+            target_frequency: 'Daily',
+            time_of_day: 'morning',
+            color: '#3d7a75',
+            tracking_type: 'boolean',
+            rationale: r.action
+          }))
+        : [];
 
-        setAiResult(result);
-        setSelectedHabitIndices(result.suggestedHabits.map((_, idx) => idx));
-        setIsGenerating(false);
-      } catch (err) {
-        console.error('[AiCoachError]', err);
-        setErrorState(true);
-        setIsGenerating(false);
+      // If no habits recommended, build an initial one from prompt
+      if (suggestedHabits.length === 0) {
+        const cleanName = text.replace(/i want to|help me|start|build/gi, '').trim();
+        const habitName = cleanName.length > 0 ? cleanName.charAt(0).toUpperCase() + cleanName.slice(1) : 'Daily Mindful Practice';
+        suggestedHabits.push({
+          habit_name: habitName,
+          category: 'Productivity',
+          target_frequency: 'Daily',
+          time_of_day: 'morning',
+          color: '#3d7a75',
+          tracking_type: 'boolean',
+          rationale: 'Small daily steps build lifelong consistency.'
+        });
       }
-    }, 600);
+
+      const result = {
+        insightMessage: data.advice || data.message || 'Personalized AI coaching advice generated.',
+        suggestedHabits,
+        source: data.source || 'fallback',
+        model: data.model || 'gpt-6-astra',
+        upstreamStatus: data.upstreamStatus,
+        recommendations: data.recommendations || []
+      };
+
+      setAiResult(result);
+      setSelectedHabitIndices(suggestedHabits.map((_, idx) => idx));
+      setIsGenerating(false);
+    } catch (err) {
+      console.error('[AiCoachError]', err);
+      // Client-side fallback if network to backend failed
+      const cleanName = text.replace(/i want to|help me|start|build/gi, '').trim();
+      const habitName = cleanName.length > 0 ? cleanName.charAt(0).toUpperCase() + cleanName.slice(1) : 'Daily Mindful Practice';
+
+      setAiResult({
+        insightMessage: `Focus on consistency over intensity. Start with a 2-minute daily minimum for "${habitName}" to protect momentum.`,
+        suggestedHabits: [
+          {
+            habit_name: habitName,
+            category: 'Productivity',
+            target_frequency: 'Daily',
+            time_of_day: 'morning',
+            color: '#3d7a75',
+            tracking_type: 'boolean',
+            rationale: 'Consistency over perfection builds lasting habits.'
+          }
+        ],
+        source: 'fallback',
+        model: 'gpt-6-astra'
+      });
+      setSelectedHabitIndices([0]);
+      setIsGenerating(false);
+    }
   };
 
   const handleApplySelected = async () => {
@@ -231,6 +217,24 @@ export default function AIPromptModal({ open, onClose, onAddHabits, habits = [],
         {/* Output Section */}
         {aiResult && (
           <div className="mt-4 pt-4 border-t border-[#e2e8ec] dark:border-[#2a343d] space-y-4">
+            {/* Engine Indicator */}
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[11px] font-semibold flex items-center gap-1.5">
+                {aiResult.source === 'kie-astra' ? (
+                  <span className="text-[#2f6b5c] dark:text-[#7fd1b9] flex items-center gap-1">
+                    <Sparkles size={13} /> Live GPT-6 Astra Response
+                  </span>
+                ) : (
+                  <span className="text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
+                    <Zap size={13} /> Adaptive Behavioral Coach (Kie AI Fallback Active)
+                  </span>
+                )}
+              </span>
+              <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono">
+                model: {aiResult.model || 'gpt-6-astra'}
+              </span>
+            </div>
+
             {/* Rationale & Insight Message */}
             {aiResult.insightMessage && (
               <div className="p-3.5 bg-[#e2f0ef]/50 dark:bg-[#14302e]/40 border border-[#3d7a75]/30 rounded-xl">

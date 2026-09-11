@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
   ListChecks, CheckCircle2, Clock, Flame, Trophy, TrendingUp, AlertCircle, RefreshCw,
@@ -48,7 +49,8 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 export default function Dashboard() {
-  const { session, user } = useAuth();
+  const { session, user, signOut } = useAuth();
+  const navigate = useNavigate();
   const [stats,      setStats]      = useState(null);
   const [heatmap,    setHeatmap]    = useState({ data: {}, totalHabits: 0 });
   const [loading,    setLoading]    = useState(true);
@@ -179,6 +181,59 @@ export default function Dashboard() {
   const toggleHabit = async (habit) => {
     const isDone = todayCompletedIds.has(habit.id);
     const newStatus = !isDone;
+
+    // Snapshot previous state for rollback
+    const prevTracking = [...allTracking];
+    const prevStats = stats ? { ...stats } : null;
+
+    // Optimistic local state update (0ms latency)
+    const existing = allTracking.find(t => t.habit_id === habit.id && t.completion_date === today);
+    let nextTracking;
+    if (existing) {
+      nextTracking = allTracking.map(t =>
+        t.habit_id === habit.id && t.completion_date === today
+          ? { ...t, status: newStatus, quantity_completed: newStatus ? (habit.target_quantity || 1) : 0 }
+          : t
+      );
+    } else {
+      nextTracking = [
+        ...allTracking,
+        {
+          habit_id: habit.id,
+          completion_date: today,
+          status: newStatus,
+          quantity_completed: newStatus ? (habit.target_quantity || 1) : 0,
+        },
+      ];
+    }
+    setAllTracking(nextTracking);
+
+    // Optimistic stats update
+    if (stats) {
+      const delta = newStatus ? 1 : -1;
+      const nextCompleted = Math.max(0, (stats.completedToday || 0) + delta);
+      const total = stats.totalHabits || habitsList.length || 1;
+      setStats({
+        ...stats,
+        completedToday: nextCompleted,
+        currentStreak: newStatus ? Math.max(stats.currentStreak, 1) : stats.currentStreak,
+        completionPercentage: Math.round((nextCompleted / total) * 100),
+      });
+    }
+
+    if (newStatus) {
+      const now = Date.now();
+      if (now - lastCelebrationRef.current > 1500) {
+        lastCelebrationRef.current = now;
+        const currentDoneCount = todayCompletedIds.size;
+        const totalHabitsCount = stats?.totalHabits || habitsList.length;
+        if (totalHabitsCount > 0 && currentDoneCount + 1 >= totalHabitsCount) {
+          firePerfectDay();
+        } else {
+          fireSmall();
+        }
+      }
+    }
     
     const body = {
       habit_id: habit.id,
@@ -189,8 +244,8 @@ export default function Dashboard() {
     if (habit.tracking_type === 'quantity') {
       if (newStatus) {
         body.action = 'add';
-        const currentQty = allTracking.find(t => t.habit_id === habit.id && t.completion_date === today)?.quantity_completed || 0;
-        body.amount = Math.max(0, habit.target_quantity - currentQty);
+        const currentQty = existing?.quantity_completed || 0;
+        body.amount = Math.max(0, (habit.target_quantity || 1) - currentQty);
       } else {
         body.action = 'reset';
       }
@@ -207,25 +262,16 @@ export default function Dashboard() {
       });
       
       if (res.ok) {
-        if (newStatus) {
-          const now = Date.now();
-          if (now - lastCelebrationRef.current > 1500) {
-            lastCelebrationRef.current = now;
-            const currentDoneCount = todayCompletedIds.size;
-            const totalHabitsCount = stats?.totalHabits || habitsList.length;
-            if (totalHabitsCount > 0 && currentDoneCount + 1 >= totalHabitsCount) {
-              firePerfectDay();
-            } else {
-              fireSmall();
-            }
-          }
-        }
-        await fetchAll();
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
       } else {
-        console.error('Failed to toggle habit');
+        // Rollback on server error
+        setAllTracking(prevTracking);
+        setStats(prevStats);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // Rollback on network failure
+      setAllTracking(prevTracking);
+      setStats(prevStats);
     }
   };
 
@@ -252,7 +298,7 @@ export default function Dashboard() {
               className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition-colors">
               <RefreshCw size={14} /> Retry
             </button>
-            <button onClick={() => { supabase.auth.signOut().then(() => navigate('/login')); }}
+            <button onClick={async () => { await signOut?.(); navigate('/login', { replace: true }); }}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors shadow-sm">
               Sign Out & Login
             </button>

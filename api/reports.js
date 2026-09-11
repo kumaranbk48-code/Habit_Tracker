@@ -1,29 +1,10 @@
 import supabase from './db-client.js';
 import { verifyUserToken } from './auth-helper.js';
-
-function getToday() { return new Date().toISOString().split('T')[0]; }
-function getDateDaysAgo(days) {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString().split('T')[0];
-}
-function startOfMonth() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
-}
-function startOfWeek() {
-  const d = new Date();
-  const day = d.getDay();
-  const start = new Date(d);
-  start.setDate(d.getDate() - day);
-  return start.toISOString().split('T')[0];
-}
+import { applyCors } from './cors.js';
+import { getUserTimeZone, getDateInTimeZone } from './date-utils.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (applyCors(req, res)) return;
 
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: 'Unauthorized — no token provided' });
@@ -40,7 +21,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    const today = getToday();
+    const timeZone = getUserTimeZone(req, user);
+    const today = getDateInTimeZone(new Date(), timeZone);
+    const [y, m, d] = today.split('-').map(Number);
+    const monthStart = `${y}-${String(m).padStart(2, '0')}-01`;
+    const nowLocal = new Date(Date.UTC(y, m - 1, d));
+    const dayOfWeek = nowLocal.getUTCDay();
+    const weekStartObj = new Date(Date.UTC(y, m - 1, d - dayOfWeek));
+    const weekStart = getDateInTimeZone(weekStartObj, timeZone);
 
     const { data: habits, error: habitsErr } = await supabase
       .from('habits').select('*').eq('user_id', user_id);
@@ -48,8 +36,8 @@ export default async function handler(req, res) {
     const habitIds = habits?.map(h => h.id) || [];
 
     let fromDate = today;
-    if (type === 'weekly')  fromDate = startOfWeek();
-    if (type === 'monthly') fromDate = startOfMonth();
+    if (type === 'weekly')  fromDate = weekStart;
+    if (type === 'monthly') fromDate = monthStart;
 
     let tracking = [];
     if (habitIds.length > 0) {
@@ -102,7 +90,7 @@ export default async function handler(req, res) {
       completionRate,
     });
   } catch (err) {
-    console.error('[/api/reports] error:', err);
-    return res.status(500).json({ error: err.message || 'Internal server error' });
+    console.error('[/api/reports] unexpected error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }

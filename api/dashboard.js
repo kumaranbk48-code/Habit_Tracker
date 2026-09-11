@@ -1,18 +1,10 @@
 import supabase from './db-client.js';
 import { verifyUserToken } from './auth-helper.js';
-
-function getToday() { return new Date().toISOString().split('T')[0]; }
-function getDateDaysAgo(days) {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString().split('T')[0];
-}
+import { applyCors } from './cors.js';
+import { getUserTimeZone, getDateInTimeZone, getDateDaysAgoInTimeZone } from './date-utils.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (applyCors(req, res)) return;
 
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
@@ -22,7 +14,8 @@ export default async function handler(req, res) {
   const user_id = user.id;
 
   try {
-    const today = getToday();
+    const timeZone = getUserTimeZone(req, user);
+    const today = getDateInTimeZone(new Date(), timeZone);
 
     const { data: habits } = await supabase
       .from('habits').select('id').eq('user_id', user_id);
@@ -51,7 +44,7 @@ export default async function handler(req, res) {
     const dateSet = new Set(allTracking.map(t => t.completion_date));
     let currentStreak = 0;
     for (let i = 0; i < 365; i++) {
-      const d = getDateDaysAgo(i);
+      const d = getDateDaysAgoInTimeZone(i, timeZone);
       if (dateSet.has(d)) {
         currentStreak++;
       } else {
@@ -91,7 +84,7 @@ export default async function handler(req, res) {
     const completedGoals = goals?.filter(g => g.status === 'Completed').length || 0;
 
     // ── Weekly chart data (single query) ─────────────────────────────────
-    const fromDate = getDateDaysAgo(6);
+    const fromDate = getDateDaysAgoInTimeZone(6, timeZone);
     let weeklyMap  = {};
     if (habitIds.length > 0) {
       const { data: weekData } = await supabase
@@ -105,7 +98,7 @@ export default async function handler(req, res) {
     }
     const last7 = [];
     for (let i = 6; i >= 0; i--) {
-      const d = getDateDaysAgo(i);
+      const d = getDateDaysAgoInTimeZone(i, timeZone);
       last7.push({ date: d, completed: weeklyMap[d] || 0, total: totalHabits });
     }
 
@@ -125,7 +118,7 @@ export default async function handler(req, res) {
       perfectDayCount,
     });
   } catch (err) {
-    console.error('[/api/dashboard] error:', err);
-    return res.status(500).json({ error: err.message || 'Internal server error' });
+    console.error('[/api/dashboard] unexpected error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }

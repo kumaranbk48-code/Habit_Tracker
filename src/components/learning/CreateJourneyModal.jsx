@@ -245,11 +245,10 @@ export default function CreateJourneyModal({ isOpen, onClose, onCreate }) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div
                 onClick={() => setForm({ ...form, structure_type: 'simple' })}
-                className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${
-                  form.structure_type === 'simple'
+                className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${form.structure_type === 'simple'
                     ? 'border-[#3d7a75] dark:border-[#5fae9e] bg-[#eaf4f2]/50 dark:bg-[#1c3733]/40 shadow-sm'
                     : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
-                }`}
+                  }`}
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-bold text-sm text-gray-900 dark:text-white">Option A: Simple Structure</div>
@@ -268,11 +267,10 @@ export default function CreateJourneyModal({ isOpen, onClose, onCreate }) {
 
               <div
                 onClick={() => setForm({ ...form, structure_type: 'phases' })}
-                className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${
-                  form.structure_type === 'phases'
+                className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${form.structure_type === 'phases'
                     ? 'border-[#3d7a75] dark:border-[#5fae9e] bg-[#eaf4f2]/50 dark:bg-[#1c3733]/40 shadow-sm'
                     : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
-                }`}
+                  }`}
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-bold text-sm text-gray-900 dark:text-white">Option B: Organized with Phases</div>
