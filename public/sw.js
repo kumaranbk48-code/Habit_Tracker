@@ -101,8 +101,8 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body: payload.body || 'Time to check your habits!',
-    icon: '/icons/icon-192.svg',
-    badge: '/icons/icon-192.svg',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
     tag: payload.tag || 'habit-reminder',
     renotify: true,
     requireInteraction: false,
@@ -197,8 +197,8 @@ self.addEventListener('message', (event) => {
           const bodyText = reminder.custom_text || `Time for: ${reminder.habit_name}!`;
           self.registration.showNotification('🔔 Habit Reminder', {
             body: bodyText,
-            icon: '/icons/icon-192.svg',
-            badge: '/icons/icon-192.svg',
+            icon: '/icons/icon-192.png',
+            badge: '/icons/icon-192.png',
             tag: `local-${reminder.id}-${idx}`,
             vibrate: [200, 100, 200],
             data: { url: '/habits' },
@@ -216,3 +216,28 @@ self.addEventListener('message', (event) => {
     });
   }
 });
+
+// ── Background Sync ───────────────────────────────────────────────────────────
+// Automatically retries queued habit tracking actions when connectivity is restored
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'sync-habit-tracking' || event.tag === 'habit-sync') {
+    event.waitUntil(
+      clients.matchAll().then((clientList) => {
+        clientList.forEach((client) => {
+          client.postMessage({ type: 'TRIGGER_BACKGROUND_SYNC' });
+        });
+      })
+    );
+  }
+});
+
+// ── Periodic Background Sync ──────────────────────────────────────────────────
+// Periodically refreshes daily habit status and updates streaks in background
+self.addEventListener('periodicsync', (event) => {
+  if (event.tag === 'check-daily-habits' || event.tag === 'daily-habit-check') {
+    event.waitUntil(
+      caches.open(STATIC_CACHE).then((cache) => cache.add('/api/dashboard').catch(() => {}))
+    );
+  }
+});
+

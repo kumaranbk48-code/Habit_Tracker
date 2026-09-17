@@ -13,6 +13,23 @@
   "background_color": "#f7f9fa",
   "theme_color": "#3d7a75",
   "categories": ["productivity", "health", "lifestyle"],
+  "prefer_related_applications": false,
+  "handle_links": "preferred",
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "edge_side_panel": {
+    "preferred_width": 420
+  },
+  "share_target": {
+    "action": "/habits",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
   "icons": [
     {
       "src": "/icons/icon-192.png",
@@ -59,15 +76,29 @@
     {
       "name": "Dashboard",
       "short_name": "Dashboard",
-      "description": "View your daily stats",
+      "description": "View daily stats and streak progress",
       "url": "/",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "My Habits",
       "short_name": "Habits",
-      "description": "Track today's habits",
+      "description": "Track and check off today's habits",
       "url": "/habits",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Calendar",
+      "short_name": "Calendar",
+      "description": "View full habit tracking history",
+      "url": "/calendar",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Goals",
+      "short_name": "Goals",
+      "description": "Manage milestones and active targets",
+      "url": "/goals",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]
