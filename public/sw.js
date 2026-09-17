@@ -68,7 +68,7 @@ self.addEventListener('fetch', (event) => {
           }
           return response;
         })
-        .catch(() => caches.match(request))
+        .catch(() => caches.match(request).then(cached => cached || caches.match('/index.html') || caches.match('/')))
     );
   } else {
     // Cache-first for other static assets (JS, CSS, images, etc.)

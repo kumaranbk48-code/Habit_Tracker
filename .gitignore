@@ -34,9 +34,9 @@ dist-ssr
 /playwright-report/
 /blob-report/
 /playwright/.cache/
-/playwright/.auth/
 .playwright-mcp/
 *.png
+!public/**/*.png
 
 # Local Scratch & Runtime Cache
 scratch/
