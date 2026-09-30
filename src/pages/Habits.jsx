@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
 import Toast from '../components/Toast';
 import {
   Plus, Check, Calendar, AlertCircle, PartyPopper, Sun, Sunset, Moon, CalendarDays, CalendarRange,
-  Sparkles, BookOpen, Palette, Clock, Search, LayoutGrid, ListFilter, Play, RotateCcw, Flame
+  Sparkles, BookOpen, Palette, Clock, Search, LayoutGrid, ListFilter, Play, RotateCcw, Flame, Bell
 } from 'lucide-react';
 import { useConfetti } from '../hooks/useConfetti';
 import QuantityTracker from '../components/QuantityTracker';
@@ -30,6 +31,7 @@ const CATEGORY_BADGES = {
 
 export default function Habits() {
   const { session } = useAuth();
+  const navigate = useNavigate();
   const [habits, setHabits] = useState([]);
   const [tracking, setTracking] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -558,6 +560,14 @@ export default function Habits() {
                       )}
 
                       <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => navigate('/reminders', { state: { openAdd: true, prefillType: 'habit', prefillId: habit.id } })}
+                          className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 text-slate-400 hover:text-[#3d7a75] dark:hover:text-[#5fae9e] hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors"
+                          title="Set Reminder"
+                          aria-label={`Set Reminder for ${habit.habit_name}`}
+                        >
+                          <Bell size={16} />
+                        </button>
                         <button
                           onClick={() => openEdit(habit)}
                           className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 text-slate-400 hover:text-[#3d7a75] dark:hover:text-[#5fae9e] hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors"

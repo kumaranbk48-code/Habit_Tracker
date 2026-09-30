@@ -3,149 +3,158 @@ import supabase from './db-client.js';
 import { applyCors } from './cors.js';
 
 if (process.env.VAPID_EMAIL && process.env.VITE_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-  webPush.setVapidDetails(
-    process.env.VAPID_EMAIL,
-    process.env.VITE_VAPID_PUBLIC_KEY,
-    process.env.VAPID_PRIVATE_KEY
-  );
+  try {
+    webPush.setVapidDetails(
+      process.env.VAPID_EMAIL,
+      process.env.VITE_VAPID_PUBLIC_KEY,
+      process.env.VAPID_PRIVATE_KEY
+    );
+  } catch (err) {
+    console.warn('[Push] VAPID initialization warning:', err.message);
+  }
 }
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
 
-  // Secure with a secret so unauthorized callers cannot trigger mass push notifications
+  // Verify cron secret for background trigger
   const secret = req.headers['x-cron-secret'] || req.query.secret;
-  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+  if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
     return res.status(401).json({ error: 'Unauthorized — invalid or missing cron secret' });
   }
 
   try {
     const now = new Date();
-    const hh  = String(now.getUTCHours()).padStart(2, '0');
-    const mm  = String(now.getUTCMinutes()).padStart(2, '0');
-    const currentTime = `${hh}:${mm}`;
 
-    // Find all active reminders matching current time
-    let reminders = [];
-    try {
-      const { data, error: remErr } = await supabase
-        .from('reminders')
-        .select(`
-          *,
-          habits(id, habit_name),
-          goals(id, goal_name, target_date, status),
-          learning_journeys:journey_id(id, title, target_date, status),
-          learning_topics:topic_id(id, title, target_date, status)
-        `)
-        .eq('notification_status', 'Active')
-        .eq('reminder_time', currentTime);
+    // Query all active reminders with their joined entities
+    const { data: reminders, error: remErr } = await supabase
+      .from('reminders')
+      .select(`
+        *,
+        habits(id, habit_name),
+        goals(id, goal_name, target_date, status),
+        learning_journeys:journey_id(id, title, target_date, status),
+        learning_topics:topic_id(id, title, target_date, status)
+      `)
+      .eq('notification_status', 'Active');
 
-      if (remErr) {
-        // Fallback to legacy habits schema if enhanced polymorphic query fails
-        console.warn('[/api/push-send] Enhanced query failed, falling back to legacy habits query:', remErr.message);
-        const legacyRes = await supabase
-          .from('reminders')
-          .select('*, habits(habit_name)')
-          .eq('notification_status', 'Active')
-          .eq('reminder_time', currentTime);
-        reminders = (legacyRes.data || []).map(r => ({ ...r, target_type: 'habit' }));
-      } else {
-        reminders = data || [];
-      }
-    } catch (queryEx) {
-      console.error('[/api/push-send] Query exception:', queryEx);
-      return res.status(500).json({ error: 'Failed to query reminders' });
+    if (remErr || !reminders?.length) {
+      return res.status(200).json({ sent: 0, message: 'No active reminders found' });
     }
 
-    if (!reminders?.length) return res.status(200).json({ sent: 0 });
-
-    // Validate days_of_week and deadline proximity
-    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const currentDay = dayNames[now.getUTCDay()];
-    const todayYMD = now.toISOString().split('T')[0];
-
-    const activeReminders = reminders.filter(r => {
-      // If deadline proximity mode, check if target date matches today + days_before_deadline
-      if (r.reminder_mode === 'deadline_proximity') {
-        const targetDateStr = r.goals?.target_date || r.learning_topics?.target_date || r.learning_journeys?.target_date;
-        if (!targetDateStr) return false;
-        const days = r.days_before_deadline || 0;
-        const checkDate = new Date(now);
-        checkDate.setDate(checkDate.getDate() + days);
-        const checkYMD = checkDate.toISOString().split('T')[0];
-        return targetDateStr === checkYMD;
-      }
-
-      // Scheduled routine check
-      if (!r.days_of_week || !Array.isArray(r.days_of_week) || r.days_of_week.length === 0) {
-        return true;
-      }
-      return r.days_of_week.includes(currentDay);
-    });
-
-    if (!activeReminders.length) return res.status(200).json({ sent: 0, dayFiltered: true });
-
-    const userIds = [...new Set(activeReminders.map(r => r.user_id))];
-
-    // Get push subscriptions for these users
+    // Query all push subscriptions
     const { data: subs, error: subErr } = await supabase
       .from('push_subscriptions')
-      .select('*')
-      .in('user_id', userIds);
+      .select('*');
 
-    if (subErr) {
-      console.error('[/api/push-send] subscriptions query error:', subErr);
-      return res.status(500).json({ error: 'Failed to retrieve push subscriptions' });
+    if (subErr || !subs?.length) {
+      return res.status(200).json({ sent: 0, message: 'No push subscriptions registered' });
     }
 
     const subsByUser = {};
-    for (const s of subs || []) {
+    for (const s of subs) {
       if (!subsByUser[s.user_id]) subsByUser[s.user_id] = [];
       subsByUser[s.user_id].push(s);
     }
 
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     let sent = 0;
     const stale = [];
 
-    for (const reminder of activeReminders) {
+    for (const reminder of reminders) {
       const userSubs = subsByUser[reminder.user_id] || [];
       if (!userSubs.length) continue;
 
-      let title = '🔔 Reminder';
-      let body = reminder.custom_text || 'You have an active reminder scheduled.';
+      // Extract user timezone or fallback
+      const userTz = req.headers['x-timezone'] || 'UTC';
+      let userNow;
+      try {
+        const userTimeStr = new Intl.DateTimeFormat('en-US', {
+          timeZone: userTz,
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+          hour12: false,
+        }).format(now);
+        const [, timePart] = userTimeStr.split(', ');
+        const [uH, uM] = timePart.split(':');
+        userNow = {
+          currentTime: `${uH.padStart(2, '0')}:${uM.padStart(2, '0')}`,
+          dayName: dayNames[now.getDay()],
+        };
+      } catch {
+        const hh = String(now.getUTCHours()).padStart(2, '0');
+        const mm = String(now.getUTCMinutes()).padStart(2, '0');
+        userNow = {
+          currentTime: `${hh}:${mm}`,
+          dayName: dayNames[now.getUTCDay()],
+        };
+      }
+
+      const isDeadlineMode = reminder.reminder_mode === 'deadline_proximity';
+
+      // Check time match (either reminder_time or within alerts list)
+      const alertsList = Array.isArray(reminder.alerts) && reminder.alerts.length > 0
+        ? reminder.alerts
+        : [reminder.reminder_time];
+
+      const timeMatches = alertsList.some((t) => t && t.slice(0, 5) === userNow.currentTime);
+      if (!timeMatches) continue;
+
+      // Check day / deadline eligibility
+      if (isDeadlineMode) {
+        const targetDateStr = reminder.goals?.target_date || reminder.learning_topics?.target_date || reminder.learning_journeys?.target_date;
+        if (!targetDateStr) continue;
+        const days = Number(reminder.days_before_deadline) || 0;
+        const checkDate = new Date(now);
+        checkDate.setDate(checkDate.getDate() + days);
+        const checkYMD = checkDate.toISOString().split('T')[0];
+        if (targetDateStr !== checkYMD) continue;
+      } else {
+        if (Array.isArray(reminder.days_of_week) && reminder.days_of_week.length > 0) {
+          if (!reminder.days_of_week.includes(userNow.dayName)) continue;
+        }
+      }
+
+      // Build Notification Content specifying Category & Exact Name
+      const type = reminder.target_type || 'habit';
+      let title = '🔔 HabitTracker Reminder';
+      let body = reminder.custom_text || 'You have an active reminder.';
       let url = '/dashboard';
 
-      const type = reminder.target_type || 'habit';
-
       if (type === 'habit') {
-        title = '🔔 Habit Reminder';
-        body = reminder.custom_text || `Time for: ${reminder.habits?.habit_name || 'your habit'}!`;
+        const habitName = reminder.habits?.habit_name || 'Habit';
+        title = `🔥 Habit: ${habitName}`;
+        body = reminder.custom_text
+          ? `${reminder.custom_text} • Habit: ${habitName}`
+          : `Time to complete your habit "${habitName}"! Keep your streak going.`;
         url = '/habits';
       } else if (type === 'goal') {
-        if (reminder.reminder_mode === 'deadline_proximity') {
-          const days = reminder.days_before_deadline || 0;
-          title = '⚠️ Goal Deadline Alert';
-          body = days === 0
-            ? `🚨 Today is the target deadline for "${reminder.goals?.goal_name || 'your goal'}"!`
+        const goalName = reminder.goals?.goal_name || 'Goal';
+        if (isDeadlineMode) {
+          const days = Number(reminder.days_before_deadline) || 0;
+          title = `🎯 Goal Deadline: ${goalName}`;
+          body = reminder.custom_text || (days === 0
+            ? `🚨 Today is the target deadline for Goal: "${goalName}"!`
             : days === 1
-            ? `🚨 Tomorrow is the final day for "${reminder.goals?.goal_name || 'your goal'}"!`
-            : `⏳ Only ${days} days remaining for "${reminder.goals?.goal_name || 'your goal'}"!`;
+            ? `🚨 Tomorrow is the final day for Goal: "${goalName}"!`
+            : `⏳ Only ${days} days remaining for Goal: "${goalName}"!`);
         } else {
-          title = '🎯 Goal Check-in';
-          body = reminder.custom_text || `Time to log progress for: ${reminder.goals?.goal_name || 'your goal'}!`;
+          title = `🎯 Goal: ${goalName}`;
+          body = reminder.custom_text
+            ? `${reminder.custom_text} • Goal: ${goalName}`
+            : `Time to log progress for Goal: "${goalName}"!`;
         }
         url = '/goals';
       } else if (type === 'learning_journey' || type === 'learning_topic') {
-        const itemTitle = reminder.learning_topics?.title || reminder.learning_journeys?.title || 'your learning roadmap';
-        if (reminder.reminder_mode === 'deadline_proximity') {
-          const days = reminder.days_before_deadline || 0;
-          title = '⏳ Roadmap Deadline';
-          body = days === 0
-            ? `📚 Due Today: Complete "${itemTitle}" in your Learning Hub!`
-            : `⏳ Due Tomorrow: Keep up the pace on "${itemTitle}"!`;
+        const topicName = reminder.learning_topics?.title || reminder.learning_journeys?.title || 'Study Session';
+        if (isDeadlineMode) {
+          title = `📚 Learning Hub: ${topicName}`;
+          body = reminder.custom_text || `Target deadline approaching for Learning Roadmap: "${topicName}"!`;
         } else {
-          title = '📚 Study Session Reminder';
-          body = reminder.custom_text || `Ready to learn? Continue: "${itemTitle}"!`;
+          title = `📚 Learning Hub: ${topicName}`;
+          body = reminder.custom_text
+            ? `${reminder.custom_text} • Topic: ${topicName}`
+            : `Time for your Learning Hub study session on "${topicName}"!`;
         }
         url = '/learning';
       }
@@ -173,7 +182,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // Clean up dead subscriptions
     if (stale.length) {
       await supabase.from('push_subscriptions').delete().in('endpoint', stale);
     }

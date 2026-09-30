@@ -221,31 +221,39 @@ self.addEventListener('message', (event) => {
         let targetUrl = '/dashboard';
 
         if (targetType === 'habit') {
-          title = '🔔 Habit Reminder';
-          body = reminder.custom_text || `Time for: ${reminder.habit_name || 'your habit'}!`;
+          const habitName = reminder.habit_name || 'Habit';
+          title = `🔥 Habit: ${habitName}`;
+          body = reminder.custom_text
+            ? `${reminder.custom_text} • Habit: ${habitName}`
+            : `Time to complete your habit "${habitName}"! Keep your streak going.`;
           targetUrl = '/habits';
         } else if (targetType === 'goal') {
+          const goalName = reminder.goal_name || 'Goal';
           if (isDeadlineMode) {
             const days = Number(reminder.days_before_deadline) || 0;
-            title = '⚠️ Goal Deadline Alert';
+            title = `🎯 Goal Deadline: ${goalName}`;
             body = reminder.custom_text || (days === 0
-              ? `🚨 Today is the target deadline for "${reminder.goal_name || 'your goal'}"!`
+              ? `🚨 Today is the target deadline for Goal: "${goalName}"!`
               : days === 1
-              ? `🚨 Tomorrow is the final day for "${reminder.goal_name || 'your goal'}"!`
-              : `⏳ Only ${days} days remaining for "${reminder.goal_name || 'your goal'}"!`);
+              ? `🚨 Tomorrow is the final day for Goal: "${goalName}"!`
+              : `⏳ Only ${days} days remaining for Goal: "${goalName}"!`);
           } else {
-            title = '🎯 Goal Check-in';
-            body = reminder.custom_text || `Time to log progress for: ${reminder.goal_name || 'your goal'}!`;
+            title = `🎯 Goal: ${goalName}`;
+            body = reminder.custom_text
+              ? `${reminder.custom_text} • Goal: ${goalName}`
+              : `Time to log progress for Goal: "${goalName}"!`;
           }
           targetUrl = '/goals';
         } else if (targetType === 'learning_journey' || targetType === 'learning_topic') {
-          const itemTitle = reminder.topic_title || reminder.journey_title || 'your learning roadmap';
+          const itemTitle = reminder.topic_title || reminder.journey_title || 'Study Session';
           if (isDeadlineMode) {
-            title = '⏳ Roadmap Deadline';
-            body = reminder.custom_text || `📚 Reminder: Keep up the pace on "${itemTitle}"!`;
+            title = `📚 Learning Hub: ${itemTitle}`;
+            body = reminder.custom_text || `Target deadline approaching for Learning Roadmap: "${itemTitle}"!`;
           } else {
-            title = '📚 Study Session Reminder';
-            body = reminder.custom_text || `Ready to learn? Continue: "${itemTitle}"!`;
+            title = `📚 Learning Hub: ${itemTitle}`;
+            body = reminder.custom_text
+              ? `${reminder.custom_text} • Topic: ${itemTitle}`
+              : `Time for your Learning Hub study session on "${itemTitle}"!`;
           }
           targetUrl = '/learning';
         }

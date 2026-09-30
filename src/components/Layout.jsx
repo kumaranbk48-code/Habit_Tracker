@@ -1,6 +1,10 @@
 import Sidebar from './Sidebar';
+import { useReminderScheduler } from '../hooks/useReminderScheduler';
 
 export default function Layout({ children }) {
+  // Continuously monitors active reminders and fires notifications when reminder times match
+  useReminderScheduler();
+
   return (
     <div className="min-h-screen bg-[#f7f9fa] dark:bg-[#14181c]">
       <Sidebar />
@@ -14,3 +18,4 @@ export default function Layout({ children }) {
     </div>
   );
 }
+

@@ -5,7 +5,17 @@ import { Resend } from 'resend';
 import supabase from './db-client.js';
 import { applyCors } from './cors.js';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+let resendClient = null;
+function getResend() {
+  if (!resendClient && process.env.RESEND_API_KEY && !process.env.RESEND_API_KEY.includes('PLACEHOLDER')) {
+    try {
+      resendClient = new Resend(process.env.RESEND_API_KEY);
+    } catch (e) {
+      console.warn('[digest] Could not initialize Resend:', e.message);
+    }
+  }
+  return resendClient;
+}
 
 function escapeHtml(str) {
   return String(str || '')
@@ -171,25 +181,28 @@ export default async function handler(req, res) {
           xp >= 3500 ? 7 : xp >= 2000 ? 6 : xp >= 1000 ? 5 :
           xp >= 500 ? 4 : xp >= 250 ? 3 : xp >= 100 ? 2 : 1;
 
-        await resend.emails.send({
-          from: 'HabitTracker <digest@habittracker.app>',
-          to: user.email,
-          subject: streak > 0
-            ? `🔥 ${streak}-day streak — Your weekly digest`
-            : `📊 Your weekly HabitTracker digest`,
-          html: buildEmailHtml({
-            displayName,
-            streak,
-            longestStreak: streak, // simplified
-            completionsThisWeek,
-            totalHabits,
-            completedGoals,
-            totalGoals: goals.length,
-            level,
-            xp,
-          }),
-        });
-        sent++;
+        const resend = getResend();
+        if (resend) {
+          await resend.emails.send({
+            from: 'HabitTracker <digest@habittracker.app>',
+            to: user.email,
+            subject: streak > 0
+              ? `🔥 ${streak}-day streak — Your weekly digest`
+              : `📊 Your weekly HabitTracker digest`,
+            html: buildEmailHtml({
+              displayName,
+              streak,
+              longestStreak: streak, // simplified
+              completionsThisWeek,
+              totalHabits,
+              completedGoals,
+              totalGoals: goals.length,
+              level,
+              xp,
+            }),
+          });
+          sent++;
+        }
       } catch (err) {
         errors.push({ userId, error: err.message });
       }

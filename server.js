@@ -1,7 +1,11 @@
-import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 import habitsHandler from './api/habits.js';
 import goalsHandler from './api/goals.js';
@@ -17,9 +21,6 @@ import pushSubscribeHandler from './api/push-subscribe.js';
 import pushSendHandler from './api/push-send.js';
 import learningHandler from './api/learning.js';
 import accountHandler from './api/account.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || process.env.API_PORT || 3001;

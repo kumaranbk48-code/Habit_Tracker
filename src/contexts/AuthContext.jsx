@@ -1,13 +1,29 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import supabase from '../lib/supabase';
 
+const getApiBaseUrl = () => {
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL.replace(/\/$/, '');
+  }
+  return '';
+};
+
 // Global fetch interceptor to handle expired/invalid tokens from the backend.
 // If the backend returns a 401 response indicating the token has expired or is unauthorized,
 // we sign the user out client-side to trigger onAuthStateChange and redirect them to the login page.
 const originalFetch = window.fetch;
 window.fetch = async (...args) => {
   let [resource, config] = args;
-  const url = typeof resource === 'string' ? resource : resource?.url || '';
+  let url = typeof resource === 'string' ? resource : resource?.url || '';
+
+  const apiBase = getApiBaseUrl();
+  if (apiBase && typeof resource === 'string') {
+    if (resource.startsWith('/api/')) {
+      resource = `${apiBase}${resource}`;
+    }
+    args[0] = resource;
+    url = resource;
+  }
 
   if (typeof url === 'string' && url.includes('/api/')) {
     config = config ? { ...config } : {};

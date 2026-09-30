@@ -135,6 +135,7 @@ export default function Reminders() {
           reminder_time: getTimeValue(rem.reminder_time),
         }));
       scheduleLocalReminders(activeReminders);
+      window.dispatchEvent(new CustomEvent('habittracker-reminders-updated'));
     } catch (err) {
       console.error(err);
       setFetchError('Network error — check your connection.');
@@ -430,25 +431,29 @@ export default function Reminders() {
             </div>
           </div>
 
-          {permission === 'denied' ? (
-            <div className="text-xs text-red-500 font-semibold px-3 py-2 bg-red-50 dark:bg-red-900/30 rounded-xl">
-              Blocked in Browser Settings
-            </div>
-          ) : subscribed ? (
-            <button
-              onClick={handleDisablePush}
-              className="text-xs font-semibold px-4 py-2 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl transition-colors"
-            >
-              Disable Notifications
-            </button>
-          ) : (
-            <button
-              onClick={handleEnablePush}
-              className="inline-flex items-center gap-2 text-xs font-semibold px-4 py-2.5 bg-[#3d7a75] text-white hover:bg-[#2f5f5b] rounded-xl transition-colors shadow-xs"
-            >
-              <Bell size={14} /> Enable Notifications
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {permission === 'denied' ? (
+              <div className="text-xs text-red-500 font-semibold px-3 py-2 bg-red-50 dark:bg-red-900/30 rounded-xl">
+                Blocked in Browser Settings
+              </div>
+            ) : subscribed ? (
+              <button
+                type="button"
+                onClick={handleDisablePush}
+                className="text-xs font-semibold px-3.5 py-2 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
+              >
+                Disable
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleEnablePush}
+                className="inline-flex items-center gap-2 text-xs font-semibold px-4 py-2.5 bg-[#3d7a75] text-white hover:bg-[#2f5f5b] rounded-xl transition-colors shadow-xs cursor-pointer"
+              >
+                <Bell size={14} /> Enable Notifications
+              </button>
+            )}
+          </div>
         </div>
       )}
 
