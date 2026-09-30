@@ -1,7 +1,7 @@
 // ─── HabitTracker Service Worker ──────────────────────────────────────────────
 // Handles: offline caching, push notifications, notification click routing
 // Version bump forces browsers to install the updated SW
-const SW_VERSION = 'habittracker-v3';
+const SW_VERSION = 'habittracker-v4';
 const STATIC_CACHE = `${SW_VERSION}-static`;
 
 // Files to pre-cache for offline use
@@ -174,18 +174,40 @@ self.addEventListener('message', (event) => {
     scheduledTimers.forEach(id => clearTimeout(id));
     scheduledTimers.clear();
 
+    const now = new Date();
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const currentDay = dayNames[now.getDay()];
+
     reminders.forEach(reminder => {
       if (reminder.notification_status !== 'Active') return;
+
+      const targetType = reminder.target_type || 'habit';
+      const isDeadlineMode = reminder.reminder_mode === 'deadline_proximity';
+
+      // 1. Check if eligible for today
+      if (isDeadlineMode) {
+        const targetDateStr = reminder.target_date;
+        if (!targetDateStr) return;
+        const days = Number(reminder.days_before_deadline) || 0;
+        const checkDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
+        const checkYMD = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
+        if (targetDateStr !== checkYMD) return;
+      } else {
+        // Scheduled mode: check days of week
+        if (Array.isArray(reminder.days_of_week) && reminder.days_of_week.length > 0) {
+          if (!reminder.days_of_week.includes(currentDay)) return;
+        }
+      }
 
       const timeList = Array.isArray(reminder.alerts) && reminder.alerts.length > 0
         ? reminder.alerts
         : [reminder.reminder_time || '08:00'];
 
       timeList.forEach((timeStr, idx) => {
+        if (!timeStr || typeof timeStr !== 'string') return;
         const [hh, mm] = timeStr.split(':').map(Number);
         if (isNaN(hh) || isNaN(mm)) return;
 
-        const now  = new Date();
         const fire = new Date();
         fire.setHours(hh, mm, 0, 0);
 
@@ -193,15 +215,49 @@ self.addEventListener('message', (event) => {
         if (fire <= now) return;
 
         const delay = fire.getTime() - now.getTime();
+
+        let title = '🔔 Reminder';
+        let body = reminder.custom_text || 'Time for your scheduled reminder!';
+        let targetUrl = '/dashboard';
+
+        if (targetType === 'habit') {
+          title = '🔔 Habit Reminder';
+          body = reminder.custom_text || `Time for: ${reminder.habit_name || 'your habit'}!`;
+          targetUrl = '/habits';
+        } else if (targetType === 'goal') {
+          if (isDeadlineMode) {
+            const days = Number(reminder.days_before_deadline) || 0;
+            title = '⚠️ Goal Deadline Alert';
+            body = reminder.custom_text || (days === 0
+              ? `🚨 Today is the target deadline for "${reminder.goal_name || 'your goal'}"!`
+              : days === 1
+              ? `🚨 Tomorrow is the final day for "${reminder.goal_name || 'your goal'}"!`
+              : `⏳ Only ${days} days remaining for "${reminder.goal_name || 'your goal'}"!`);
+          } else {
+            title = '🎯 Goal Check-in';
+            body = reminder.custom_text || `Time to log progress for: ${reminder.goal_name || 'your goal'}!`;
+          }
+          targetUrl = '/goals';
+        } else if (targetType === 'learning_journey' || targetType === 'learning_topic') {
+          const itemTitle = reminder.topic_title || reminder.journey_title || 'your learning roadmap';
+          if (isDeadlineMode) {
+            title = '⏳ Roadmap Deadline';
+            body = reminder.custom_text || `📚 Reminder: Keep up the pace on "${itemTitle}"!`;
+          } else {
+            title = '📚 Study Session Reminder';
+            body = reminder.custom_text || `Ready to learn? Continue: "${itemTitle}"!`;
+          }
+          targetUrl = '/learning';
+        }
+
         const timerId = setTimeout(() => {
-          const bodyText = reminder.custom_text || `Time for: ${reminder.habit_name}!`;
-          self.registration.showNotification('🔔 Habit Reminder', {
-            body: bodyText,
+          self.registration.showNotification(title, {
+            body,
             icon: '/icons/icon-192.png',
             badge: '/icons/icon-192.png',
             tag: `local-${reminder.id}-${idx}`,
             vibrate: [200, 100, 200],
-            data: { url: '/habits' },
+            data: { url: targetUrl },
           });
         }, delay);
 

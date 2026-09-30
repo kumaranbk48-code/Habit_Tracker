@@ -77,6 +77,18 @@ export default function Reminders() {
     scheduleLocalReminders,
   } = usePushNotifications(session);
 
+  const getTimeValue = (val) => {
+    if (!val) return '08:00';
+    const str = typeof val === 'string' ? val : (val.target?.value || val.value || '08:00');
+    if (typeof str === 'string' && str.includes(':')) {
+      const [h, m] = str.split(':');
+      const cleanH = String(parseInt(h, 10) || 0).padStart(2, '0');
+      const cleanM = String(parseInt(m, 10) || 0).padStart(2, '0');
+      return `${cleanH}:${cleanM}`;
+    }
+    return '08:00';
+  };
+
   const fetchData = useCallback(async () => {
     if (!session) return;
     setFetchError('');
@@ -113,7 +125,14 @@ export default function Reminders() {
         .filter((rem) => rem.notification_status === 'Active')
         .map((rem) => ({
           ...rem,
-          habit_name: rem.habits?.habit_name || rem.goals?.goal_name || rem.learning_journeys?.title || 'Reminder',
+          target_type: rem.target_type || 'habit',
+          habit_name: rem.habits?.habit_name || '',
+          goal_name: rem.goals?.goal_name || '',
+          journey_title: rem.learning_journeys?.title || '',
+          topic_title: rem.learning_topics?.title || '',
+          target_date: rem.goals?.target_date || rem.learning_journeys?.target_date || rem.learning_topics?.target_date || '',
+          alerts: Array.isArray(rem.alerts) && rem.alerts.length > 0 ? rem.alerts.map(getTimeValue) : [getTimeValue(rem.reminder_time)],
+          reminder_time: getTimeValue(rem.reminder_time),
         }));
       scheduleLocalReminders(activeReminders);
     } catch (err) {
@@ -140,7 +159,7 @@ export default function Reminders() {
         openAdd('habit', prefillId);
       }
     }
-  }, [location.state]); // eslint-disable-line
+  }, [location.state, habits, goals, journeys]); // eslint-disable-line
 
   const handleEnablePush = async () => {
     const ok = await requestPermissionAndSubscribe();
@@ -158,16 +177,17 @@ export default function Reminders() {
 
   const openAdd = (preferredType = 'habit', preferredId = '') => {
     setEditing(null);
+    const initialTime = '08:00';
     setForm({
       target_type: preferredType,
-      habit_id: preferredType === 'habit' ? (preferredId || habits[0]?.id || '') : '',
-      goal_id: preferredType === 'goal' ? (preferredId || goals[0]?.id || '') : '',
-      journey_id: preferredType === 'learning_journey' ? (preferredId || journeys[0]?.id || '') : '',
+      habit_id: preferredType === 'habit' ? (preferredId || habits[0]?.id || '') : (habits[0]?.id || ''),
+      goal_id: preferredType === 'goal' ? (preferredId || goals[0]?.id || '') : (goals[0]?.id || ''),
+      journey_id: preferredType === 'learning_journey' ? (preferredId || journeys[0]?.id || '') : (journeys[0]?.id || ''),
       topic_id: '',
       reminder_mode: preferredType === 'goal' ? 'deadline_proximity' : 'scheduled',
       days_before_deadline: 1,
-      reminder_time: '08:00',
-      alerts: ['08:00'],
+      reminder_time: initialTime,
+      alerts: [initialTime],
       custom_text: '',
       routine_window: 'Morning',
       days_of_week: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
@@ -178,23 +198,26 @@ export default function Reminders() {
 
   const openEdit = (reminder) => {
     setEditing(reminder);
-    const existingAlerts = Array.isArray(reminder.alerts) && reminder.alerts.length > 0
-      ? reminder.alerts
-      : [reminder.reminder_time || '08:00'];
+    const parsedAlerts = Array.isArray(reminder.alerts) && reminder.alerts.length > 0
+      ? reminder.alerts.map(getTimeValue)
+      : [getTimeValue(reminder.reminder_time)];
+
+    const mainTime = getTimeValue(reminder.reminder_time) || parsedAlerts[0] || '08:00';
+    const targetType = reminder.target_type || 'habit';
 
     setForm({
-      target_type: reminder.target_type || 'habit',
-      habit_id: reminder.habit_id || '',
-      goal_id: reminder.goal_id || '',
-      journey_id: reminder.journey_id || '',
-      topic_id: reminder.topic_id || '',
-      reminder_mode: reminder.reminder_mode || 'scheduled',
+      target_type: targetType,
+      habit_id: targetType === 'habit' ? (reminder.habit_id || habits[0]?.id || '') : '',
+      goal_id: targetType === 'goal' ? (reminder.goal_id || goals[0]?.id || '') : '',
+      journey_id: targetType === 'learning_journey' ? (reminder.journey_id || journeys[0]?.id || '') : '',
+      topic_id: targetType === 'learning_topic' ? (reminder.topic_id || '') : '',
+      reminder_mode: reminder.reminder_mode || (targetType === 'goal' ? 'deadline_proximity' : 'scheduled'),
       days_before_deadline: reminder.days_before_deadline ?? 1,
-      reminder_time: reminder.reminder_time || existingAlerts[0],
-      alerts: existingAlerts,
+      reminder_time: mainTime,
+      alerts: parsedAlerts,
       custom_text: reminder.custom_text || '',
-      routine_window: reminder.routine_window || getRoutineWindow(existingAlerts[0]),
-      days_of_week: Array.isArray(reminder.days_of_week) ? reminder.days_of_week : WEEKDAYS,
+      routine_window: reminder.routine_window || getRoutineWindow(mainTime),
+      days_of_week: Array.isArray(reminder.days_of_week) && reminder.days_of_week.length > 0 ? reminder.days_of_week : WEEKDAYS,
       notification_status: reminder.notification_status || 'Active',
     });
     setModalOpen(true);
@@ -219,8 +242,28 @@ export default function Reminders() {
 
     setFormLoading(true);
     try {
+      const cleanAlerts = (Array.isArray(form.alerts) && form.alerts.length > 0 ? form.alerts : [form.reminder_time]).map(getTimeValue);
+      const cleanMainTime = getTimeValue(form.reminder_time) || cleanAlerts[0] || '08:00';
+      const cleanRoutine = form.routine_window || getRoutineWindow(cleanMainTime);
+
+      const payload = {
+        target_type: form.target_type,
+        habit_id: form.target_type === 'habit' ? form.habit_id : null,
+        goal_id: form.target_type === 'goal' ? form.goal_id : null,
+        journey_id: form.target_type === 'learning_journey' ? form.journey_id : null,
+        topic_id: form.target_type === 'learning_topic' ? form.topic_id : null,
+        reminder_mode: form.reminder_mode,
+        reminder_time: cleanMainTime,
+        alerts: cleanAlerts,
+        routine_window: cleanRoutine,
+        days_before_deadline: Number(form.days_before_deadline) || 0,
+        days_of_week: Array.isArray(form.days_of_week) && form.days_of_week.length > 0 ? form.days_of_week : WEEKDAYS,
+        custom_text: form.custom_text || '',
+        notification_status: form.notification_status || 'Active',
+      };
+
       const method = editing ? 'PUT' : 'POST';
-      const body = editing ? { ...form, id: editing.id } : form;
+      const body = editing ? { ...payload, id: editing.id } : payload;
       const res = await fetch('/api/reminders', {
         method,
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
@@ -293,10 +336,11 @@ export default function Reminders() {
   };
 
   const updateAlertTime = (index, value) => {
+    const timeStr = getTimeValue(value);
     const next = [...form.alerts];
-    next[index] = value;
-    const routine = getRoutineWindow(next[0]);
-    setForm({ ...form, alerts: next, reminder_time: next[0], routine_window: routine });
+    next[index] = timeStr;
+    const routine = getRoutineWindow(next[0] || '08:00');
+    setForm({ ...form, alerts: next, reminder_time: next[0] || '08:00', routine_window: routine });
   };
 
   const toggleDayOfWeek = (day) => {
@@ -862,7 +906,7 @@ export default function Reminders() {
                 </label>
                 <CustomTimePicker
                   value={form.reminder_time}
-                  onChange={(val) => setForm({ ...form, reminder_time: val })}
+                  onChange={(val) => setForm({ ...form, reminder_time: getTimeValue(val) })}
                 />
               </div>
             </div>

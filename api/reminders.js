@@ -34,6 +34,18 @@ async function sanitizePayload(table, payload) {
   return sanitized;
 }
 
+function cleanTime(val) {
+  if (!val) return null;
+  const str = typeof val === 'string' ? val : (val.target?.value || val.value || '');
+  if (typeof str === 'string' && str.includes(':')) {
+    const parts = str.split(':');
+    const h = String(parseInt(parts[0], 10) || 0).padStart(2, '0');
+    const m = String(parseInt(parts[1], 10) || 0).padStart(2, '0');
+    return `${h}:${m}`;
+  }
+  return null;
+}
+
 const REMINDER_SELECT = `
   *,
   habits(id, habit_name, color, icon),
@@ -151,7 +163,11 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Invalid target_type. Must be habit, goal, learning_journey, or learning_topic' });
       }
 
-      const mainTime = reminder_time || (Array.isArray(alerts) && alerts.length > 0 ? alerts[0] : '09:00');
+      const timeFromAlerts = Array.isArray(alerts) && alerts.length > 0 ? cleanTime(alerts[0]) : null;
+      const mainTime = cleanTime(reminder_time) || timeFromAlerts || '08:00';
+      const cleanAlerts = Array.isArray(alerts) && alerts.length > 0
+        ? alerts.map(cleanTime).filter(Boolean)
+        : [mainTime];
 
       const rawPayload = {
         user_id,
@@ -164,10 +180,10 @@ export default async function handler(req, res) {
         days_before_deadline: Number(days_before_deadline) || 0,
         reminder_time: mainTime,
         notification_status,
-        alerts: Array.isArray(alerts) ? alerts : [mainTime],
+        alerts: cleanAlerts.length > 0 ? cleanAlerts : [mainTime],
         custom_text: custom_text || '',
-        routine_window,
-        days_of_week: Array.isArray(days_of_week) ? days_of_week : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+        routine_window: routine_window || 'Morning',
+        days_of_week: Array.isArray(days_of_week) && days_of_week.length > 0 ? days_of_week : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
       };
 
       const payload = await sanitizePayload('reminders', rawPayload);
@@ -245,32 +261,40 @@ export default async function handler(req, res) {
 
       // If target entity changed, verify ownership
       const effectiveType = target_type || existing.target_type || 'habit';
-      if (effectiveType === 'habit' && habit_id) {
-        const { data: h } = await supabase.from('habits').select('id').eq('id', habit_id).eq('user_id', user_id).maybeSingle();
+      const effectiveHabitId = effectiveType === 'habit' ? (habit_id || existing.habit_id) : null;
+      const effectiveGoalId = effectiveType === 'goal' ? (goal_id || existing.goal_id) : null;
+      const effectiveJourneyId = effectiveType === 'learning_journey' ? (journey_id || existing.journey_id) : null;
+      const effectiveTopicId = effectiveType === 'learning_topic' ? (topic_id || existing.topic_id) : null;
+
+      if (effectiveType === 'habit' && effectiveHabitId) {
+        const { data: h } = await supabase.from('habits').select('id').eq('id', effectiveHabitId).eq('user_id', user_id).maybeSingle();
         if (!h) return res.status(404).json({ error: 'Target habit not found' });
-      } else if (effectiveType === 'goal' && goal_id) {
-        const { data: g } = await supabase.from('goals').select('id').eq('id', goal_id).eq('user_id', user_id).maybeSingle();
+      } else if (effectiveType === 'goal' && effectiveGoalId) {
+        const { data: g } = await supabase.from('goals').select('id').eq('id', effectiveGoalId).eq('user_id', user_id).maybeSingle();
         if (!g) return res.status(404).json({ error: 'Target goal not found' });
-      } else if (effectiveType === 'learning_journey' && journey_id) {
-        const { data: j } = await supabase.from('learning_journeys').select('id').eq('id', journey_id).eq('user_id', user_id).maybeSingle();
+      } else if (effectiveType === 'learning_journey' && effectiveJourneyId) {
+        const { data: j } = await supabase.from('learning_journeys').select('id').eq('id', effectiveJourneyId).eq('user_id', user_id).maybeSingle();
         if (!j) return res.status(404).json({ error: 'Target journey not found' });
-      } else if (effectiveType === 'learning_topic' && topic_id) {
-        const { data: t } = await supabase.from('learning_topics').select('id').eq('id', topic_id).eq('user_id', user_id).maybeSingle();
+      } else if (effectiveType === 'learning_topic' && effectiveTopicId) {
+        const { data: t } = await supabase.from('learning_topics').select('id').eq('id', effectiveTopicId).eq('user_id', user_id).maybeSingle();
         if (!t) return res.status(404).json({ error: 'Target topic not found' });
       }
 
-      const mainTime = reminder_time || (Array.isArray(alerts) && alerts.length > 0 ? alerts[0] : undefined);
+      const putTimeFromAlerts = Array.isArray(alerts) && alerts.length > 0 ? cleanTime(alerts[0]) : null;
+      const putMainTime = cleanTime(reminder_time) || putTimeFromAlerts;
+      const putCleanAlerts = Array.isArray(alerts) ? alerts.map(cleanTime).filter(Boolean) : undefined;
+
       const rawUpdatePayload = {
-        ...(target_type && { target_type }),
-        ...(habit_id !== undefined && { habit_id }),
-        ...(goal_id !== undefined && { goal_id }),
-        ...(journey_id !== undefined && { journey_id }),
-        ...(topic_id !== undefined && { topic_id }),
+        target_type: effectiveType,
+        habit_id: effectiveHabitId,
+        goal_id: effectiveGoalId,
+        journey_id: effectiveJourneyId,
+        topic_id: effectiveTopicId,
         ...(reminder_mode && { reminder_mode }),
         ...(days_before_deadline !== undefined && { days_before_deadline: Number(days_before_deadline) }),
-        ...(mainTime && { reminder_time: mainTime }),
+        ...(putMainTime && { reminder_time: putMainTime }),
         ...(notification_status !== undefined && { notification_status }),
-        ...(alerts !== undefined && { alerts }),
+        ...(putCleanAlerts !== undefined && { alerts: putCleanAlerts }),
         ...(custom_text !== undefined && { custom_text }),
         ...(routine_window !== undefined && { routine_window }),
         ...(days_of_week !== undefined && { days_of_week }),
@@ -290,14 +314,14 @@ export default async function handler(req, res) {
       if (error && (error.code === 'PGRST204' || error.code === '42703')) {
         console.warn('[/api/reminders] PUT schema mismatch, retrying with base columns:', error.message);
         const fallbackUpdate = {
-          ...(target_type && { target_type }),
-          ...(habit_id !== undefined && { habit_id }),
-          ...(goal_id !== undefined && { goal_id }),
-          ...(journey_id !== undefined && { journey_id }),
-          ...(topic_id !== undefined && { topic_id }),
+          target_type: effectiveType,
+          habit_id: effectiveHabitId,
+          goal_id: effectiveGoalId,
+          journey_id: effectiveJourneyId,
+          topic_id: effectiveTopicId,
           ...(reminder_mode && { reminder_mode }),
           ...(days_before_deadline !== undefined && { days_before_deadline: Number(days_before_deadline) }),
-          ...(mainTime && { reminder_time: mainTime }),
+          ...(putMainTime && { reminder_time: putMainTime }),
           ...(notification_status !== undefined && { notification_status })
         };
         const retryRes = await supabase

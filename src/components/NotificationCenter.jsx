@@ -74,13 +74,21 @@ export default function NotificationCenter() {
         }
       }
 
-      // 2. Evaluate Scheduled Reminders for Today
+      // 2. Evaluate Scheduled & Deadline Reminders for Today
       let todayReminders = [];
       if (remRes?.ok) {
         const remData = await remRes.json().catch(() => []);
         if (Array.isArray(remData)) {
           todayReminders = remData.filter(r => {
-            if (r.notification_status === 'Paused') return false;
+            if (r.notification_status !== 'Active') return false;
+            if (r.reminder_mode === 'deadline_proximity') {
+              const targetDateStr = r.goals?.target_date || r.learning_topics?.target_date || r.learning_journeys?.target_date;
+              if (!targetDateStr) return false;
+              const days = Number(r.days_before_deadline) || 0;
+              const checkDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
+              const checkYMD = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
+              return targetDateStr === checkYMD;
+            }
             if (!r.days_of_week || !Array.isArray(r.days_of_week) || r.days_of_week.length === 0) return true;
             return r.days_of_week.includes(currentDay);
           });
