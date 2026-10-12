@@ -7,7 +7,7 @@ import Toast from '../components/Toast';
 import CustomSelect from '../components/CustomSelect';
 import CustomTimePicker from '../components/CustomTimePicker';
 import {
-  Plus, Pencil, Trash2, Bell, BellOff, AlertCircle, ShieldCheck,
+  Plus, Pencil, Trash2, Bell, BellOff, BellRing, AlertCircle, ShieldCheck,
   Sun, Sunset, Moon, Clock, Calendar, Check, MessageSquare, Sparkles,
   Target, GraduationCap, CheckCircle2, AlertTriangle, Layers, BookOpen
 } from 'lucide-react';
