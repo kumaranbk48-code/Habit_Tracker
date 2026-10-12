@@ -5,9 +5,10 @@ const KEY = 'ht-theme';
 export function useTheme() {
   const [isDark, setIsDark] = useState(() => {
     try {
-      return localStorage.getItem(KEY) === 'dark';
+      const saved = localStorage.getItem(KEY);
+      return saved !== 'light';
     } catch {
-      return false;
+      return true;
     }
   });
 

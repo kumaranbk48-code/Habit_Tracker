@@ -117,7 +117,7 @@ export default async function handler(req, res) {
 
       // Build Notification Content specifying Category & Exact Name
       const type = reminder.target_type || 'habit';
-      let title = '🔔 HabitTracker Reminder';
+      let title = '🔔 HabiZ Reminder';
       let body = reminder.custom_text || 'You have an active reminder.';
       let url = '/dashboard';
 
@@ -127,6 +127,10 @@ export default async function handler(req, res) {
         body = reminder.custom_text
           ? `${reminder.custom_text} • Habit: ${habitName}`
           : `Time to complete your habit "${habitName}"! Keep your streak going.`;
+        if (reminder.is_alarm) {
+          title = `🚨 ALARM: ${habitName}`;
+          body = reminder.custom_text || `Streak at stake: Don't break your chain on "${habitName}"!`;
+        }
         url = '/habits';
       } else if (type === 'goal') {
         const goalName = reminder.goals?.goal_name || 'Goal';
@@ -163,10 +167,12 @@ export default async function handler(req, res) {
         const payload = JSON.stringify({
           title,
           body,
-          tag: `reminder-${reminder.id}`,
+          tag: reminder.is_alarm && reminder.habit_id ? `alarm-habit-${reminder.habit_id}` : `reminder-${reminder.id}`,
           url,
           reminderId: reminder.id,
+          habitId: reminder.habit_id || null,
           targetType: type,
+          isAlarm: Boolean(reminder.is_alarm),
         });
 
         try {

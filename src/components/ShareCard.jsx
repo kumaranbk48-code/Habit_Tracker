@@ -46,9 +46,9 @@ function drawCard(canvas, stats, displayName) {
   ctx.fill();
 
   // App Logo Header
-  ctx.fillStyle = '#5fae9e';
-  ctx.font = 'bold 12px Inter, sans-serif';
-  ctx.fillText('HABITTRACKER 2.0', 32, 40);
+  ctx.fillStyle = '#2dd4bf';
+  ctx.font = 'bold 13px Inter, sans-serif';
+  ctx.fillText('HABIZ', 32, 40);
 
   // User Display Name
   ctx.fillStyle = '#f8fafc';
@@ -56,7 +56,7 @@ function drawCard(canvas, stats, displayName) {
   ctx.fillText(displayName, 32, 74);
 
   // Level Badge
-  ctx.fillStyle = current.color || '#3d7a75';
+  ctx.fillStyle = current.color || '#178274';
   ctx.beginPath();
   if (ctx.roundRect) {
     ctx.roundRect(32, 86, 110, 24, 8);
@@ -69,7 +69,7 @@ function drawCard(canvas, stats, displayName) {
   ctx.fillText(`Lv.${current.level} ${current.title}`, 42, 102);
 
   // Big Streak Counter
-  ctx.fillStyle = '#dcb579';
+  ctx.fillStyle = '#f59e0b';
   ctx.font = 'bold 56px Inter, sans-serif';
   ctx.fillText(`🔥 ${streak}`, 32, 180);
   ctx.fillStyle = '#94a3b8';
@@ -95,7 +95,7 @@ function drawCard(canvas, stats, displayName) {
   // Footer Watermark
   ctx.fillStyle = '#475569';
   ctx.font = '11px Inter, sans-serif';
-  ctx.fillText('habittracker.app', W - 120, H - 20);
+  ctx.fillText('habiz.app', W - 90, H - 20);
 }
 
 export default function ShareCard({
@@ -114,7 +114,7 @@ export default function ShareCard({
   const isModalOpen = isControlled ? Boolean(externalOpen ?? externalIsOpen) : internalOpen;
 
   const streak = stats?.currentStreak || 0;
-  const shareText = `🔥 I'm on a ${streak}-day streak on HabitTracker!\nBuilding better habits every single day. 💪\nJoin me at HabitTracker!`;
+  const shareText = `🔥 I'm on a ${streak}-day streak on HabiZ!\nBuilding better habits every single day. 🌱\nJoin me at HabiZ!`;
 
   const handleClose = () => {
     if (externalOnClose) externalOnClose();
@@ -141,7 +141,7 @@ export default function ShareCard({
     if (!imageUrl) return;
     const a = document.createElement('a');
     a.href = imageUrl;
-    a.download = `habittracker-streak-${streak}-days.png`;
+    a.download = `habiz-streak-${streak}-days.png`;
     a.click();
   };
 
@@ -168,16 +168,16 @@ export default function ShareCard({
       try {
         if (imageUrl) {
           const blob = await (await fetch(imageUrl)).blob();
-          const file = new File([blob], 'habit-streak.png', { type: 'image/png' });
+          const file = new File([blob], 'habiz-streak.png', { type: 'image/png' });
           await navigator.share({
-            title: 'My HabitTracker Streak',
+            title: 'My HabiZ Streak',
             text: shareText,
             files: [file],
           });
           return;
         }
         await navigator.share({
-          title: 'My HabitTracker Streak',
+          title: 'My HabiZ Streak',
           text: shareText,
         });
       } catch (err) {
@@ -198,7 +198,7 @@ export default function ShareCard({
             generate();
             setInternalOpen(true);
           }}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white rounded-xl text-xs font-semibold shadow-md shadow-[#3d7a75]/20 transition-all active:scale-95 flex-shrink-0 cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#178274] hover:bg-[#136c60] text-white rounded-xl text-xs font-bold shadow-md shadow-teal-950/40 transition-all active:scale-95 flex-shrink-0 cursor-pointer"
         >
           <Share2 size={15} /> Share Streak
         </button>
@@ -207,17 +207,17 @@ export default function ShareCard({
       <Modal open={isModalOpen} onClose={handleClose} title="Share Your Progress" maxWidth="max-w-md">
         <div className="space-y-5 py-1">
           <div className="text-center">
-            <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-              You're on a <span className="text-[#3d7a75] dark:text-[#5fae9e] font-extrabold">{streak} Day Streak!</span> 🔥
+            <p className="text-sm font-semibold text-slate-200">
+              You're on a <span className="text-teal-400 font-extrabold">{streak} Day Streak!</span> 🔥
             </p>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+            <p className="text-xs text-slate-400 mt-0.5">
               Keep the consistency going every single day.
             </p>
           </div>
 
           {/* Visual Card Preview */}
           {imageUrl ? (
-            <div className="relative rounded-2xl overflow-hidden shadow-md border border-[#e2e8ec] dark:border-[#2a343d] group bg-[#0f172a]">
+            <div className="relative rounded-2xl overflow-hidden shadow-md border border-white/[0.08] group bg-[#080d12]">
               <img
                 src={imageUrl}
                 alt="Habit streak progress card"
@@ -225,11 +225,11 @@ export default function ShareCard({
               />
             </div>
           ) : (
-            <div className="bg-[#14181c] text-white rounded-2xl p-6 text-center space-y-3 border border-[#2a343d]">
-              <Flame size={48} className="text-[#dcb579] mx-auto animate-bounce" />
+            <div className="habiz-panel text-white rounded-2xl p-6 text-center space-y-3">
+              <Flame size={48} className="text-amber-400 mx-auto animate-bounce" />
               <p className="text-3xl font-extrabold text-white">{streak} DAYS</p>
-              <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">CONSISTENT</p>
-              <p className="text-xs text-[#5fae9e] font-semibold">HabitTracker</p>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">CONSISTENT</p>
+              <p className="text-xs text-teal-400 font-semibold">HabiZ</p>
             </div>
           )}
 

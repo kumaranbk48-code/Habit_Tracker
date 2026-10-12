@@ -136,7 +136,18 @@ export default defineConfig(async ({ mode }) => {
     },
     server: {
       watch: {
-        ignored: ['**/scratch/**', '**/scratch/**/*', '**/.tempmediaStorage/**', '**/playwright-report/**', '**/.playwright-mcp/**'],
+        usePolling: true,
+        interval: 300,
+        ignored: [
+          '**/scratch/**',
+          '**/scratch/**/*',
+          '**/.tempmediaStorage/**',
+          '**/playwright-report/**',
+          '**/.playwright-mcp/**',
+          '**/node_modules/**',
+          '**/.git/**',
+          '**/dist/**'
+        ],
       },
       proxy: {
         '/api': {

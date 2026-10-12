@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "HabitTracker — Build Better Habits",
-  "short_name": "HabitTracker",
-  "description": "Track your daily habits, set meaningful goals, and build streaks that last.",
+  "name": "HabiZ — Small habits. Big shifts.",
+  "short_name": "HabiZ",
+  "description": "Small habits. Big shifts. Track your daily habits, set meaningful goals, and build streaks that last.",
   "start_url": "/",
   "scope": "/",
   "lang": "en",
@@ -10,8 +10,8 @@
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone"],
   "orientation": "portrait-primary",
-  "background_color": "#f7f9fa",
-  "theme_color": "#3d7a75",
+  "background_color": "#0a0f14",
+  "theme_color": "#0a0f14",
   "categories": ["productivity", "health", "lifestyle"],
   "prefer_related_applications": false,
   "handle_links": "preferred",
@@ -62,14 +62,14 @@
       "sizes": "540x960",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "HabitTracker Mobile Dashboard"
+      "label": "HabiZ Mobile Dashboard"
     },
     {
       "src": "/screenshots/screenshot-desktop.png",
       "sizes": "1280x720",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "HabitTracker Desktop Dashboard"
+      "label": "HabiZ Desktop Dashboard"
     }
   ],
   "shortcuts": [

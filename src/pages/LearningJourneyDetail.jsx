@@ -5,16 +5,20 @@ import JourneyTimelineView from '../components/learning/JourneyTimelineView';
 import TopicWorkspaceModal from '../components/learning/TopicWorkspaceModal';
 import HabitConnectionModal from '../components/learning/HabitConnectionModal';
 import ContextualInfo from '../components/learning/ContextualInfo';
-import CustomSelect from '../components/CustomSelect';
+import TopicHabitConfirmModal from '../components/learning/TopicHabitConfirmModal';
+import Toast from '../components/Toast';
+import { useConfetti } from '../hooks/useConfetti';
 import {
   ArrowLeft, Plus, Play, Pause, CheckCircle2, Link, FileText, Globe,
   Sliders, Trash2, Edit3, Layers, BookOpen, Sparkles, MoreVertical, Bell
 } from 'lucide-react';
+import HabizLoader from '../components/HabizLoader';
 
 export default function LearningJourneyDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { session } = useAuth();
+  const { fireSmall } = useConfetti();
 
   const [loading, setLoading] = useState(true);
   const [journeyData, setJourneyData] = useState(null);
@@ -25,6 +29,9 @@ export default function LearningJourneyDetail() {
   const [addTopicOpen, setAddTopicOpen] = useState(false);
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [fetchError, setFetchError] = useState('');
+  const [confirmModalData, setConfirmModalData] = useState(null);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [toast, setToast] = useState(null);
   const menuRef = useRef(null);
   const initialLoadDone = useRef(false);
 
@@ -124,6 +131,14 @@ export default function LearningJourneyDetail() {
       console.error('Failed to toggle task:', err);
     }
     fetchJourneyDetail(true);
+
+    if (completed && selectedTopic) {
+      const allTasks = selectedTopic.tasks || [];
+      const willBeAllDone = allTasks.length > 0 && allTasks.every(t => (t.id === taskId ? true : t.completed));
+      if (willBeAllDone) {
+        checkAndPromptConnectedHabit(selectedTopic);
+      }
+    }
   };
 
   const handleAddTask = async (topicId, title) => {
@@ -253,6 +268,115 @@ export default function LearningJourneyDetail() {
     fetchJourneyDetail(true);
   };
 
+  const checkAndPromptConnectedHabit = async (targetTopic) => {
+    if (!session || !journeyData || !targetTopic) return;
+    const connections = journeyData.habitConnections || [];
+    if (!connections.length) return;
+
+    let habit = connections[0]?.habits;
+    const habitId = connections[0]?.habit_id;
+
+    if (!habit && habitId) {
+      try {
+        const hRes = await fetch('/api/habits', {
+          headers: { Authorization: `Bearer ${session.access_token}` }
+        });
+        if (hRes.ok) {
+          const habits = await hRes.json();
+          habit = habits.find(h => h.id === habitId);
+        }
+      } catch (err) {
+        console.warn('Could not load habits for connection prompt:', err);
+      }
+    }
+
+    if (!habit || !habit.id) return;
+
+    // Check if habit is already completed today
+    const todayDate = new Date().toISOString().split('T')[0];
+    try {
+      const tRes = await fetch(`/api/tracking?date=${todayDate}&habit_id=${habit.id}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      });
+      if (tRes.ok) {
+        const logs = await tRes.json();
+        const alreadyDone = Array.isArray(logs) && logs.some(t => t.habit_id === habit.id && t.status === true);
+        if (alreadyDone) return;
+      }
+    } catch {
+      // ignore network check error
+    }
+
+    setConfirmModalData({ topic: targetTopic, habit });
+  };
+
+  const handleConfirmHabitDone = async () => {
+    if (!confirmModalData?.habit || !session) return;
+    setConfirmLoading(true);
+
+    const habit = confirmModalData.habit;
+    const topic = confirmModalData.topic;
+    const todayDate = new Date().toISOString().split('T')[0];
+    const isQuantity = habit.tracking_type === 'quantity';
+    const targetQty = Number(habit.target_quantity) || 1;
+
+    try {
+      const res = await fetch('/api/tracking', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({
+          habit_id: habit.id,
+          completion_date: todayDate,
+          status: true,
+          completion_source: 'learning',
+          completion_ref_id: topic?.id,
+          action: isQuantity ? 'add' : undefined,
+          amount: isQuantity ? targetQty : undefined
+        })
+      });
+
+      if (res.ok) {
+        fireSmall();
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+        setConfirmModalData(null);
+        setToast({
+          message: `Marked "${habit.habit_name}" as done! 🎯`,
+          type: 'success',
+          actionLabel: 'Undo',
+          onAction: async () => {
+            try {
+              await fetch('/api/tracking', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${session.access_token}`
+                },
+                body: JSON.stringify({
+                  habit_id: habit.id,
+                  completion_date: todayDate,
+                  status: false,
+                  action: isQuantity ? 'reset' : undefined,
+                  amount: 0
+                })
+              });
+              window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+              setToast({ message: `Reverted "${habit.habit_name}".`, type: 'info' });
+            } catch (err) {
+              console.warn('[Learning] Undo error:', err);
+            }
+          }
+        });
+      }
+    } catch (err) {
+      console.error('[Learning] Confirm habit error:', err);
+    } finally {
+      setConfirmLoading(false);
+    }
+  };
+
   const handleUpdateTopic = async (topicId, payload) => {
     if (!session) return;
     try {
@@ -268,6 +392,11 @@ export default function LearningJourneyDetail() {
       console.error('Failed to update topic:', err);
     }
     fetchJourneyDetail(true);
+
+    if (payload?.status === 'Completed') {
+      const targetTopic = journeyData?.topics?.find(t => t.id === topicId) || selectedTopic || { id: topicId, title: 'Topic' };
+      checkAndPromptConnectedHabit(targetTopic);
+    }
   };
 
   const handleAddTopic = async (e) => {
@@ -360,32 +489,8 @@ export default function LearningJourneyDetail() {
     fetchJourneyDetail(true);
   };
 
-  const handleStatusChange = async (newStatus) => {
-    if (!session || !id) return;
-    try {
-      await fetch('/api/learning?action=update_journey', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`
-        },
-        body: JSON.stringify({ id, status: newStatus })
-      });
-    } catch (err) {
-      console.error('Failed to update journey status:', err);
-    }
-    fetchJourneyDetail(true);
-  };
-
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-4 border-[#3d7a75] dark:border-[#5fae9e] border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs font-semibold text-gray-500">Loading Workspace...</span>
-        </div>
-      </div>
-    );
+    return <HabizLoader size="lg" text="Loading Workspace..." />;
   }
 
   if (fetchError || !journeyData || !journeyData.journey) {
@@ -415,59 +520,33 @@ export default function LearningJourneyDetail() {
       </button>
 
       {/* TOP HEADER CARD */}
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-3xl p-6 shadow-sm space-y-4">
+      <div className="habiz-panel rounded-3xl p-6 sm:p-7 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#e3f3ee] dark:bg-[#1c3a32] text-[#2f6b5c] dark:text-[#7fd1b9]">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-teal-500/15 text-teal-300 border border-teal-500/25">
                 {journey.category || 'Learning Journey'}
               </span>
-              <CustomSelect
-                value={journey.status || 'Active'}
-                onChange={e => handleStatusChange(e.target.value)}
-                containerClassName="w-28"
-                className="text-[11px] font-semibold bg-gray-100 dark:bg-gray-700/80 text-gray-800 dark:text-gray-200 px-2.5 py-1 rounded-full border border-gray-200/60 dark:border-gray-600/60 hover:bg-gray-200/70 dark:hover:bg-gray-600/70 focus:outline-none transition-colors"
-                dropdownClassName="w-32"
-              >
-                <option value="Active">Active</option>
-                <option value="Paused">Paused</option>
-                <option value="Completed">Completed</option>
-              </CustomSelect>
-
-              {/* Quick Mark Journey as Complete Button */}
-              <button
-                type="button"
-                onClick={() => handleStatusChange(journey.status === 'Completed' ? 'Active' : 'Completed')}
-                className={`flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full transition-colors cursor-pointer ${
-                  journey.status === 'Completed'
-                    ? 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300'
-                    : 'bg-[#e3f3ee] dark:bg-[#1c3a32] text-[#2f6b5c] dark:text-[#7fd1b9] hover:bg-[#d5ece4]'
-                }`}
-                title={journey.status === 'Completed' ? 'Mark Journey Active' : 'Mark Journey as Completed'}
-              >
-                <CheckCircle2 size={13} />
-                {journey.status === 'Completed' ? 'Undo Complete' : 'Mark Complete'}
-              </button>
 
               {/* Quick Study Reminder Button */}
               <button
                 type="button"
                 onClick={() => navigate('/reminders', { state: { openAdd: true, prefillType: 'learning', prefillId: journey.id } })}
-                className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#f0f4f8] dark:bg-[#182a40] text-[#2f5378] dark:text-[#8fb4d9] hover:bg-[#e4ecf5] dark:hover:bg-[#203650] transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/[0.04] text-slate-300 border border-white/[0.06] hover:bg-white/[0.08] transition-colors cursor-pointer"
                 title="Set Study Schedule or Deadline Reminder"
               >
-                <Bell size={13} />
+                <Bell size={13} className="text-teal-400" />
                 <span>Study Reminder</span>
               </button>
             </div>
 
-            <h1 className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight">
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
               {journey.title}
             </h1>
 
             {journey.personal_goal && (
-              <p className="text-xs text-[#3d7a75] dark:text-[#5fae9e] font-medium flex items-center gap-1">
-                <Sparkles size={13} /> Goal: {journey.personal_goal}
+              <p className="text-xs text-teal-300 font-medium flex items-center gap-1 mt-1">
+                <Sparkles size={13} className="text-amber-400" /> Goal: {journey.personal_goal}
               </p>
             )}
           </div>
@@ -481,15 +560,15 @@ export default function LearningJourneyDetail() {
               title="More actions"
               className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer ${
                 actionsMenuOpen
-                  ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white shadow-xs'
-                  : 'text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60'
+                  ? 'bg-white/[0.1] text-white shadow-xs'
+                  : 'text-slate-400 hover:text-white hover:bg-white/[0.05]'
               }`}
             >
               <MoreVertical size={18} />
             </button>
 
             {actionsMenuOpen && (
-              <div className="absolute right-0 mt-2 w-48 rounded-2xl bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700/80 shadow-xl p-1.5 z-30 animate-fadeIn space-y-0.5">
+              <div className="absolute right-0 mt-2 w-48 rounded-2xl habiz-panel border border-white/[0.08] shadow-2xl p-1.5 z-30 space-y-0.5">
                 {/* 1. Add Topic */}
                 <button
                   type="button"
@@ -497,9 +576,9 @@ export default function LearningJourneyDetail() {
                     setActionsMenuOpen(false);
                     setAddTopicOpen(true);
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-[#e3f3ee]/80 hover:text-[#2f6b5c] dark:hover:bg-[#1c3a32]/70 dark:hover:text-[#7fd1b9] transition-all duration-150 text-left cursor-pointer group"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-slate-200 hover:bg-teal-500/15 hover:text-teal-300 transition-all text-left cursor-pointer group"
                 >
-                  <div className="w-6 h-6 rounded-lg bg-[#e3f3ee] dark:bg-[#1c3a32] flex items-center justify-center text-[#2f6b5c] dark:text-[#7fd1b9] group-hover:scale-105 transition-transform">
+                  <div className="w-6 h-6 rounded-lg bg-teal-500/15 flex items-center justify-center text-teal-400 group-hover:scale-105 transition-transform">
                     <Plus size={14} />
                   </div>
                   <span>Add Topic</span>
@@ -512,21 +591,21 @@ export default function LearningJourneyDetail() {
                     setActionsMenuOpen(false);
                     setHabitModalOpen(true);
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100/80 dark:hover:bg-gray-700/60 transition-all duration-150 text-left cursor-pointer group"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-slate-200 hover:bg-white/[0.05] transition-all text-left cursor-pointer group"
                 >
-                  <div className="w-6 h-6 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-500 dark:text-gray-400 group-hover:scale-105 transition-transform">
+                  <div className="w-6 h-6 rounded-lg bg-white/[0.05] flex items-center justify-center text-slate-400 group-hover:scale-105 transition-transform">
                     <Link size={14} />
                   </div>
                   <span className="flex-1">Connect Habit</span>
                   {habitConnections && habitConnections.length > 0 && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-200/80 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300">
                       {habitConnections.length}
                     </span>
                   )}
                 </button>
 
                 {/* Divider */}
-                <div className="my-1 border-t border-gray-100 dark:border-gray-700/80" />
+                <div className="my-1 border-t border-white/[0.06]" />
 
                 {/* 3. Delete Journey (subtle destructive) */}
                 <button
@@ -535,9 +614,9 @@ export default function LearningJourneyDetail() {
                     setActionsMenuOpen(false);
                     handleDeleteJourney();
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition-all duration-150 text-left cursor-pointer group"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-red-400 hover:bg-red-500/10 transition-all text-left cursor-pointer group"
                 >
-                  <div className="w-6 h-6 rounded-lg bg-red-50 dark:bg-red-950/50 flex items-center justify-center text-red-500 dark:text-red-400 group-hover:scale-105 transition-transform">
+                  <div className="w-6 h-6 rounded-lg bg-red-500/10 flex items-center justify-center text-red-400 group-hover:scale-105 transition-transform">
                     <Trash2 size={14} />
                   </div>
                   <span>Delete Journey</span>
@@ -548,15 +627,15 @@ export default function LearningJourneyDetail() {
         </div>
 
         {/* Overview Dual Progress */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-gray-100 dark:border-gray-700 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-white/[0.06] text-xs">
           <div>
-            <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 mb-1">
+            <div className="flex items-center justify-between text-slate-400 mb-1">
               <span>Overall Completion Progress</span>
-              <span className="font-bold text-[#3d7a75] dark:text-[#5fae9e]">{journey.completion_progress}%</span>
+              <span className="font-bold text-teal-300">{journey.completion_progress}%</span>
             </div>
-            <div className="w-full h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-white/[0.05] rounded-full overflow-hidden">
               <div
-                className="h-full bg-[#5fae9e] rounded-full transition-all duration-300"
+                className="h-full bg-gradient-to-r from-[#178274] to-[#2dd4bf] rounded-full transition-all duration-300"
                 style={{ width: `${journey.completion_progress}%` }}
               />
             </div>
@@ -646,6 +725,27 @@ export default function LearningJourneyDetail() {
         journey={journey}
         onConnect={handleConnectHabit}
       />
+
+      {/* Auto-Tracking Topic-to-Habit Confirmation Modal */}
+      <TopicHabitConfirmModal
+        open={Boolean(confirmModalData)}
+        onClose={() => setConfirmModalData(null)}
+        topic={confirmModalData?.topic}
+        habit={confirmModalData?.habit}
+        loading={confirmLoading}
+        onConfirm={handleConfirmHabitDone}
+      />
+
+      {/* Undo Toast */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          actionLabel={toast.actionLabel}
+          onAction={toast.onAction}
+          onClose={() => setToast(null)}
+        />
+      )}
     </div>
   );
 }

@@ -1,39 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Quote, Sparkles, RefreshCw, Copy, Check } from 'lucide-react';
-
-const MOTIVATIONAL_QUOTES = [
-  { text: "We are what we repeatedly do. Excellence, then, is not an act, but a habit.", author: "Aristotle", category: "Excellence" },
-  { text: "Small daily improvements over time lead to stunning results.", author: "Robin Sharma", category: "Consistency" },
-  { text: "You do not rise to the level of your goals. You fall to the level of your systems.", author: "James Clear", category: "Systems" },
-  { text: "Motivation is what gets you started. Habit is what keeps you going.", author: "Jim Ryun", category: "Discipline" },
-  { text: "Success is the sum of small efforts, repeated day in and day out.", author: "Robert Collier", category: "Persistence" },
-  { text: "First we make our habits, then our habits make us.", author: "John Dryden", category: "Mindset" },
-  { text: "It is easier to prevent bad habits than to break them.", author: "Benjamin Franklin", category: "Wisdom" },
-  { text: "Chains of habit are too light to be felt until they are too heavy to be broken.", author: "Warren Buffett", category: "Awareness" },
-  { text: "Don't count the days, make the days count.", author: "Muhammad Ali", category: "Focus" },
-  { text: "Action is the foundational key to all success.", author: "Pablo Picasso", category: "Action" },
-  { text: "The secret of your future is hidden in your daily routine.", author: "Mike Murdock", category: "Routine" },
-  { text: "Discipline is choosing between what you want now and what you want most.", author: "Abraham Lincoln", category: "Discipline" },
-  { text: "Be not afraid of growing slowly, be afraid only of standing still.", author: "Chinese Proverb", category: "Growth" },
-  { text: "Energy flows where attention goes.", author: "Tony Robbins", category: "Focus" },
-  { text: "Your life does not get better by chance, it gets better by change.", author: "Jim Rohn", category: "Change" },
-  { text: "Continuous effort—not strength or intelligence—is the key to unlocking our potential.", author: "Winston Churchill", category: "Perseverance" },
-  { text: "Success isn't always about greatness. It's about consistency. Consistent hard work leads to success.", author: "Dwayne Johnson", category: "Consistency" },
-  { text: "The difference between who you are and who you want to be is what you do.", author: "Bill Phillips", category: "Identity" },
-  { text: "Start where you are. Use what you have. Do what you can.", author: "Arthur Ashe", category: "Action" },
-  { text: "A year from now you may wish you had started today.", author: "Karen Lamb", category: "Momentum" },
-  { text: "Do something today that your future self will thank you for.", author: "Sean Patrick Flanery", category: "Future Self" },
-  { text: "You don't have to be extreme, just consistent.", author: "Anonymous", category: "Consistency" },
-  { text: "Habits are the compound interest of self-improvement.", author: "James Clear", category: "Compounding" },
-  { text: "Quality is not an act, it is a habit.", author: "Aristotle", category: "Excellence" },
-  { text: "The only bad workout is the one that didn't happen.", author: "Anonymous", category: "Action" },
-  { text: "Believe you can and you're halfway there.", author: "Theodore Roosevelt", category: "Belief" },
-  { text: "Focus on progress, not perfection.", author: "Bill Gates", category: "Progress" },
-  { text: "Great things are done by a series of small things brought together.", author: "Vincent Van Gogh", category: "Mastery" },
-  { text: "The secret to getting ahead is getting started.", author: "Mark Twain", category: "Initiative" },
-  { text: "Routine, in an intelligent man, is a sign of ambition.", author: "W. H. Auden", category: "Ambition" },
-  { text: "Consistency is the true foundation of trust in yourself.", author: "Roy T. Bennett", category: "Self-Trust" },
-];
+import { MOTIVATIONAL_QUOTES } from '../constants/quotes';
 
 function getDailyQuoteIndex() {
   const today = new Date();
@@ -48,15 +15,20 @@ export default function DailyQuoteCard() {
   const dailyIdx = useMemo(() => getDailyQuoteIndex(), []);
   const [currentIdx, setCurrentIdx] = useState(dailyIdx);
   const [copied, setCopied] = useState(false);
+  const [animating, setAnimating] = useState(false);
 
   const quote = MOTIVATIONAL_QUOTES[currentIdx];
 
   const handleNextRandom = () => {
-    let nextIdx = Math.floor(Math.random() * MOTIVATIONAL_QUOTES.length);
-    if (nextIdx === currentIdx) {
-      nextIdx = (currentIdx + 1) % MOTIVATIONAL_QUOTES.length;
-    }
-    setCurrentIdx(nextIdx);
+    setAnimating(true);
+    setTimeout(() => {
+      let nextIdx = Math.floor(Math.random() * MOTIVATIONAL_QUOTES.length);
+      if (nextIdx === currentIdx) {
+        nextIdx = (currentIdx + 1) % MOTIVATIONAL_QUOTES.length;
+      }
+      setCurrentIdx(nextIdx);
+      setAnimating(false);
+    }, 150);
   };
 
   const handleCopy = () => {
@@ -68,61 +40,74 @@ export default function DailyQuoteCard() {
   const isTodayQuote = currentIdx === dailyIdx;
 
   return (
-    <div className="bg-gradient-to-br from-[#14181c] via-[#1c2734] to-[#1f3a3a] text-white rounded-2xl p-6 shadow-md border border-[#2a343d] flex flex-col justify-between relative overflow-hidden group">
+    <div className="habiz-panel h-[260px] p-5 sm:p-6 rounded-3xl relative overflow-hidden flex flex-col justify-between group shadow-xl">
       {/* Background Glow Overlay */}
-      <div className="absolute -top-10 -right-10 w-40 h-40 bg-[#3d7a75]/10 rounded-full blur-2xl pointer-events-none" />
-      <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-[#2d3f56]/10 rounded-full blur-2xl pointer-events-none" />
+      <div
+        className="absolute -top-10 -right-10 w-36 h-36 pointer-events-none opacity-20 blur-3xl rounded-full"
+        style={{ background: 'radial-gradient(circle, #178274 0%, transparent 70%)' }}
+      />
+      <div
+        className="absolute -bottom-10 -left-10 w-36 h-36 pointer-events-none opacity-15 blur-3xl rounded-full"
+        style={{ background: 'radial-gradient(circle, #f59e0b 0%, transparent 70%)' }}
+      />
 
-      {/* Top Header Row */}
-      <div className="flex items-center justify-between gap-3 mb-4 z-10">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-[#3d7a75]/20 border border-[#3d7a75]/30 flex items-center justify-center text-[#8fd0c4]">
-            <Quote size={16} />
+      {/* Top Header Row (Fixed Height) */}
+      <div className="flex items-center justify-between gap-3 flex-shrink-0 relative z-10">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-teal-500/15 border border-teal-500/25 flex items-center justify-center text-teal-300 flex-shrink-0">
+            <Quote size={15} />
           </div>
-          <div>
-            <h3 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
-              Daily Motivation
+          <div className="min-w-0">
+            <h3 className="text-xs font-bold text-white flex items-center gap-1.5 truncate">
+              <span>Daily Motivation</span>
               {isTodayQuote && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#3d7a75]/30 text-[#8fd0c4] border border-[#3d7a75]/30">
-                  Today's Quote
+                <span className="px-2 py-0.2 rounded-full text-[9px] font-bold bg-teal-950/70 text-teal-300 border border-teal-500/30">
+                  Today
                 </span>
               )}
             </h3>
-            <p className="text-[11px] text-slate-400">Fresh daily wisdom for habit consistency</p>
+            <p className="text-[10px] text-slate-400 truncate">Habit consistency wisdom</p>
           </div>
         </div>
 
-        <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white/10 text-slate-200 border border-white/10 flex items-center gap-1">
-          <Sparkles size={12} className="text-[#b5934a]" />
-          #{quote.category}
+        <span className="px-2.5 py-1 rounded-xl text-[10px] font-bold bg-white/[0.04] text-amber-300 border border-amber-500/20 flex items-center gap-1 flex-shrink-0">
+          <Sparkles size={11} className="text-amber-400" />
+          #{quote.category || 'Mindset'}
         </span>
       </div>
 
-      {/* Main Quote Content */}
-      <div className="my-3 z-10">
-        <blockquote className="text-base sm:text-lg font-medium text-slate-100 italic leading-relaxed">
-          "{quote.text}"
-        </blockquote>
-        <p className="text-xs font-semibold text-[#8fd0c4] mt-2.5 flex items-center gap-1">
-          — {quote.author}
-        </p>
+      {/* Main Quote Content Area (Fixed Height with Vertically Centered Content) */}
+      <div className="flex-1 flex flex-col justify-center my-2 relative z-10 overflow-hidden">
+        <div
+          className={`transition-all duration-200 ${
+            animating ? 'opacity-0 translate-y-1' : 'opacity-100 translate-y-0'
+          }`}
+        >
+          <blockquote className="text-xs sm:text-sm font-medium text-slate-200 italic leading-relaxed line-clamp-3">
+            "{quote.text}"
+          </blockquote>
+          <p className="text-[11px] font-bold text-teal-400 mt-2 flex items-center gap-1">
+            — {quote.author}
+          </p>
+        </div>
       </div>
 
-      {/* Action Footer */}
-      <div className="pt-4 mt-2 border-t border-white/10 flex items-center justify-between z-10 text-xs">
+      {/* Action Footer (Fixed Height) */}
+      <div className="pt-3 border-t border-white/[0.06] flex items-center justify-between relative z-10 text-xs flex-shrink-0">
         <button
           onClick={handleNextRandom}
-          className="flex items-center gap-1.5 text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-xl border border-white/10 transition-colors"
+          className="flex items-center gap-1.5 text-slate-300 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] px-3 py-1.5 rounded-xl border border-white/[0.06] transition-all cursor-pointer text-xs font-medium active:scale-95"
         >
-          <RefreshCw size={13} className="text-[#8fd0c4]" />
+          <RefreshCw size={12} className={`text-teal-400 ${animating ? 'animate-spin' : ''}`} />
           <span>New Inspiration</span>
         </button>
 
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1.5 text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-xl border border-white/10 transition-colors"
+          className="flex items-center gap-1.5 text-slate-300 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] px-3 py-1.5 rounded-xl border border-white/[0.06] transition-all cursor-pointer text-xs font-medium active:scale-95"
+          title="Copy quote"
         >
-          {copied ? <Check size={13} className="text-[#7fd1b9]" /> : <Copy size={13} className="text-[#8fd0c4]" />}
+          {copied ? <Check size={12} className="text-teal-300" /> : <Copy size={12} className="text-slate-400" />}
           <span>{copied ? 'Copied!' : 'Copy'}</span>
         </button>
       </div>

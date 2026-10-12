@@ -322,7 +322,7 @@ export default function NotificationCenter() {
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <button
-                              onClick={() => { setOpen(false); navigate(l.journeyId ? `/learning/${l.journeyId}` : '/learning'); }}
+                              onClick={() => { setOpen(false); navigate(l.journeyId ? `/learning/journey/${l.journeyId}` : '/learning'); }}
                               className="p-1 text-[#3d7a75] dark:text-[#5fae9e] hover:bg-[#3d7a75]/10 rounded-lg text-[10px] font-semibold flex items-center gap-0.5"
                             >
                               Study <ArrowRight size={11} />
@@ -382,14 +382,14 @@ export default function NotificationCenter() {
           </div>
 
           {/* Footer */}
-          <div className="p-2.5 border-t border-[#e2e8ec] dark:border-[#2a343d] bg-[#f7f9fa] dark:bg-[#14181c] flex items-center justify-between text-xs">
+          <div className="p-2.5 border-t border-white/[0.06] bg-black/40 flex items-center justify-between text-xs">
             <button
               onClick={() => { setOpen(false); navigate('/reminders'); }}
-              className="text-[#3d7a75] dark:text-[#5fae9e] font-semibold hover:underline text-xs flex items-center gap-1"
+              className="text-teal-400 font-semibold hover:underline text-xs flex items-center gap-1 cursor-pointer"
             >
               Manage all reminders →
             </button>
-            <span className="text-[10px] text-gray-400">HabitTracker Alerts</span>
+            <span className="text-[10px] text-slate-400">HabiZ Alerts</span>
           </div>
         </div>
       )}

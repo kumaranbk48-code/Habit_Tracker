@@ -129,17 +129,17 @@ export default function AIPromptModal({ open, onClose, onAddHabits, habits = [],
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="HabitTracker AI Coach">
+    <Modal open={open} onClose={onClose} title="HabiZ AI Coach">
       <div className="space-y-4 py-1">
         {/* Coach Header banner */}
-        <div className="flex items-start gap-3 p-4 bg-[#f7f9fa] dark:bg-[#14181c] border border-[#e2e8ec] dark:border-[#2a343d] rounded-2xl">
-          <div className="w-10 h-10 rounded-xl bg-[#3d7a75] flex items-center justify-center text-white shadow-md flex-shrink-0">
+        <div className="flex items-start gap-3 p-4 bg-white/[0.03] border border-white/[0.08] rounded-2xl">
+          <div className="w-10 h-10 rounded-xl bg-[#178274] flex items-center justify-center text-white shadow-md flex-shrink-0">
             <Bot size={22} />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="font-bold text-gray-900 dark:text-gray-100 text-sm">HabitTracker AI Coach</h3>
-              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#e2f0ef] dark:bg-[#14302e] text-[#2c6560] dark:text-[#7cc3bb]">
+              <h3 className="font-bold text-white text-sm">HabiZ AI Coach</h3>
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-teal-500/15 text-teal-300 border border-teal-500/25">
                 PRO COACH
               </span>
             </div>

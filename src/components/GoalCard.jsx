@@ -3,13 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import {
   Pencil, Trash2, Target, Plus, Minus, Check, X, TrendingUp, TrendingDown,
   Calendar, Layers, Activity, Flame, AlertCircle, ShieldAlert, CheckCircle2, Undo2,
-  Bell
+  Bell, PauseCircle, Play
 } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 const statusColors = {
   Pending: 'bg-[#f5ecdb] text-[#8a5a24] dark:bg-[#3a2c14] dark:text-[#dcb579] border border-[#c99a52]/40',
   'In Progress': 'bg-[#e4ecf5] text-[#2f5378] dark:bg-[#182a40] dark:text-[#8fb4d9] border border-[#2f5378]/40',
   Completed: 'bg-[#e3f3ee] text-[#2f6b5c] dark:bg-[#1c3a32] dark:text-[#7fd1b9] border border-[#2f6b5c]/40',
+  'On Hold': 'bg-amber-500/15 text-amber-300 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-500/30',
 };
 
 const goalTypeIcons = {
@@ -36,6 +38,7 @@ export default function GoalCard({
   onDeleteMilestone,
   onUpdateProgress,
   onMarkComplete,
+  onToggleHold,
 }) {
   const [newTitle, setNewTitle] = useState('');
   const [adding, setAdding] = useState(false);
@@ -117,7 +120,10 @@ export default function GoalCard({
   };
 
   return (
-    <div className="bg-white dark:bg-slate-800/90 rounded-2xl p-5 shadow-sm border border-slate-100 dark:border-slate-700/60 hover:shadow-md transition-all duration-200 flex flex-col justify-between group">
+    <motion.div
+      whileHover={{ y: -3, transition: { duration: 0.18 } }}
+      className="habiz-panel habiz-panel-interactive rounded-3xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 flex flex-col justify-between group"
+    >
       {/* Header Info */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3">
@@ -148,21 +154,34 @@ export default function GoalCard({
         <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
           <button
             onClick={() => navigate('/reminders', { state: { openAdd: true, prefillType: 'goal', prefillId: goal.id } })}
-            className="p-1.5 text-slate-400 hover:text-[#3d7a75] dark:hover:text-[#5fae9e] hover:bg-[#eaf4f2] dark:hover:bg-[#1c3733] rounded-lg transition-colors"
+            className="p-1.5 text-slate-400 hover:text-[#3d7a75] dark:hover:text-[#5fae9e] hover:bg-[#eaf4f2] dark:hover:bg-[#1c3733] rounded-lg transition-colors cursor-pointer"
             title="Set Deadline or Check-in Reminder"
           >
             <Bell size={15} />
           </button>
+          {onToggleHold && goal.status !== 'Completed' && (
+            <button
+              onClick={() => onToggleHold(goal.id, goal.status)}
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                goal.status === 'On Hold'
+                  ? 'text-teal-400 hover:text-teal-300 hover:bg-teal-500/10'
+                  : 'text-slate-400 hover:text-amber-400 hover:bg-amber-500/10'
+              }`}
+              title={goal.status === 'On Hold' ? 'Resume Goal' : 'Put Goal on Hold'}
+            >
+              {goal.status === 'On Hold' ? <Play size={15} fill="currentColor" /> : <PauseCircle size={15} />}
+            </button>
+          )}
           <button
             onClick={() => onEdit(goal)}
-            className="p-1.5 text-slate-400 hover:text-[#3d7a75] dark:hover:text-[#5fae9e] hover:bg-[#eaf4f2] dark:hover:bg-[#1c3733] rounded-lg transition-colors"
+            className="p-1.5 text-slate-400 hover:text-[#3d7a75] dark:hover:text-[#5fae9e] hover:bg-[#eaf4f2] dark:hover:bg-[#1c3733] rounded-lg transition-colors cursor-pointer"
             title="Edit Goal"
           >
             <Pencil size={15} />
           </button>
           <button
             onClick={() => onDelete(goal.id)}
-            className="p-1.5 text-slate-400 hover:text-[#b3453f] dark:hover:text-[#e2a8a3] hover:bg-[#fbebeb] dark:hover:bg-[#3a2020] rounded-lg transition-colors"
+            className="p-1.5 text-slate-400 hover:text-[#b3453f] dark:hover:text-[#e2a8a3] hover:bg-[#fbebeb] dark:hover:bg-[#3a2020] rounded-lg transition-colors cursor-pointer"
             title="Delete Goal"
           >
             <Trash2 size={15} />
@@ -175,6 +194,30 @@ export default function GoalCard({
         <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${statusColors[goal.status] || 'bg-slate-100 text-slate-600'}`}>
           {goal.status}
         </span>
+
+        {/* Quick Put on Hold / Resume pill button */}
+        {goal.status !== 'Completed' && onToggleHold && (
+          <button
+            type="button"
+            onClick={() => onToggleHold(goal.id, goal.status)}
+            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+              goal.status === 'On Hold'
+                ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 hover:bg-teal-500/25'
+                : 'bg-white/[0.04] text-slate-400 hover:text-amber-300 border border-white/[0.08] hover:border-amber-500/30 hover:bg-amber-500/10'
+            }`}
+            title={goal.status === 'On Hold' ? 'Resume this goal' : 'Put this goal on hold'}
+          >
+            {goal.status === 'On Hold' ? (
+              <>
+                <Play size={11} fill="currentColor" /> Resume
+              </>
+            ) : (
+              <>
+                <PauseCircle size={12} /> Put on Hold
+              </>
+            )}
+          </button>
+        )}
 
         {goalType === 'Target' && hasQuantity && goal.status !== 'Completed' && (
           <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${
@@ -211,13 +254,15 @@ export default function GoalCard({
         </div>
 
         <div className="h-2 bg-[#f1f3f5] dark:bg-[#14181c] rounded-full overflow-hidden relative">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ${
+          <motion.div
+            className={`h-full rounded-full ${
               isBadHabit
                 ? 'bg-gradient-to-r from-[#c99a52] to-[#b3574f]'
                 : 'bg-gradient-to-r from-[#3d7a75] via-[#5fae9e] to-[#8fd0c4]'
             }`}
-            style={{ width: `${pct}%` }}
+            initial={{ width: 0 }}
+            animate={{ width: `${pct}%` }}
+            transition={{ duration: 0.65, ease: 'easeOut' }}
           />
         </div>
 
@@ -235,12 +280,31 @@ export default function GoalCard({
         )}
       </div>
 
-      {/* Mark Complete button for non-quantity, non-milestone goals */}
-      {!hasQuantity && milestones.length === 0 && goal.status !== 'Completed' && onMarkComplete && (
+      {/* On Hold prominent banner & Resume action */}
+      {goal.status === 'On Hold' && onToggleHold && (
+        <div className="mb-4 flex items-center justify-between p-3 bg-amber-500/10 dark:bg-amber-950/30 rounded-2xl border border-amber-500/30">
+          <div className="flex items-center gap-2">
+            <PauseCircle size={16} className="text-amber-400 flex-shrink-0" />
+            <span className="text-xs font-semibold text-amber-300">Goal is On Hold</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => onToggleHold(goal.id, goal.status)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-[#178274] hover:bg-[#136c60] text-white rounded-xl transition-all cursor-pointer shadow-xs active:scale-95"
+          >
+            <Play size={12} fill="currentColor" />
+            Resume Goal
+          </button>
+        </div>
+      )}
+
+      {/* Mark Complete button for goals that are not completed */}
+      {goal.status !== 'Completed' && onMarkComplete && (
         <div className="mb-4">
           <button
+            type="button"
             onClick={() => onMarkComplete(goal.id)}
-            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-[#e2f0ef] dark:bg-[#14302e] text-[#3d7a75] dark:text-[#5fae9e] hover:bg-[#3d7a75] hover:text-white dark:hover:bg-[#5fae9e] dark:hover:text-[#0e2320] rounded-xl text-xs font-semibold transition-all duration-200 border border-[#3d7a75]/20 dark:border-[#5fae9e]/20 hover:shadow-md hover:shadow-[#3d7a75]/15 active:scale-[0.98]"
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-[#e2f0ef] dark:bg-[#14302e] text-[#3d7a75] dark:text-[#5fae9e] hover:bg-[#3d7a75] hover:text-white dark:hover:bg-[#5fae9e] dark:hover:text-[#0e2320] rounded-xl text-xs font-semibold transition-all duration-200 border border-[#3d7a75]/20 dark:border-[#5fae9e]/20 hover:shadow-md hover:shadow-[#3d7a75]/15 active:scale-[0.98] cursor-pointer"
           >
             <CheckCircle2 size={15} />
             Mark as Complete
@@ -248,16 +312,17 @@ export default function GoalCard({
         </div>
       )}
 
-      {/* Completed state indicator for manually-completed goals (allows undo) */}
-      {!hasQuantity && milestones.length === 0 && goal.status === 'Completed' && onMarkComplete && (
+      {/* Completed state indicator with Undo button */}
+      {goal.status === 'Completed' && onMarkComplete && (
         <div className="mb-4 flex items-center justify-between p-2.5 bg-[#e3f3ee] dark:bg-[#1c3a32] rounded-xl border border-[#2f6b5c]/20 dark:border-[#7fd1b9]/20">
           <div className="flex items-center gap-2">
             <CheckCircle2 size={15} className="text-[#2f6b5c] dark:text-[#7fd1b9]" />
-            <span className="text-xs font-semibold text-[#2f6b5c] dark:text-[#7fd1b9]">Goal Completed!</span>
+            <span className="text-xs font-semibold text-[#2f6b5c] dark:text-[#7fd1b9]">Goal Completed! 🎉</span>
           </div>
           <button
+            type="button"
             onClick={() => onMarkComplete(goal.id, true)}
-            className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-[#8a5a24] dark:hover:text-[#dcb579] hover:bg-[#f5ecdb]/50 dark:hover:bg-[#3a2c14]/50 rounded-lg transition-colors"
+            className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-[#8a5a24] dark:hover:text-[#dcb579] hover:bg-[#f5ecdb]/50 dark:hover:bg-[#3a2c14]/50 rounded-lg transition-colors cursor-pointer"
             title="Revert to In Progress"
           >
             <Undo2 size={12} />
@@ -389,6 +454,6 @@ export default function GoalCard({
           </button>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

@@ -62,6 +62,25 @@ export function getCellStatus(habit, dateStr, log, todayStr) {
     };
   }
 
+  // Feature 3: Paused habits are never marked as missed
+  const statusDone = log?.status === true;
+  if (habit?.status === 'paused' && !statusDone) {
+    return {
+      type: 'PAUSED',
+      symbol: '⏸',
+      label: 'Paused for Season',
+      scheduled: false,
+      isDone: false,
+      isPartial: false,
+      isMissed: false,
+      isNotScheduled: true,
+      isFuture: false,
+      quantityDone: 0,
+      targetQuantity: habit?.target_quantity || 0,
+      progressPct: 0,
+    };
+  }
+
   if (!scheduled) {
     return {
       type: 'NOT_SCHEDULED',
@@ -82,7 +101,6 @@ export function getCellStatus(habit, dateStr, log, todayStr) {
   const isQuantity = habit?.tracking_type === 'quantity';
   const target = habit?.target_quantity || 1;
   const quantityDone = log?.quantity_completed || 0;
-  const statusDone = log?.status === true;
 
   if (isQuantity) {
     const isFullyDone = statusDone || quantityDone >= target;
@@ -199,11 +217,15 @@ export function calculateMonthlyAnalytics(habits = [], trackingLogs = [], viewYe
       if (dateStr > todayStr) continue;
 
       if (isHabitScheduledOnDate(habit, dateStr)) {
+        const log = trackingMap.get(`${habit.id}_${dateStr}`);
+        const status = getCellStatus(habit, dateStr, log, todayStr);
+        if (status.type === 'PAUSED') {
+          // Feature 3: Paused days are excluded from completion-rate math
+          continue;
+        }
         scheduledDays++;
         totalScheduledOpportunities++;
 
-        const log = trackingMap.get(`${habit.id}_${dateStr}`);
-        const status = getCellStatus(habit, dateStr, log, todayStr);
         if (status.isDone) {
           completedDays++;
           completedScheduledOpportunities++;

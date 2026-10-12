@@ -104,7 +104,7 @@ function buildEmailHtml({ displayName, streak, longestStreak, completionsThisWee
     <div style="padding:28px 32px;text-align:center;">
       <a href="${process.env.VITE_APP_URL || 'https://your-app.vercel.app'}"
         style="display:inline-block;background:linear-gradient(135deg,#3d7a75,#2f5378);color:#fff;text-decoration:none;padding:14px 36px;border-radius:12px;font-weight:700;font-size:15px;box-shadow:0 4px 12px rgba(61,122,117,0.3);">
-        Open HabitTracker →
+        Open HabiZ →
       </a>
       <div style="font-size:11px;color:#9ca3af;margin-top:20px;">
         You're receiving this because you enabled weekly digests.<br/>
@@ -184,11 +184,11 @@ export default async function handler(req, res) {
         const resend = getResend();
         if (resend) {
           await resend.emails.send({
-            from: 'HabitTracker <digest@habittracker.app>',
+            from: 'HabiZ <digest@habiz.app>',
             to: user.email,
             subject: streak > 0
-              ? `🔥 ${streak}-day streak — Your weekly digest`
-              : `📊 Your weekly HabitTracker digest`,
+              ? `🔥 ${streak}-day streak — Your weekly HabiZ digest`
+              : `📊 Your weekly HabiZ digest`,
             html: buildEmailHtml({
               displayName,
               streak,

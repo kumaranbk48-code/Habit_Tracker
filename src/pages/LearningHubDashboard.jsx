@@ -7,8 +7,12 @@ import CreateJourneyModal from '../components/learning/CreateJourneyModal';
 import ContextualInfo from '../components/learning/ContextualInfo';
 import {
   Compass, Plus, Sparkles, Flame, CheckCircle2, BookOpen, Layers,
-  ArrowRight, HelpCircle, AlertCircle, PlayCircle, Clock, Calendar, BarChart2, Trash2
+  ArrowRight, HelpCircle, AlertCircle, PlayCircle, Clock, Calendar, BarChart2, Trash2,
+  Search, X
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import HabizLoader from '../components/HabizLoader';
+import { LEARNING_FILTER_CATEGORIES, matchesLearningCategory } from '../constants/learningCategories';
 
 export default function LearningHubDashboard() {
   const { session } = useAuth();
@@ -26,6 +30,8 @@ export default function LearningHubDashboard() {
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [fetchError, setFetchError] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [searchTopic, setSearchTopic] = useState('');
   const initialLoadDone = useRef(false);
 
   const fetchDashboardData = useCallback(async (silent = false) => {
@@ -161,49 +167,50 @@ export default function LearningHubDashboard() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-4 border-[#3d7a75] border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs font-semibold text-gray-500">Preparing your Learning Space...</span>
-        </div>
-      </div>
-    );
+    return <HabizLoader size="lg" text="Preparing your Learning Space..." />;
   }
 
   const { journeys, continueJourney, todaysFocus, stats } = data;
 
+  // Default featured item if no continueJourney exists yet
+  const featuredJourney = continueJourney || (journeys && journeys[0]) || {
+    id: 'demo-dsa',
+    title: 'Data Structures & Algorithms in Java',
+    category: 'Tech & Coding',
+    current_topic: 'Binary Trees & Traversals',
+    completion_progress: 40,
+    understanding_progress: 55,
+  };
+
+  const trimmedSearch = searchTopic.trim().toLowerCase();
+  const filteredJourneys = (journeys || []).filter(j => {
+    const matchesCat = matchesLearningCategory(j.category, selectedCategory);
+    const matchesSearch = !trimmedSearch ||
+      j.title?.toLowerCase().includes(trimmedSearch) ||
+      j.category?.toLowerCase().includes(trimmedSearch);
+    return matchesCat && matchesSearch;
+  });
+
   return (
-    <div className="space-y-8 page-enter pb-12">
-      {/* SECTION 1: HEADER */}
+    <div className="space-y-7 page-enter pb-12">
+      {/* ── SECTION 1: HEADER (Matching Reference) ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#e4ecf5] dark:bg-[#182a40] text-[#2f5378] dark:text-[#8fb4d9]">
-              Personal Environment
-            </span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
             Your Learning Space
           </h1>
-          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-1">
-            "You create the path. We help you complete it."
+          <p className="text-xs sm:text-sm text-slate-400 mt-1">
+            You create the path. We help you complete it.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <span className="hidden md:inline text-xs font-semibold text-teal-300 bg-teal-950/70 border border-teal-500/25 px-3 py-1.5 rounded-full">
+            Smarter today, Stronger tomorrow.
+          </span>
           <button
-            onClick={() => setOnboardingOpen(true)}
-            className="flex items-center gap-1.5 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-3.5 py-2.5 rounded-2xl transition-all shadow-md shadow-[#3d7a75]/20"
-          >
-            <HelpCircle size={15} className="text-white" /> How it Works
-          </button>
-          <button
-            onClick={() => {
-              setOnboardingOpen(false);
-              setCreateModalOpen(true);
-            }}
-            className="flex items-center gap-1.5 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-4 py-2.5 rounded-2xl shadow-md shadow-[#3d7a75]/20 transition-all"
+            onClick={() => setCreateModalOpen(true)}
+            className="flex items-center gap-1.5 text-xs font-bold bg-[#178274] hover:bg-[#136c60] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-teal-950/40 transition-all cursor-pointer"
           >
             <Plus size={16} /> New Journey
           </button>
@@ -211,146 +218,191 @@ export default function LearningHubDashboard() {
       </div>
 
       {fetchError && (
-        <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-2xl text-xs text-red-600 dark:text-red-300">
+        <div className="p-4 bg-red-950/40 border border-red-800/60 rounded-2xl text-xs text-red-300">
           {fetchError}
         </div>
       )}
 
-      {/* EMPTY STATE */}
-      {(!journeys || journeys.length === 0) ? (
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-3xl p-8 sm:p-12 text-center shadow-sm">
-          <div className="w-16 h-16 bg-[#e4ecf5] dark:bg-[#182a40] rounded-3xl flex items-center justify-center text-[#2f5378] dark:text-[#8fb4d9] mx-auto mb-4">
-            <Compass size={32} />
+      {/* ── SECTION 2: HERO CONTINUE LEARNING (Matching Reference with 3D Laptop Art) ── */}
+      <div className="habiz-panel p-6 sm:p-8 rounded-3xl relative overflow-hidden">
+        {/* Subtle background glow */}
+        <div className="absolute right-0 top-0 bottom-0 w-full sm:w-1/2 opacity-35 sm:opacity-50 pointer-events-none bg-cover bg-center mix-blend-screen"
+          style={{
+            backgroundImage: 'url(/assets/learning-art.jpg)',
+            maskImage: 'linear-gradient(to right, transparent 0%, rgba(0,0,0,0.7) 40%, black 100%)',
+            WebkitMaskImage: 'linear-gradient(to right, transparent 0%, rgba(0,0,0,0.7) 40%, black 100%)',
+          }}
+        />
+
+        <div className="relative z-10 max-w-xl space-y-4">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-teal-400 bg-teal-950/70 border border-teal-500/30 px-2.5 py-0.5 rounded-full">
+              Continue Learning
+            </span>
+            <span className="text-xs text-slate-400">• {featuredJourney.category || 'Development'}</span>
           </div>
-          <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">No Learning Journeys Yet</h3>
-          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mb-6">
-            You can start with anything you want to learn — coding, video editing, guitar, languages, design, or any custom skill.
-          </p>
-          <div className="flex flex-wrap justify-center gap-3">
-            <button
-              onClick={() => setCreateModalOpen(true)}
-              className="flex items-center gap-2 text-xs font-semibold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-6 py-3 rounded-2xl shadow-md transition-all"
+
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-snug">
+            {featuredJourney.title}
+          </h2>
+
+          <div className="text-xs text-slate-300 flex items-center gap-2">
+            <span className="text-slate-400">Current Focus:</span>
+            <span className="font-semibold text-white bg-white/[0.08] px-2.5 py-1 rounded-lg">
+              {featuredJourney.current_topic || 'Core Foundations'}
+            </span>
+          </div>
+
+          {/* Progress Bar & Continue CTA */}
+          <div className="pt-2 max-w-md space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-400 font-medium">Agile / {featuredJourney.category || 'Self-Paced'}</span>
+              <span className="font-bold text-teal-300">{featuredJourney.completion_progress || 40}%</span>
+            </div>
+            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-teal-400 rounded-full transition-all duration-500"
+                style={{ width: `${featuredJourney.completion_progress || 40}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => {
+                if (featuredJourney.id && !featuredJourney.id.startsWith('demo-')) {
+                  navigate(`/learning/journey/${featuredJourney.id}`);
+                } else if (journeys?.[0]?.id) {
+                  navigate(`/learning/journey/${journeys[0].id}`);
+                } else {
+                  setCreateModalOpen(true);
+                }
+              }}
+              className="inline-flex items-center gap-2 text-xs font-bold bg-[#178274] hover:bg-[#136c60] text-white px-5 py-2.5 rounded-xl shadow-lg transition-colors cursor-pointer"
             >
-              <Plus size={16} /> Create Your First Journey
-            </button>
-            <button
-              onClick={() => setOnboardingOpen(true)}
-              className="flex items-center gap-1.5 text-xs font-semibold bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-5 py-3 rounded-2xl hover:bg-gray-200 dark:hover:bg-gray-600 transition-all"
-            >
-              Explore Learning Hub
-            </button>
+              <span>Continue</span>
+              <ArrowRight size={14} />
+            </motion.button>
           </div>
         </div>
-      ) : (
-        <>
-          {/* SECTION 2: CONTINUE LEARNING (HERO SECTION) */}
-          {continueJourney && (
-            <div className="relative overflow-hidden bg-gradient-to-br from-[#14181c] via-[#1c2734] to-[#1f3a3a] border border-[#2a343d] text-white rounded-3xl p-6 sm:p-8 shadow-xl">
-              <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-[#3d7a75]/10 rounded-full blur-3xl" />
-              
-              <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-                <div className="space-y-3 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-[#1f3a3a] text-[#8fd0c4] border border-[#3d7a75]/40">
-                      Continue Learning
-                    </span>
-                    <span className="text-xs text-slate-300">• {continueJourney.category || 'General'}</span>
-                  </div>
+      </div>
 
-                  <h2 className="text-2xl sm:text-3xl font-black tracking-tight">
-                    {continueJourney.title}
-                  </h2>
+      {/* ── SECTION 3: CATEGORY PILLS & TOPIC SEARCH (Matching Reference) ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none relative">
+          {LEARNING_FILTER_CATEGORIES.map(cat => {
+            const isSelected = selectedCategory === cat;
+            return (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`relative px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors cursor-pointer whitespace-nowrap ${
+                  isSelected
+                    ? 'text-teal-300'
+                    : 'bg-white/[0.03] text-slate-400 hover:text-white border border-white/[0.05]'
+                }`}
+              >
+                {isSelected && (
+                  <motion.div
+                    layoutId="activeLearningCategoryPill"
+                    className="absolute inset-0 bg-[#153834] border border-teal-500/35 rounded-xl shadow-xs -z-0"
+                    transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                  />
+                )}
+                <span className="relative z-10">{cat}</span>
+              </button>
+            );
+          })}
+        </div>
 
-                  <div className="flex items-center gap-2 text-xs text-slate-300">
-                    <span>Currently Learning:</span>
-                    <span className="font-bold text-white bg-white/10 px-2.5 py-1 rounded-lg">
-                      {continueJourney.current_topic}
-                    </span>
-                  </div>
-
-                  {/* Dual Progress Bars */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 max-w-lg">
-                    <div>
-                      <div className="flex items-center justify-between text-xs mb-1">
-                        <span className="text-slate-300">Completion</span>
-                        <span className="font-bold text-white">{continueJourney.completion_progress}%</span>
-                      </div>
-                      <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-[#5fae9e] rounded-full transition-all duration-500"
-                          style={{ width: `${continueJourney.completion_progress}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between text-xs mb-1">
-                        <span className="text-[#b0aee0]">My Understanding</span>
-                        <span className="font-bold text-[#b0aee0]">{continueJourney.understanding_progress}%</span>
-                      </div>
-                      <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-[#7570ab] rounded-full transition-all duration-500"
-                          style={{ width: `${continueJourney.understanding_progress}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex-shrink-0">
-                  <button
-                    onClick={() => navigate(`/learning/journey/${continueJourney.id}`)}
-                    className="flex items-center gap-2 text-sm font-bold bg-white text-[#14181c] hover:bg-[#eef1f3] px-6 py-3.5 rounded-2xl shadow-lg transition-all transform hover:scale-105"
-                  >
-                    <PlayCircle size={18} className="text-[#3d7a75]" /> Continue Learning
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* SECTION 3: TODAY'S FOCUS */}
-          <TodaysFocusCard
-            focusItems={todaysFocus}
-            onCompleteTask={handleCompleteTask}
-            onOpenJourney={(id) => navigate(`/learning/journey/${id}`)}
+        <div className="relative">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            value={searchTopic}
+            onChange={(e) => setSearchTopic(e.target.value)}
+            placeholder="Search journeys..."
+            className="w-full sm:w-56 pl-8 pr-7 py-1.5 text-xs rounded-xl bg-black/30 border border-white/[0.08] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-teal-500/50 transition-all"
           />
+          {searchTopic && (
+            <button
+              type="button"
+              onClick={() => setSearchTopic('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              title="Clear search"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      </div>
 
-          {/* SECTION 4: ACTIVE LEARNING JOURNEYS */}
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-bold text-gray-900 dark:text-white text-lg">Active Learning Journeys</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400">All your active learning paths</p>
-              </div>
-              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-                {journeys.length} {journeys.length === 1 ? 'Journey' : 'Journeys'}
-              </span>
-            </div>
+      {/* ── SECTION 4: MY LEARNING JOURNEYS ── */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-bold text-white">My Learning Journeys</h3>
+          <span className="text-xs text-slate-400">
+            {filteredJourneys.length} {filteredJourneys.length === 1 ? 'Journey' : 'Journeys'}
+          </span>
+        </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {journeys.map(j => (
-                <div
+        {filteredJourneys.length === 0 ? (
+          <div className="habiz-panel p-8 text-center rounded-3xl space-y-3">
+            <BookOpen size={28} className="mx-auto text-teal-400/70" />
+            <h4 className="text-sm font-bold text-white">
+              {trimmedSearch ? `No journeys matching "${searchTopic}"` : 'Start your first learning roadmap'}
+            </h4>
+            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+              {trimmedSearch ? 'Try a different keyword or category filter.' : 'Track courses, skills, and books with structured milestones and study habit check-ins.'}
+            </p>
+            {trimmedSearch ? (
+              <button
+                type="button"
+                onClick={() => { setSearchTopic(''); setSelectedCategory('All'); }}
+                className="text-xs font-semibold text-teal-300 hover:underline cursor-pointer"
+              >
+                Clear search filter
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCreateModalOpen(true)}
+                className="text-xs font-bold text-teal-300 bg-teal-950/70 border border-teal-500/30 px-4 py-2 rounded-xl hover:bg-teal-900 transition-colors"
+              >
+                + Create Learning Journey
+              </button>
+            )}
+          </div>
+        ) : (
+          <motion.div layout className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <AnimatePresence mode="popLayout">
+              {filteredJourneys.map(j => (
+                <motion.div
+                  layout
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  whileHover={{ y: -3 }}
+                  transition={{ duration: 0.2 }}
                   key={j.id}
                   onClick={() => navigate(`/learning/journey/${j.id}`)}
-                  className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-3xl p-5 shadow-sm hover:shadow-md hover:border-[#3d7a75] dark:hover:border-[#5fae9e] transition-all cursor-pointer flex flex-col justify-between"
+                  className="habiz-panel habiz-panel-interactive p-5 rounded-3xl cursor-pointer flex flex-col justify-between space-y-4 group"
                 >
                   <div className="space-y-3">
                     <div className="flex items-start justify-between gap-2">
-                      <div className="w-10 h-10 rounded-2xl bg-[#e4ecf5] dark:bg-[#182a40] text-[#2f5378] dark:text-[#8fb4d9] flex items-center justify-center font-bold">
-                        <BookOpen size={20} />
+                      <div className="w-10 h-10 rounded-xl bg-teal-500/15 border border-teal-500/25 text-teal-300 flex items-center justify-center">
+                        <BookOpen size={18} />
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
-                          j.status === 'Active' ? 'bg-[#e3f3ee] text-[#2f6b5c] dark:bg-[#1c3a32] dark:text-[#7fd1b9]' : 'bg-[#f1f3f5] text-[#4b5563] dark:bg-[#2a343d] dark:text-[#cbd5e1]'
-                        }`}>
-                          {j.status}
+                        <span className="text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-teal-950/60 text-teal-300 border border-teal-500/25">
+                          {j.category || 'Learning'}
                         </span>
                         <button
                           type="button"
                           onClick={(e) => handleDeleteJourney(e, j.id)}
-                          className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+                          className="text-slate-500 hover:text-red-400 p-1 rounded-lg transition-colors"
                           title="Delete journey"
                         >
                           <Trash2 size={13} />
@@ -359,77 +411,71 @@ export default function LearningHubDashboard() {
                     </div>
 
                     <div>
-                      <h4 className="font-bold text-base text-gray-900 dark:text-white line-clamp-1">
+                      <h4 className="text-sm font-bold text-white group-hover:text-teal-200 transition-colors truncate">
                         {j.title}
                       </h4>
-                      {j.personal_goal && (
-                        <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1 mt-0.5">
-                          Goal: {j.personal_goal}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="p-2.5 bg-gray-50 dark:bg-gray-900/60 rounded-xl text-xs flex items-center justify-between">
-                      <span className="text-gray-500 dark:text-gray-400">Current Topic:</span>
-                      <span className="font-semibold text-gray-800 dark:text-gray-200 truncate max-w-[140px]">
-                        {j.current_topic}
-                      </span>
-                    </div>
-
-                    {/* Progress */}
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-gray-500 dark:text-gray-400">Progress</span>
-                        <span className="font-bold text-[#3d7a75] dark:text-[#5fae9e]">{j.completion_progress}%</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-[#5fae9e] rounded-full transition-all duration-300"
-                          style={{ width: `${j.completion_progress}%` }}
-                        />
-                      </div>
+                      <p className="text-xs text-slate-400 mt-0.5 truncate">
+                        {j.current_topic ? `Topic: ${j.current_topic}` : j.personal_goal || 'Self-paced mastery'}
+                      </p>
                     </div>
                   </div>
 
-                  <div className="pt-4 mt-4 border-t border-gray-100 dark:border-gray-700/60 flex items-center justify-between text-xs">
-                    <span className="text-gray-400">{j.topics_count || 0} Topics</span>
-                    <span className="font-semibold text-[#3d7a75] dark:text-[#5fae9e] flex items-center gap-1 hover:underline">
-                      Continue <ArrowRight size={14} />
-                    </span>
+                  <div className="space-y-2 pt-2 border-t border-white/[0.04]">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-400">{j.topics_count || 5} topics</span>
+                      <span className="font-bold text-teal-300">{j.completion_progress || 0}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-teal-400 rounded-full transition-all duration-300"
+                        style={{ width: `${j.completion_progress || 0}%` }}
+                      />
+                    </div>
                   </div>
-                </div>
+                </motion.div>
               ))}
-            </div>
-          </div>
+            </AnimatePresence>
+          </motion.div>
+        )}
+      </div>
 
-          {/* SECTION 5: LEARNING CONSISTENCY STATS */}
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-3xl p-6 shadow-sm">
-            <div className="flex items-center gap-2 mb-4">
-              <Flame className="text-[#c99a52] fire-bounce" size={20} />
-              <h3 className="font-bold text-gray-900 dark:text-white text-base">Learning Consistency</h3>
-            </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="p-4 bg-[#f5ecdb] dark:bg-[#3a2c14] border border-[#c99a52]/40 rounded-2xl text-center">
-                <div className="text-2xl font-black text-[#8a5a24] dark:text-[#dcb579]">{stats.streak}</div>
-                <div className="text-xs text-[#8a5a24] dark:text-[#dcb579] font-medium">Day Streak</div>
-              </div>
-              <div className="p-4 bg-[#e4ecf5] dark:bg-[#182a40] border border-[#2f5378]/40 rounded-2xl text-center">
-                <div className="text-2xl font-black text-[#2f5378] dark:text-[#8fb4d9]">{stats.totalActiveDays}</div>
-                <div className="text-xs text-[#2f5378] dark:text-[#8fb4d9] font-medium">Active Days</div>
-              </div>
-              <div className="p-4 bg-[#eae7f5] dark:bg-[#232042] border border-[#7570ab]/40 rounded-2xl text-center">
-                <div className="text-2xl font-black text-[#4b4a8a] dark:text-[#b0aee0]">{stats.topicsCompleted}</div>
-                <div className="text-xs text-[#4b4a8a] dark:text-[#b0aee0] font-medium">Topics Completed</div>
-              </div>
-              <div className="p-4 bg-[#e3f3ee] dark:bg-[#1c3a32] border border-[#2f6b5c]/40 rounded-2xl text-center">
-                <div className="text-2xl font-black text-[#2f6b5c] dark:text-[#7fd1b9]">{stats.tasksCompleted}</div>
-                <div className="text-xs text-[#2f6b5c] dark:text-[#7fd1b9] font-medium">Tasks Completed</div>
-              </div>
-            </div>
-          </div>
-        </>
+
+      {/* ── SECTION 6: TODAY'S FOCUS & CONSISTENCY ── */}
+      {todaysFocus?.length > 0 && (
+        <TodaysFocusCard
+          focusItems={todaysFocus}
+          onCompleteTask={handleCompleteTask}
+          onOpenJourney={(id) => navigate(`/learning/journey/${id}`)}
+        />
       )}
+
+      {/* Consistency Stats */}
+      <div className="habiz-panel p-5 sm:p-6 rounded-3xl">
+        <div className="flex items-center gap-2 mb-4">
+          <Flame className="text-amber-400 fire-bounce" size={18} />
+          <h3 className="font-bold text-white text-base">Learning Consistency</h3>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-center">
+            <div className="text-2xl font-black text-amber-300">{stats.streak}</div>
+            <div className="text-xs text-slate-400 mt-0.5">Day Streak</div>
+          </div>
+          <div className="p-3.5 bg-sky-500/10 border border-sky-500/20 rounded-2xl text-center">
+            <div className="text-2xl font-black text-sky-300">{stats.totalActiveDays}</div>
+            <div className="text-xs text-slate-400 mt-0.5">Active Days</div>
+          </div>
+          <div className="p-3.5 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl text-center">
+            <div className="text-2xl font-black text-indigo-300">{stats.topicsCompleted}</div>
+            <div className="text-xs text-slate-400 mt-0.5">Topics Completed</div>
+          </div>
+          <div className="p-3.5 bg-teal-500/10 border border-teal-500/20 rounded-2xl text-center">
+            <div className="text-2xl font-black text-teal-300">{stats.tasksCompleted}</div>
+            <div className="text-xs text-slate-400 mt-0.5">Tasks Completed</div>
+          </div>
+        </div>
+      </div>
 
       {/* MODALS */}
       <LearningOnboardingModal

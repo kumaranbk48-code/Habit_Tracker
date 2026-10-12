@@ -21,7 +21,8 @@ async function sanitizePayload(table, payload) {
     // Always keep standard base columns
     if ([
       'user_id', 'id', 'target_type', 'habit_id', 'goal_id', 'journey_id',
-      'topic_id', 'reminder_mode', 'days_before_deadline', 'reminder_time', 'notification_status'
+      'topic_id', 'reminder_mode', 'days_before_deadline', 'reminder_time',
+      'notification_status', 'is_alarm', 'alerts', 'custom_text', 'routine_window', 'days_of_week'
     ].includes(key)) {
       sanitized[key] = value;
       continue;
@@ -37,8 +38,9 @@ async function sanitizePayload(table, payload) {
 function cleanTime(val) {
   if (!val) return null;
   const str = typeof val === 'string' ? val : (val.target?.value || val.value || '');
-  if (typeof str === 'string' && str.includes(':')) {
-    const parts = str.split(':');
+  const clean = String(str).replace(/[{}"'\s]/g, '').trim();
+  if (clean.includes(':')) {
+    const parts = clean.split(':');
     const h = String(parseInt(parts[0], 10) || 0).padStart(2, '0');
     const m = String(parseInt(parts[1], 10) || 0).padStart(2, '0');
     return `${h}:${m}`;
@@ -48,7 +50,7 @@ function cleanTime(val) {
 
 const REMINDER_SELECT = `
   *,
-  habits(id, habit_name, color, icon),
+  habits(id, habit_name, color, icon, tracking_type, target_quantity, unit),
   goals(id, goal_name, target_date, status),
   learning_journeys:journey_id(id, title, target_date, status),
   learning_topics:topic_id(id, title, target_date, status)
@@ -65,8 +67,23 @@ export default async function handler(req, res) {
   const user_id = user.id;
 
   try {
-    // ── GET: Fetch reminders (with optional target_type filter) ────────────────
+    // ── GET: Fetch reminders (with optional target_type filter or reping_status) ────────────────
     if (req.method === 'GET') {
+      if (req.query?.action === 'reping_status') {
+        const today = new Date().toISOString().split('T')[0];
+        try {
+          const { data } = await supabase
+            .from('reminder_events')
+            .select('*')
+            .eq('user_id', user_id)
+            .eq('event_date', today)
+            .order('created_at', { ascending: false });
+          return res.status(200).json(data || []);
+        } catch {
+          return res.status(200).json([]);
+        }
+      }
+
       const targetType = req.query?.target_type;
 
       // Attempt polymorphic select with joined relations
@@ -84,7 +101,12 @@ export default async function handler(req, res) {
         const { data, error } = await query;
 
         if (!error && data) {
-          return res.status(200).json(data);
+          const mapped = data.map((r) => ({
+            ...r,
+            reminder_mode: r.reminder_mode === 'alarm' ? 'scheduled' : (r.reminder_mode || 'scheduled'),
+            is_alarm: Boolean(r.is_alarm || r.reminder_mode === 'alarm'),
+          }));
+          return res.status(200).json(mapped);
         }
 
         // If schema hasn't been migrated yet (e.g. column target_type or relations missing / PGRST200)
@@ -93,16 +115,17 @@ export default async function handler(req, res) {
           try {
             const legacyQuery = await supabase
               .from('reminders')
-              .select('*, habits(id, habit_name, color, icon)')
+              .select('*, habits(id, habit_name, color, icon, tracking_type, target_quantity, unit)')
               .eq('user_id', user_id)
               .order('reminder_time', { ascending: true });
 
             if (legacyQuery.data) {
-              const fallbackData = (legacyQuery.data || []).map(r => ({
+              const fallbackData = (legacyQuery.data || []).map((r) => ({
                 ...r,
                 target_type: r.target_type || 'habit',
                 reminder_mode: r.reminder_mode || 'scheduled',
                 days_before_deadline: r.days_before_deadline || 0,
+                is_alarm: Boolean(r.is_alarm || r.reminder_mode === 'alarm'),
               }));
 
               return res.status(200).json(fallbackData);
@@ -111,17 +134,119 @@ export default async function handler(req, res) {
             console.error('[/api/reminders] Legacy query exception:', legacyErr);
           }
 
+          // Second fallback: plain select without table relations
+          try {
+            const plainQuery = await supabase
+              .from('reminders')
+              .select('*')
+              .eq('user_id', user_id)
+              .order('reminder_time', { ascending: true });
+
+            if (plainQuery.data) {
+              const fallbackData = (plainQuery.data || []).map((r) => ({
+                ...r,
+                target_type: r.target_type || 'habit',
+                reminder_mode: r.reminder_mode || 'scheduled',
+                days_before_deadline: r.days_before_deadline || 0,
+                is_alarm: Boolean(r.is_alarm || r.reminder_mode === 'alarm'),
+              }));
+              return res.status(200).json(fallbackData);
+            }
+          } catch (plainErr) {
+            console.error('[/api/reminders] Plain query exception:', plainErr);
+          }
+
           console.error('[/api/reminders] GET error:', error);
-          return res.status(500).json({ error: 'Failed to retrieve reminders' });
+          return res.status(200).json([]);
         }
       } catch (err) {
         console.error('[/api/reminders] GET query exception:', err);
-        return res.status(500).json({ error: 'Failed to retrieve reminders' });
+        return res.status(200).json([]);
       }
     }
 
-    // ── POST: Create new reminder (Habit, Goal, or Learning Roadmap) ───────────
+    // ── POST: Create new reminder or handle skip action ─────────────────────────
     if (req.method === 'POST') {
+      if (req.body?.action === 'skip') {
+        const { reminder_id, habit_id, delay_minutes } = req.body;
+        if (!habit_id) return res.status(400).json({ error: 'habit_id is required for skip' });
+
+        const REPING_DELAY_MINUTES = Number(delay_minutes) > 0 ? Number(delay_minutes) : 25;
+        const maxRepings = 3;
+
+        // Verify habit exists and belongs to user
+        const { data: habitRecord } = await supabase
+          .from('habits')
+          .select('id')
+          .eq('id', habit_id)
+          .eq('user_id', user_id)
+          .maybeSingle();
+
+        if (!habitRecord) {
+          return res.status(404).json({ error: 'Habit not found' });
+        }
+
+        // Verify reminder_id actually exists in reminders table before using as FK
+        let validReminderId = null;
+        if (reminder_id) {
+          const { data: remCheck } = await supabase
+            .from('reminders')
+            .select('id')
+            .eq('id', reminder_id)
+            .eq('user_id', user_id)
+            .maybeSingle();
+          if (remCheck) validReminderId = remCheck.id;
+        }
+
+        const today = new Date().toISOString().split('T')[0];
+
+        let skipCount = 1;
+        try {
+          const { data: existingEvents } = await supabase
+            .from('reminder_events')
+            .select('*')
+            .eq('user_id', user_id)
+            .eq('habit_id', habit_id)
+            .eq('event_date', today);
+
+          if (Array.isArray(existingEvents)) {
+            skipCount = existingEvents.filter(e => e.event_type === 'skipped').length + 1;
+          }
+        } catch (err) {
+          console.warn('[/api/reminders] Error checking reminder_events:', err);
+        }
+
+        let nextRepingAt = null;
+        if (skipCount <= maxRepings) {
+          nextRepingAt = new Date(Date.now() + REPING_DELAY_MINUTES * 60 * 1000).toISOString();
+        }
+
+        try {
+          const { error: insErr } = await supabase.from('reminder_events').insert({
+            user_id,
+            reminder_id: validReminderId,
+            habit_id,
+            event_date: today,
+            event_type: 'skipped',
+            reping_count: skipCount,
+            next_reping_at: nextRepingAt,
+          });
+          if (insErr) {
+            console.error('[/api/reminders] Error inserting reminder_event:', insErr);
+          }
+        } catch (err) {
+          console.warn('[/api/reminders] Error inserting reminder_event:', err);
+        }
+
+        return res.status(200).json({
+          ok: true,
+          reping_count: skipCount,
+          max_reached: skipCount > maxRepings,
+          next_reping_at: nextRepingAt,
+          delay_minutes: REPING_DELAY_MINUTES,
+        });
+      }
+
       const {
         target_type = 'habit',
         habit_id,
@@ -136,6 +261,7 @@ export default async function handler(req, res) {
         custom_text,
         routine_window = 'Morning',
         days_of_week = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+        is_alarm = false,
       } = req.body ?? {};
 
       // 1. Validate Target Entity Ownership
@@ -172,18 +298,21 @@ export default async function handler(req, res) {
       const rawPayload = {
         user_id,
         target_type,
-        habit_id: target_type === 'habit' ? habit_id : null,
-        goal_id: target_type === 'goal' ? goal_id : null,
-        journey_id: target_type === 'learning_journey' ? journey_id : null,
-        topic_id: target_type === 'learning_topic' ? topic_id : null,
-        reminder_mode,
+        habit_id: target_type === 'habit' ? (habit_id || null) : null,
+        goal_id: target_type === 'goal' ? (goal_id || null) : null,
+        journey_id: target_type === 'learning_journey' ? (journey_id || null) : null,
+        topic_id: target_type === 'learning_topic' ? (topic_id || null) : null,
+        reminder_mode: ['scheduled', 'deadline_proximity', 'smart_nudge'].includes(reminder_mode)
+          ? reminder_mode
+          : (target_type === 'goal' ? 'deadline_proximity' : 'scheduled'),
         days_before_deadline: Number(days_before_deadline) || 0,
         reminder_time: mainTime,
-        notification_status,
+        notification_status: notification_status || 'Active',
         alerts: cleanAlerts.length > 0 ? cleanAlerts : [mainTime],
         custom_text: custom_text || '',
         routine_window: routine_window || 'Morning',
         days_of_week: Array.isArray(days_of_week) && days_of_week.length > 0 ? days_of_week : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+        is_alarm: Boolean(is_alarm),
       };
 
       const payload = await sanitizePayload('reminders', rawPayload);
@@ -194,28 +323,28 @@ export default async function handler(req, res) {
         .select(REMINDER_SELECT)
         .single();
 
-      // Retry with minimal columns if schema cache error occurs
-      if (error && (error.code === 'PGRST204' || error.code === '42703')) {
-        console.warn('[/api/reminders] POST schema mismatch, retrying with base columns:', error.message);
-        const basePayload = {
-          user_id,
-          target_type,
-          habit_id: target_type === 'habit' ? habit_id : null,
-          goal_id: target_type === 'goal' ? goal_id : null,
-          journey_id: target_type === 'learning_journey' ? journey_id : null,
-          topic_id: target_type === 'learning_topic' ? topic_id : null,
-          reminder_mode,
-          days_before_deadline: Number(days_before_deadline) || 0,
-          reminder_time: mainTime,
-          notification_status
-        };
+      // Retry with simpler select if complex joined select encounters error
+      if (error) {
+        console.warn('[/api/reminders] POST initial select failed, retrying with fallback select:', error.message);
         const retryRes = await supabase
           .from('reminders')
-          .insert(basePayload)
-          .select(REMINDER_SELECT)
+          .insert(payload)
+          .select('*, habits(id, habit_name, color, icon)')
           .single();
-        data = retryRes.data;
-        error = retryRes.error;
+        if (!retryRes.error) {
+          data = retryRes.data;
+          error = null;
+        } else {
+          const minimalRes = await supabase
+            .from('reminders')
+            .insert(payload)
+            .select('*')
+            .single();
+          if (!minimalRes.error) {
+            data = minimalRes.data;
+            error = null;
+          }
+        }
       }
 
       if (error) {
@@ -243,6 +372,7 @@ export default async function handler(req, res) {
         custom_text,
         routine_window,
         days_of_week,
+        is_alarm,
       } = req.body ?? {};
 
       if (!id) return res.status(400).json({ error: 'id is required for update' });
@@ -250,7 +380,7 @@ export default async function handler(req, res) {
       // Verify the reminder exists and belongs to this user
       const { data: existing, error: findErr } = await supabase
         .from('reminders')
-        .select('id, target_type, habit_id, goal_id, journey_id, topic_id')
+        .select('*')
         .eq('id', id)
         .eq('user_id', user_id)
         .maybeSingle();
@@ -286,18 +416,21 @@ export default async function handler(req, res) {
 
       const rawUpdatePayload = {
         target_type: effectiveType,
-        habit_id: effectiveHabitId,
-        goal_id: effectiveGoalId,
-        journey_id: effectiveJourneyId,
-        topic_id: effectiveTopicId,
-        ...(reminder_mode && { reminder_mode }),
+        habit_id: effectiveType === 'habit' ? (effectiveHabitId || null) : null,
+        goal_id: effectiveType === 'goal' ? (effectiveGoalId || null) : null,
+        journey_id: effectiveType === 'learning_journey' ? (effectiveJourneyId || null) : null,
+        topic_id: effectiveType === 'learning_topic' ? (effectiveTopicId || null) : null,
+        reminder_mode: reminder_mode && ['scheduled', 'deadline_proximity', 'smart_nudge'].includes(reminder_mode)
+          ? reminder_mode
+          : (effectiveType === 'goal' ? 'deadline_proximity' : 'scheduled'),
         ...(days_before_deadline !== undefined && { days_before_deadline: Number(days_before_deadline) }),
         ...(putMainTime && { reminder_time: putMainTime }),
         ...(notification_status !== undefined && { notification_status }),
         ...(putCleanAlerts !== undefined && { alerts: putCleanAlerts }),
-        ...(custom_text !== undefined && { custom_text }),
+        ...(custom_text !== undefined && { custom_text: custom_text || '' }),
         ...(routine_window !== undefined && { routine_window }),
         ...(days_of_week !== undefined && { days_of_week }),
+        ...(is_alarm !== undefined && { is_alarm: Boolean(is_alarm) }),
       };
 
       const updatePayload = await sanitizePayload('reminders', rawUpdatePayload);
@@ -310,29 +443,32 @@ export default async function handler(req, res) {
         .select(REMINDER_SELECT)
         .single();
 
-      // Retry with minimal columns if schema cache error occurs
-      if (error && (error.code === 'PGRST204' || error.code === '42703')) {
-        console.warn('[/api/reminders] PUT schema mismatch, retrying with base columns:', error.message);
-        const fallbackUpdate = {
-          target_type: effectiveType,
-          habit_id: effectiveHabitId,
-          goal_id: effectiveGoalId,
-          journey_id: effectiveJourneyId,
-          topic_id: effectiveTopicId,
-          ...(reminder_mode && { reminder_mode }),
-          ...(days_before_deadline !== undefined && { days_before_deadline: Number(days_before_deadline) }),
-          ...(putMainTime && { reminder_time: putMainTime }),
-          ...(notification_status !== undefined && { notification_status })
-        };
+      // Retry with simpler select if complex joined select encounters error
+      if (error) {
+        console.warn('[/api/reminders] PUT initial select failed, retrying with fallback select:', error.message);
         const retryRes = await supabase
           .from('reminders')
-          .update(fallbackUpdate)
+          .update(updatePayload)
           .eq('id', id)
           .eq('user_id', user_id)
-          .select(REMINDER_SELECT)
+          .select('*, habits(id, habit_name, color, icon)')
           .single();
-        data = retryRes.data;
-        error = retryRes.error;
+        if (!retryRes.error) {
+          data = retryRes.data;
+          error = null;
+        } else {
+          const minimalRes = await supabase
+            .from('reminders')
+            .update(updatePayload)
+            .eq('id', id)
+            .eq('user_id', user_id)
+            .select('*')
+            .single();
+          if (!minimalRes.error) {
+            data = minimalRes.data;
+            error = null;
+          }
+        }
       }
 
       if (error) {

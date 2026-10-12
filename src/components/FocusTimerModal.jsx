@@ -1,19 +1,27 @@
 import { useState, useEffect, useRef } from 'react';
 import Modal from './Modal';
 import CustomSelect from './CustomSelect';
-import { Play, Pause, RotateCcw, CheckCircle, Clock, Volume2, Sparkles } from 'lucide-react';
+import { Play, Pause, RotateCcw, CheckCircle, Clock, Volume2, Sparkles, Undo2 } from 'lucide-react';
 import { useConfetti } from '../hooks/useConfetti';
 
-export default function FocusTimerModal({ open, onClose, habits = [], onCompleteHabit }) {
+export default function FocusTimerModal({
+  open,
+  onClose,
+  habits = [],
+  tracking = [],
+  onCompleteHabit,
+  onUndoHabit
+}) {
   const [selectedHabitId, setSelectedHabitId] = useState('');
   const [durationMinutes, setDurationMinutes] = useState(25);
   const [timeLeft, setTimeLeft] = useState(25 * 60);
   const [isRunning, setIsRunning] = useState(false);
   const [mode, setMode] = useState('timer'); // 'timer' | 'stopwatch'
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [autoCompleteBanner, setAutoCompleteBanner] = useState(null);
   
   const timerRef = useRef(null);
-  const { firePerfectDay } = useConfetti();
+  const { firePerfectDay, fireSmall } = useConfetti();
 
   // Reset when modal opens or habit changes
   useEffect(() => {
@@ -28,6 +36,7 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
 
   const handleSelectHabit = (id) => {
     setSelectedHabitId(id);
+    setAutoCompleteBanner(null);
     const h = habits.find(item => item.id === id);
     const dur = h?.timer_duration || 25;
     setDurationMinutes(dur);
@@ -40,6 +49,36 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
     setDurationMinutes(mins);
     setTimeLeft(mins * 60);
     setIsRunning(false);
+    setAutoCompleteBanner(null);
+  };
+
+  const handleTimerFinished = (manual = false) => {
+    const habit = habits.find(h => h.id === selectedHabitId);
+    if (!habit) return;
+
+    // Check if habit is already completed today in tracking
+    const isAlreadyDone = Array.isArray(tracking) && tracking.some(t => t.habit_id === habit.id && t.status === true);
+
+    if (isAlreadyDone) {
+      fireSmall();
+      setAutoCompleteBanner({
+        habitId: habit.id,
+        habitName: habit.habit_name,
+        type: 'already_done'
+      });
+      return;
+    }
+
+    firePerfectDay();
+    setAutoCompleteBanner({
+      habitId: habit.id,
+      habitName: habit.habit_name,
+      type: 'auto'
+    });
+
+    if (onCompleteHabit) {
+      onCompleteHabit(habit, { source: 'timer', auto: !manual });
+    }
   };
 
   useEffect(() => {
@@ -50,7 +89,7 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
             if (prev <= 1) {
               clearInterval(timerRef.current);
               setIsRunning(false);
-              handleTimerFinished();
+              handleTimerFinished(false);
               return 0;
             }
             return prev - 1;
@@ -64,15 +103,7 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
     }
 
     return () => clearInterval(timerRef.current);
-  }, [isRunning, mode]);
-
-  const handleTimerFinished = () => {
-    firePerfectDay();
-    const habit = habits.find(h => h.id === selectedHabitId);
-    if (habit && onCompleteHabit) {
-      onCompleteHabit(habit);
-    }
-  };
+  }, [isRunning, mode, selectedHabitId, habits, tracking]);
 
   const toggleTimer = () => {
     setIsRunning(!isRunning);
@@ -82,6 +113,7 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
     setIsRunning(false);
     setTimeLeft(durationMinutes * 60);
     setElapsedSeconds(0);
+    setAutoCompleteBanner(null);
   };
 
   const formatTime = (seconds) => {
@@ -196,19 +228,52 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
           </div>
         </div>
 
+        {/* Auto-Complete & Undo Notification Banner */}
+        {autoCompleteBanner && (
+          <div className="animate-fadeIn transition-all">
+            {autoCompleteBanner.type === 'auto' ? (
+              <div className="p-3.5 rounded-2xl bg-[#e3f3ee] dark:bg-[#1c3a32] border border-[#2f6b5c]/30 dark:border-[#7fd1b9]/30 flex items-center justify-between gap-3 text-xs shadow-sm">
+                <div className="flex items-center gap-2 text-[#2f6b5c] dark:text-[#7fd1b9] font-bold">
+                  <CheckCircle size={16} />
+                  <span>Timer complete! Auto-marked "{autoCompleteBanner.habitName}" as done.</span>
+                </div>
+                {onUndoHabit && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const h = habits.find(item => item.id === autoCompleteBanner.habitId);
+                      if (h) onUndoHabit(h);
+                      setAutoCompleteBanner(null);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-white dark:bg-[#14181c] text-[#2f6b5c] dark:text-[#7fd1b9] font-extrabold hover:underline shadow-sm cursor-pointer transition-all active:scale-95 flex items-center gap-1"
+                  >
+                    <Undo2 size={13} />
+                    <span>Undo</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-[#1a2129] border border-slate-200 dark:border-[#2a343d] flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-semibold shadow-sm">
+                <Sparkles size={16} className="text-amber-500" />
+                <span>Timer complete! "{autoCompleteBanner.habitName}" was already completed today.</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Controls */}
         <div className="flex items-center justify-center gap-4">
           <button
             onClick={resetTimer}
             title="Reset"
-            className="p-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 bg-gray-100 dark:bg-[#14181c] hover:bg-gray-200 dark:hover:bg-[#2a343d] rounded-xl transition-colors"
+            className="p-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 bg-gray-100 dark:bg-[#14181c] hover:bg-gray-200 dark:hover:bg-[#2a343d] rounded-xl transition-colors cursor-pointer"
           >
             <RotateCcw size={18} />
           </button>
 
           <button
             onClick={toggleTimer}
-            className={`flex items-center gap-2 px-8 py-3.5 rounded-2xl font-semibold text-white shadow-lg transition-all duration-200 hover:scale-105 active:scale-95 ${
+            className={`flex items-center gap-2 px-8 py-3.5 rounded-2xl font-semibold text-white shadow-lg transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer ${
               isRunning
                 ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-900/20'
                 : 'bg-[#3d7a75] hover:bg-[#2f5f5b] shadow-[#3d7a75]/30'
@@ -219,9 +284,9 @@ export default function FocusTimerModal({ open, onClose, habits = [], onComplete
           </button>
 
           <button
-            onClick={handleTimerFinished}
+            onClick={() => handleTimerFinished(true)}
             title="Complete Habit Now"
-            className="p-3 text-[#2f6b5c] dark:text-[#7fd1b9] bg-[#e3f3ee] dark:bg-[#1c3a32] hover:bg-[#d5eee5] dark:hover:bg-[#244b41] rounded-xl transition-colors"
+            className="p-3 text-[#2f6b5c] dark:text-[#7fd1b9] bg-[#e3f3ee] dark:bg-[#1c3a32] hover:bg-[#d5eee5] dark:hover:bg-[#244b41] rounded-xl transition-colors cursor-pointer"
           >
             <CheckCircle size={20} />
           </button>

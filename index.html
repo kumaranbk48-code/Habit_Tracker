@@ -3,36 +3,68 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>HabitTracker — Build Better Habits</title>
-    <meta name="description" content="Track your daily habits, set meaningful goals, and build streaks that last." />
+    <title>HabiZ — Small habits. Big shifts.</title>
+    <meta name="description" content="HabiZ — Track your daily habits, set meaningful goals, and build streaks that last." />
     
     <!-- PWA & Mobile Meta Tags -->
     <link rel="manifest" href="/manifest.json" />
-    <meta name="theme-color" content="#3d7a75" />
+    <meta name="theme-color" content="#0a0f14" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="HabitTracker" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="apple-mobile-web-app-title" content="HabiZ" />
+    <link rel="apple-touch-icon" href="/habiz-logo-tile.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/habiz-logo-tile.png" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="shortcut icon" href="/favicon.ico" />
     
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
     
-    <!-- Prevent dark-mode flash: apply saved theme before first paint -->
+    <style>
+      @keyframes habiz-glow-pulse {
+        0%, 100% { transform: scale(0.96); opacity: 0.7; }
+        50% { transform: scale(1.05); opacity: 1; }
+      }
+      .habiz-initial-loader {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background-color: #080d12;
+        color: #ffffff;
+        font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+      }
+      .habiz-initial-icon {
+        width: 52px;
+        height: 52px;
+        object-fit: contain;
+        animation: habiz-glow-pulse 2s ease-in-out infinite;
+        filter: drop-shadow(0 0 16px rgba(45, 212, 191, 0.45));
+      }
+    </style>
+
+    <!-- Prevent dark-mode flash: default to dark atmosphere -->
     <script>
       try {
-        if (localStorage.getItem('ht-theme') === 'dark') {
+        if (localStorage.getItem('ht-theme') !== 'light') {
           document.documentElement.classList.add('dark');
         }
       } catch(e) {}
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="habiz-initial-loader">
+        <img src="/favicon.png" alt="HabiZ" class="habiz-initial-icon" />
+        <div style="margin-top: 14px; font-weight: 700; font-size: 16px; letter-spacing: -0.01em; color: #f1f5f9;">HabiZ</div>
+        <div style="margin-top: 4px; font-size: 11px; font-weight: 600; color: #2dd4bf; letter-spacing: 0.05em; text-transform: uppercase;">Small habits. Big shifts.</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
       if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {

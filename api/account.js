@@ -49,7 +49,7 @@ export default async function handler(req, res) {
       ]);
 
       const exportPayload = {
-        app: 'HabitTracker',
+        app: 'HabiZ',
         version: '1.0.0',
         exportedAt: new Date().toISOString(),
         user: {

@@ -6,9 +6,12 @@ import GoalCard from '../components/GoalCard';
 import CustomSelect from '../components/CustomSelect';
 import CustomDatePicker from '../components/CustomDatePicker';
 import {
-  Plus, Target, AlertCircle, Search, Filter, Layers, Activity, Flame, ShieldAlert, Sparkles
+  Plus, Target, AlertCircle, Search, Filter, Layers, Activity, Flame, ShieldAlert, Sparkles,
+  X
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useConfetti } from '../hooks/useConfetti';
+import HabizLoader from '../components/HabizLoader';
 
 const GOALS_META_KEY = 'habit_tracker_goals_meta';
 
@@ -285,6 +288,39 @@ export default function Goals() {
     }
   };
 
+  const handleToggleHold = async (id, currentStatus) => {
+    const targetGoal = goals.find((g) => g.id === id);
+    if (!targetGoal) return;
+    const isHold = currentStatus === 'On Hold' || targetGoal.status === 'On Hold';
+    const newStatus = isHold ? 'In Progress' : 'On Hold';
+
+    try {
+      const res = await fetch('/api/goals', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          id,
+          goal_name: targetGoal.goal_name,
+          target_date: targetGoal.target_date,
+          goal_type: targetGoal.goal_type || 'Target',
+          status: newStatus,
+        }),
+      });
+      if (res.ok) {
+        setToast({
+          message: isHold ? 'Goal resumed! Back in progress.' : 'Goal placed on hold.',
+          type: 'success',
+        });
+        fetchGoals();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setToast({ message: errData.error || 'Failed to update goal status.', type: 'error' });
+      }
+    } catch {
+      setToast({ message: 'Network error — check your connection.', type: 'error' });
+    }
+  };
+
   const handleAddMilestone = async (goal_id, title) => {
     try {
       const res = await fetch('/api/milestones', {
@@ -354,81 +390,88 @@ export default function Goals() {
   }
 
   // Filter & Search logic
+  const trimmedQuery = searchQuery.trim().toLowerCase();
   const filteredGoals = goals.filter((g) => {
-    const matchesSearch = g.goal_name?.toLowerCase().includes(searchQuery.toLowerCase());
-    if (!matchesSearch) return false;
-    if (activeFilter === 'All') return true;
-    if (activeFilter === 'Target') return (g.goal_type || 'Target') === 'Target';
-    if (activeFilter === 'Project') return g.goal_type === 'Project';
-    if (activeFilter === 'Average') return g.goal_type === 'Average';
-    if (activeFilter === 'Habit') return g.goal_type === 'Habit';
+    if (trimmedQuery) {
+      const matchName = g.goal_name?.toLowerCase().includes(trimmedQuery);
+      const matchType = g.goal_type?.toLowerCase().includes(trimmedQuery);
+      const matchUnit = g.unit?.toLowerCase().includes(trimmedQuery);
+      const matchStatus = g.status?.toLowerCase().includes(trimmedQuery);
+      if (!matchName && !matchType && !matchUnit && !matchStatus) return false;
+    }
+    if (activeFilter === 'Active') return g.status !== 'Completed' && g.status !== 'On Hold';
     if (activeFilter === 'Completed') return g.status === 'Completed';
+    if (activeFilter === 'On Hold') return g.status === 'On Hold';
     return true;
   });
 
   const counts = {
     All: goals.length,
-    Target: goals.filter((g) => (g.goal_type || 'Target') === 'Target').length,
-    Project: goals.filter((g) => g.goal_type === 'Project').length,
-    Average: goals.filter((g) => g.goal_type === 'Average').length,
-    Habit: goals.filter((g) => g.goal_type === 'Habit').length,
+    Active: goals.filter((g) => g.status !== 'Completed' && g.status !== 'On Hold').length,
     Completed: goals.filter((g) => g.status === 'Completed').length,
+    'On Hold': goals.filter((g) => g.status === 'On Hold').length,
   };
 
+  // Calculate overall goal completion percentage for the inspiration gauge
+  const totalGoalItems = goals.length;
+  const completedGoalsCount = counts.Completed;
+  const overallGoalPercent = totalGoalItems > 0 ? Math.round((completedGoalsCount / totalGoalItems) * 100) : 0;
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="space-y-6 page-enter pb-10">
+      {/* ── 1. Page Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-10">Goals & Tasks</h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#e4ecf5] dark:bg-[#182a40] text-[#2f5378] dark:text-[#8fb4d9]">
-              Performance Analytics
-            </span>
-          </div>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            Track targets, project roadmaps, rolling averages & habits with pace velocity.
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+            Goals
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-400 mt-1">
+            Turn intent into progress.
           </p>
         </div>
 
-        <button
+        <motion.button
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.96 }}
           onClick={openAdd}
-          className="inline-flex items-center gap-2 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-4 py-2.5 rounded-xl font-semibold text-sm transition-all shadow-md shadow-[#3d7a75]/20 active:scale-95 flex-shrink-0"
+          className="inline-flex items-center gap-2 bg-[#178274] hover:bg-[#136c60] text-white px-4 py-2.5 rounded-xl font-bold text-xs transition-colors shadow-lg shadow-teal-950/40 flex-shrink-0 cursor-pointer"
         >
-          <Plus size={18} /> Add Goal
-        </button>
+          <Plus size={16} /> New Goal
+        </motion.button>
       </div>
 
-      {/* Filter Tabs & Search Bar */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-white dark:bg-slate-800/80 p-2 rounded-2xl border border-slate-100 dark:border-slate-700/60 shadow-xs">
-        {/* Category Tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
-          {[
-            { id: 'All', label: 'All', icon: Target },
-            { id: 'Target', label: 'Target', icon: Target },
-            { id: 'Project', label: 'Project', icon: Layers },
-            { id: 'Average', label: 'Average', icon: Activity },
-            { id: 'Habit', label: 'Habit', icon: Flame },
-            { id: 'Completed', label: 'Done', icon: Sparkles },
-          ].map((tab) => {
-            const TabIcon = tab.icon;
-            const active = activeFilter === tab.id;
+      {/* ── 2. Filter Pills & Search Bar ── */}
+      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
+          {['All', 'Active', 'Completed', 'On Hold'].map((tab) => {
+            const isSelected = activeFilter === tab;
             return (
               <button
-                key={tab.id}
-                onClick={() => setActiveFilter(tab.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
-                  active
-                    ? 'bg-[#3d7a75] text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-[#eef2f4] dark:hover:bg-[#222b33]'
+                key={tab}
+                onClick={() => setActiveFilter(tab)}
+                className={`relative px-3.5 py-1.5 rounded-xl text-xs font-semibold cursor-pointer whitespace-nowrap flex items-center gap-1.5 transition-colors ${
+                  isSelected ? 'text-teal-300 font-bold' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <TabIcon size={14} />
-                {tab.label}
-                <span className={`px-1.5 py-0.2 rounded-md text-[10px] ${
-                  active ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
-                }`}>
-                  {counts[tab.id] || 0}
+                {isSelected && (
+                  <motion.div
+                    layoutId="activeFilterPill"
+                    className="absolute inset-0 bg-[#153834] border border-teal-500/35 rounded-xl shadow-xs"
+                    transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                  />
+                )}
+                {!isSelected && (
+                  <div className="absolute inset-0 bg-white/[0.03] border border-white/[0.05] rounded-xl pointer-events-none" />
+                )}
+                <span className="relative z-10">{tab}</span>
+                <span
+                  className={`relative z-10 text-[10px] px-1.5 py-0.5 rounded-full font-bold leading-none transition-colors ${
+                    isSelected
+                      ? 'bg-teal-500/25 text-teal-200'
+                      : 'bg-white/[0.06] text-slate-400'
+                  }`}
+                >
+                  {counts[tab] ?? 0}
                 </span>
               </button>
             );
@@ -436,72 +479,184 @@ export default function Goals() {
         </div>
 
         {/* Search */}
-        <div className="relative min-w-[200px]">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <div className="relative min-w-[220px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search goals..."
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-xl outline-none focus:ring-2 focus:ring-[#3d7a75] text-slate-800 dark:text-slate-100"
+            className="w-full pl-8 pr-8 py-1.5 text-xs bg-black/30 border border-white/[0.08] rounded-xl outline-none focus:border-teal-500/50 text-slate-100 placeholder:text-slate-500"
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors cursor-pointer p-0.5"
+              title="Clear search"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── 3. Inspiration Feature Banner (Matching Reference) ── */}
+      <div className="habiz-panel p-6 sm:p-7 rounded-3xl relative overflow-hidden flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+        <div
+          className="absolute right-0 top-0 bottom-0 w-full sm:w-1/2 opacity-25 pointer-events-none bg-cover bg-right mix-blend-screen"
+          style={{ backgroundImage: 'url(/assets/hero-landscape.jpg)' }}
+        />
+
+        <div className="relative z-10 space-y-2">
+          <div className="w-10 h-10 rounded-2xl bg-teal-500/15 border border-teal-500/25 text-teal-300 flex items-center justify-center mb-2">
+            <Target size={20} />
+          </div>
+          <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+            Make consistency a lifestyle.
+          </h2>
+          <p className="text-xs text-slate-400">
+            Small steps, big results.
+          </p>
+        </div>
+
+        {/* Circular Progress Gauge */}
+        <div className="relative z-10 flex-shrink-0 flex items-center gap-4">
+          <div className="relative w-20 h-20 sm:w-24 sm:h-24 flex items-center justify-center">
+            <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" stroke="rgba(255,255,255,0.08)" strokeWidth="8" fill="none" />
+              <circle
+                cx="50"
+                cy="50"
+                r="42"
+                stroke="#1bb59c"
+                strokeWidth="8"
+                fill="none"
+                strokeDasharray={`${(overallGoalPercent / 100) * 264} 264`}
+                strokeLinecap="round"
+                className="ring-progress"
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-lg sm:text-xl font-bold text-white">{overallGoalPercent}%</span>
+            </div>
+          </div>
         </div>
       </div>
 
       {fetchError && (
-        <div className="flex items-center gap-3 p-4 bg-red-50 border border-red-100 rounded-2xl">
-          <AlertCircle size={18} className="text-red-500 flex-shrink-0" />
-          <p className="text-sm text-red-600">{fetchError}</p>
-          <button onClick={fetchGoals} className="ml-auto text-xs font-medium text-red-600 underline">
+        <div className="flex items-center gap-3 p-4 bg-red-950/40 border border-red-800/60 rounded-2xl">
+          <AlertCircle size={18} className="text-red-400 flex-shrink-0" />
+          <p className="text-xs text-red-300">{fetchError}</p>
+          <button onClick={fetchGoals} className="ml-auto text-xs font-semibold text-red-300 underline">
             Retry
           </button>
         </div>
       )}
 
-      {loading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="w-8 h-8 border-4 border-[#e2f0ef] border-t-[#3d7a75] dark:border-[#14302e] dark:border-t-[#5fae9e] rounded-full animate-spin" />
+      {/* ── 4. Goals Grid (Career Growth, Health & Fitness, etc.) ── */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-base font-bold text-white">
+            {activeFilter === 'All'
+              ? 'All Goals'
+              : activeFilter === 'Active'
+              ? 'Active Goals'
+              : activeFilter === 'Completed'
+              ? 'Completed Goals'
+              : 'Goals On Hold'}
+          </h3>
+          <span className="text-xs text-slate-400">
+            {filteredGoals.length} {filteredGoals.length === 1 ? 'Goal' : 'Goals'}
+          </span>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredGoals.map((goal) => (
-            <GoalCard
-              key={goal.id}
-              goal={goal}
-              milestones={milestonesByGoal[goal.id] || []}
-              onEdit={openEdit}
-              onDelete={handleDelete}
-              onAddMilestone={handleAddMilestone}
-              onToggleMilestone={handleToggleMilestone}
-              onDeleteMilestone={handleDeleteMilestone}
-              onUpdateProgress={handleUpdateProgress}
-              onMarkComplete={handleMarkComplete}
-            />
-          ))}
 
-          {filteredGoals.length === 0 && !fetchError && (
-            <div className="col-span-full">
-              <div className="bg-white dark:bg-slate-800/60 rounded-3xl border border-slate-100 dark:border-slate-700/60 py-16 flex flex-col items-center gap-3 text-center px-4">
-                <div className="w-14 h-14 bg-[#e2f0ef] dark:bg-[#14302e] rounded-2xl flex items-center justify-center text-[#3d7a75] dark:text-[#5fae9e]">
-                  <Target size={28} />
-                </div>
-                <h3 className="text-slate-800 dark:text-slate-100 font-semibold text-lg">No goals found</h3>
-                <p className="text-slate-400 text-sm max-w-sm">
-                  {searchQuery || activeFilter !== 'All'
-                    ? 'No goals match your current filter or search query.'
-                    : 'Set a target number, project roadmap, or habit goal to start tracking progress.'}
+        {loading ? (
+          <HabizLoader size="md" text="Loading goals..." />
+        ) : (
+          <AnimatePresence mode="wait">
+            {filteredGoals.length === 0 ? (
+              <motion.div
+                key="empty-state"
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ duration: 0.2 }}
+                className="habiz-panel p-8 text-center rounded-3xl space-y-3"
+              >
+                <Target size={28} className="mx-auto text-teal-400/70" />
+                <h4 className="text-sm font-bold text-white">
+                  {searchQuery.trim()
+                    ? 'No goals match your search'
+                    : activeFilter === 'Completed'
+                    ? 'No completed goals yet'
+                    : activeFilter === 'On Hold'
+                    ? 'No goals currently on hold'
+                    : activeFilter === 'Active'
+                    ? 'No active goals right now'
+                    : 'No goals found'}
+                </h4>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                  {searchQuery.trim()
+                    ? `No goals found matching "${searchQuery.trim()}". Try searching for another keyword or clear search.`
+                    : activeFilter === 'Completed'
+                    ? 'Goals you finish will appear here. Keep building momentum!'
+                    : activeFilter === 'On Hold'
+                    ? 'Goals paused or placed on hold will appear here for you to resume anytime.'
+                    : 'Set targets for career growth, fitness routines, personal projects, or habits.'}
                 </p>
-                <button
-                  onClick={openAdd}
-                  className="mt-2 px-4 py-2 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white rounded-xl font-medium text-sm transition-colors shadow-xs"
-                >
-                  Create Goal
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+                {searchQuery.trim() ? (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="text-xs font-bold text-teal-300 bg-teal-950/70 border border-teal-500/30 px-4 py-2 rounded-xl hover:bg-teal-900 transition-colors cursor-pointer"
+                  >
+                    Clear Search
+                  </button>
+                ) : goals.length === 0 && activeFilter === 'All' ? (
+                  <button
+                    onClick={openAdd}
+                    className="text-xs font-bold text-teal-300 bg-teal-950/70 border border-teal-500/30 px-4 py-2 rounded-xl hover:bg-teal-900 transition-colors cursor-pointer"
+                  >
+                    + Create Your First Goal
+                  </button>
+                ) : null}
+              </motion.div>
+            ) : (
+              <motion.div
+                key="goals-grid"
+                layout
+                className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"
+              >
+                <AnimatePresence mode="popLayout">
+                  {filteredGoals.map((goal) => (
+                    <motion.div
+                      key={goal.id}
+                      layout
+                      initial={{ opacity: 0, scale: 0.92, y: 14 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                      transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+                    >
+                      <GoalCard
+                        goal={goal}
+                        milestones={milestonesByGoal[goal.id] || []}
+                        onEdit={openEdit}
+                        onDelete={handleDelete}
+                        onAddMilestone={handleAddMilestone}
+                        onToggleMilestone={handleToggleMilestone}
+                        onDeleteMilestone={handleDeleteMilestone}
+                        onUpdateProgress={handleUpdateProgress}
+                        onMarkComplete={handleMarkComplete}
+                        onToggleHold={handleToggleHold}
+                      />
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        )}
+      </div>
 
       {/* Add / Edit Goal Modal */}
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit Goal' : 'Add New Tracker Goal'}>
@@ -667,6 +822,7 @@ export default function Goals() {
               >
                 <option value="Pending">Pending</option>
                 <option value="In Progress">In Progress</option>
+                <option value="On Hold">On Hold</option>
                 <option value="Completed">Completed</option>
               </CustomSelect>
             </div>

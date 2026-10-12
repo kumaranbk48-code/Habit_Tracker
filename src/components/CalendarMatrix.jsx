@@ -87,6 +87,7 @@ export default function CalendarMatrix({
                   let scheduledCount = 0;
 
                   visibleHabits.forEach(h => {
+                    if (h.status === 'paused') return;
                     const isScheduled = isHabitScheduledOnDate(h, dateStr);
                     if (isScheduled) {
                       scheduledCount++;
@@ -179,6 +180,8 @@ export default function CalendarMatrix({
                           } ${
                             status.isFuture
                               ? 'opacity-20 cursor-not-allowed bg-[#eef1f3] dark:bg-[#22282d] text-transparent'
+                              : status.type === 'PAUSED'
+                              ? 'bg-[#f1f4f6] dark:bg-[#1f262e] text-slate-400 dark:text-slate-500 opacity-60'
                               : status.isNotScheduled
                               ? 'bg-[#f7f9fa] dark:bg-[#1a2129] text-[#94a0aa] dark:text-[#5b6672]'
                               : status.isDone
@@ -212,9 +215,9 @@ export default function CalendarMatrix({
                 </td>
                 {daysArray.map(day => {
                   const dateStr = getDateStr(day);
-                  const scheduledCount = visibleHabits.filter(h => isHabitScheduledOnDate(h, dateStr)).length;
+                  const scheduledCount = visibleHabits.filter(h => h.status !== 'paused' && isHabitScheduledOnDate(h, dateStr)).length;
                   const completedCount = visibleHabits.filter(h => {
-                    if (!isHabitScheduledOnDate(h, dateStr)) return false;
+                    if (h.status === 'paused' || !isHabitScheduledOnDate(h, dateStr)) return false;
                     const log = trackingMap.get(`${h.id}_${dateStr}`);
                     return getCellStatus(h, dateStr, log, todayStr).isDone;
                   }).length;

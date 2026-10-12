@@ -72,6 +72,8 @@ export default async function handler(req, res) {
       if (icon !== undefined) insertObj.icon = icon;
       if (is_archived !== undefined) insertObj.is_archived = is_archived;
       if (timer_duration !== undefined) insertObj.timer_duration = timer_duration ? Number(timer_duration) : null;
+      if (req.body?.status !== undefined) insertObj.status = req.body.status;
+      if (req.body?.season_id !== undefined) insertObj.season_id = req.body.season_id;
 
       const { data, error } = await supabase
         .from('habits')
@@ -89,7 +91,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PUT') {
-      const { id, habit_name, category, target_frequency, tracking_type, target_quantity, unit, time_of_day, color, icon, is_archived, timer_duration } = req.body ?? {};
+      const { id, habit_name, category, target_frequency, tracking_type, target_quantity, unit, time_of_day, color, icon, is_archived, timer_duration, status, season_id } = req.body ?? {};
       if (!id) return res.status(400).json({ error: 'id is required for update' });
 
       if (habit_name !== undefined && (!habit_name.trim() || habit_name.trim().length > 150)) {
@@ -123,7 +125,9 @@ export default async function handler(req, res) {
         ...(color !== undefined && { color: isOldBlue(color) ? '#3d7a75' : color }),
         ...(icon !== undefined && { icon }),
         ...(is_archived !== undefined && { is_archived }),
-        ...(timer_duration !== undefined && { timer_duration: timer_duration ? Number(timer_duration) : null })
+        ...(timer_duration !== undefined && { timer_duration: timer_duration ? Number(timer_duration) : null }),
+        ...(status !== undefined && { status }),
+        ...(season_id !== undefined && { season_id }),
       };
 
       const { data, error } = await supabase

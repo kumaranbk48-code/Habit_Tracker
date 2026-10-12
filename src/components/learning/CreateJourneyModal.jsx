@@ -1,29 +1,34 @@
 import { useState } from 'react';
 import Modal from '../Modal';
 import CustomDatePicker from '../CustomDatePicker';
+import CustomSelect from '../CustomSelect';
 import ContextualInfo from './ContextualInfo';
+import { LEARNING_CATEGORIES } from '../../constants/learningCategories';
 import {
   Sparkles, Plus, Trash2, ArrowRight, ArrowLeft, Check, Layers,
   Compass, Code, Music, Video, Palette, Languages, Camera, Target
 } from 'lucide-react';
 
 const DOMAIN_SUGGESTIONS = [
-  { title: 'Master Data Structures & Algorithms in Java', category: 'Programming', icon: 'Code', goal: 'Solve 100 Medium LeetCode problems confidently' },
-  { title: 'Become a Professional Video Editor', category: 'Video Editing', icon: 'Video', goal: 'Master color grading and cinematic cut transitions' },
-  { title: 'Learn Acoustic Guitar Basics', category: 'Music', icon: 'Music', goal: 'Play 10 favorite songs with smooth chord switches' },
+  { title: 'Master Data Structures & Algorithms in Java', category: 'Tech & Coding', icon: 'Code', goal: 'Solve 100 Medium LeetCode problems confidently' },
+  { title: 'Full Body Mobility & Calisthenics', category: 'Health & Fitness', icon: 'Target', goal: 'Master pull-ups, mobility drills, and core strength' },
+  { title: 'Deep Work & Daily Time Boxing System', category: 'Productivity', icon: 'Compass', goal: 'Complete 4 hours of distraction-free focused work daily' },
   { title: 'Conversational Japanese (N5)', category: 'Languages', icon: 'Languages', goal: 'Hold a 5-minute natural conversation in Japanese' },
-  { title: 'Master Manual Mode Photography', category: 'Creative Skills', icon: 'Camera', goal: 'Capture sharp, well-exposed low light photos' },
+  { title: 'Become a Professional Video Editor', category: 'Creative & Design', icon: 'Video', goal: 'Master color grading and cinematic cut transitions' },
+  { title: 'Daily Mindfulness & Stress Mastery', category: 'Mindfulness & Wellness', icon: 'Sparkles', goal: 'Establish 20-min daily breathwork and mental clarity' },
+  { title: 'Startup Leadership & Venture Finance', category: 'Career & Business', icon: 'Layers', goal: 'Learn startup unit economics and investor pitches' },
 ];
 
 export default function CreateJourneyModal({ isOpen, onClose, onCreate }) {
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+  const [customCategory, setCustomCategory] = useState('');
 
   const [form, setForm] = useState({
     title: '',
     description: '',
     personal_goal: '',
-    category: 'General',
+    category: 'Tech & Coding',
     target_date: '',
     icon: 'Compass',
     structure_type: 'simple', // 'simple' or 'phases'
@@ -195,15 +200,31 @@ export default function CreateJourneyModal({ isOpen, onClose, onCreate }) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">
-                  Category / Domain
+                  Category <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Software, Music, Fitness, Languages..."
+                <CustomSelect
                   value={form.category}
-                  onChange={e => setForm({ ...form, category: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-xs dark:text-white"
+                  onChange={e => {
+                    const val = e.target.value;
+                    setForm(prev => ({ ...prev, category: val }));
+                    if (val !== 'Other') setCustomCategory('');
+                  }}
+                  options={LEARNING_CATEGORIES.map(cat => ({ value: cat, label: cat }))}
+                  className="py-2.5 px-3 rounded-xl border border-gray-200 dark:border-gray-700 text-xs"
                 />
+
+                {form.category === 'Other' && (
+                  <input
+                    type="text"
+                    placeholder="Enter custom category..."
+                    value={customCategory}
+                    onChange={e => {
+                      setCustomCategory(e.target.value);
+                      setForm(prev => ({ ...prev, category: e.target.value || 'Other' }));
+                    }}
+                    className="mt-2 w-full px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-xs dark:text-white outline-none focus:ring-1 focus:ring-[#3d7a75]"
+                  />
+                )}
               </div>
 
               <div>
@@ -215,6 +236,38 @@ export default function CreateJourneyModal({ isOpen, onClose, onCreate }) {
                   onChange={e => setForm({ ...form, target_date: e.target.value })}
                   className="w-full px-3.5 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-xs dark:text-white focus:ring-2 focus:ring-[#3d7a75] outline-none"
                 />
+              </div>
+            </div>
+
+            {/* Quick Category Selection Chips */}
+            <div>
+              <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
+                Quick Category Select:
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {LEARNING_CATEGORIES.map(cat => {
+                  const isSelected = form.category === cat || (cat === 'Other' && form.category && !LEARNING_CATEGORIES.slice(0, 7).includes(form.category));
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => {
+                        if (cat === 'Other') {
+                          setForm(prev => ({ ...prev, category: customCategory || 'Other' }));
+                        } else {
+                          setForm(prev => ({ ...prev, category: cat }));
+                        }
+                      }}
+                      className={`text-xs px-2.5 py-1 rounded-lg transition-all cursor-pointer font-medium ${
+                        isSelected
+                          ? 'bg-[#3d7a75] text-white shadow-xs font-semibold'
+                          : 'bg-gray-100 dark:bg-gray-800 hover:bg-[#eaf4f2] dark:hover:bg-[#1c3733] text-gray-700 dark:text-gray-300 hover:text-[#3d7a75] dark:hover:text-[#5fae9e] border border-gray-200 dark:border-gray-700'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -484,8 +537,13 @@ export default function CreateJourneyModal({ isOpen, onClose, onCreate }) {
             </div>
 
             <div className="p-4 bg-gray-50 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-2xl space-y-3 font-mono text-xs max-h-64 overflow-y-auto">
-              <div className="font-bold text-[#3d7a75] dark:text-[#5fae9e] text-sm font-sans">
-                {form.title}
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="font-bold text-[#3d7a75] dark:text-[#5fae9e] text-sm font-sans">
+                  {form.title}
+                </span>
+                <span className="text-[10px] font-bold text-teal-300 bg-teal-950/70 border border-teal-500/25 px-2.5 py-0.5 rounded-full font-sans">
+                  {form.category}
+                </span>
               </div>
               {form.personal_goal && (
                 <div className="text-gray-500 font-sans text-xs italic">

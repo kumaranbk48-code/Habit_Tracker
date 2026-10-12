@@ -51,12 +51,12 @@ export default function PWAInstallBanner() {
           <Download size={18} className="text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Install HabitTracker</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Add to home screen for offline access</p>
+          <p className="font-semibold text-white text-sm">Install HabiZ</p>
+          <p className="text-xs text-slate-400 mt-0.5">Add to home screen for offline access</p>
         </div>
         <button
           onClick={handleInstall}
-          className="flex-shrink-0 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors install-pulse"
+          className="flex-shrink-0 bg-[#178274] hover:bg-[#136c60] text-white text-xs font-bold px-3 py-2 rounded-xl transition-all shadow-md shadow-teal-950/40 cursor-pointer"
         >
           Install
         </button>

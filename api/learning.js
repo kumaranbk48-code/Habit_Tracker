@@ -76,14 +76,12 @@ export default async function handler(req, res) {
             journeyTopics.find(topic => topic.status === 'In Progress') ||
             journeyTopics.find(topic => topic.status === 'Not Started') ||
             journeyTopics[0]
-          )?.title || 'No topic added yet'
+          )?.title || 'No topic added yet',
+          topic_titles: journeyTopics.map(t => t.title).filter(Boolean)
         };
       });
 
-      const continueJourney =
-        activeJourneys.find(journey => journey.status === 'Active') ||
-        activeJourneys[0] ||
-        null;
+      const continueJourney = activeJourneys[0] || null;
 
       let focusTasks = [];
       if (continueJourney) {
@@ -149,7 +147,7 @@ export default async function handler(req, res) {
             calculateTopicCompletion(topic.id, tasks) === 100
           ).length,
           tasksCompleted: tasks.filter(task => task.completed).length,
-          activeJourneysCount: activeJourneys.filter(journey => journey.status === 'Active').length
+          activeJourneysCount: activeJourneys.length
         }
       });
     }
@@ -166,7 +164,13 @@ export default async function handler(req, res) {
         supabase.from('learning_tasks').select('*').eq('journey_id', journeyId).eq('user_id', userId).order('order_index', { ascending: true }),
         supabase.from('learning_resources').select('*').eq('journey_id', journeyId).eq('user_id', userId),
         supabase.from('learning_notes').select('*').eq('journey_id', journeyId).eq('user_id', userId),
-        supabase.from('journey_habit_connections').select('*').eq('journey_id', journeyId).eq('user_id', userId)
+        supabase.from('journey_habit_connections').select('*, habits(id, habit_name, tracking_type, target_quantity, unit, color)').eq('journey_id', journeyId).eq('user_id', userId)
+          .then(res => {
+            if (res.error) {
+              return supabase.from('journey_habit_connections').select('*').eq('journey_id', journeyId).eq('user_id', userId);
+            }
+            return res;
+          })
       ]);
 
       if (jRes.error) {
@@ -319,7 +323,7 @@ export default async function handler(req, res) {
       const { error: jErr } = await supabase.from('learning_journeys').insert(journey);
       if (jErr) {
         console.error('[/api/learning] create_journey insert error:', jErr);
-        return res.status(500).json({ error: 'Failed to create learning journey in database' });
+        return res.status(500).json({ error: 'Failed to create learning journey in database', details: jErr.message });
       }
 
       // Insert phases if present
@@ -327,7 +331,7 @@ export default async function handler(req, res) {
         const { error: pErr } = await supabase.from('learning_phases').insert(createdPhases);
         if (pErr) {
           console.error('[/api/learning] create phases error:', pErr);
-          return res.status(500).json({ error: 'Failed to save journey phases' });
+          return res.status(500).json({ error: 'Failed to save journey phases', details: pErr.message });
         }
       }
 
@@ -336,7 +340,7 @@ export default async function handler(req, res) {
         const { error: tErr } = await supabase.from('learning_topics').insert(createdTopics);
         if (tErr) {
           console.error('[/api/learning] create topics error:', tErr);
-          return res.status(500).json({ error: 'Failed to save journey topics' });
+          return res.status(500).json({ error: 'Failed to save journey topics', details: tErr.message });
         }
       }
 
@@ -345,7 +349,7 @@ export default async function handler(req, res) {
         const { error: tkErr } = await supabase.from('learning_tasks').insert(createdTasks);
         if (tkErr) {
           console.error('[/api/learning] create tasks error:', tkErr);
-          return res.status(500).json({ error: 'Failed to save journey tasks' });
+          return res.status(500).json({ error: 'Failed to save journey tasks', details: tkErr.message });
         }
       }
 
@@ -499,6 +503,137 @@ export default async function handler(req, res) {
       }
 
       return res.status(200).json({ ok: true, completed: completedValue });
+    }
+
+    // ── POST: Connect Habit ─────────────────────────────────────────────────
+    if (req.method === 'POST' && action === 'connect_habit') {
+      const { journey_id, habit_id } = req.body || {};
+      if (!journey_id || !habit_id) return res.status(400).json({ error: 'journey_id and habit_id are required' });
+
+      const { data, error } = await supabase
+        .from('journey_habit_connections')
+        .insert({
+          user_id: userId,
+          journey_id,
+          habit_id
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[/api/learning] connect_habit error:', error);
+        return res.status(500).json({ error: 'Failed to connect habit' });
+      }
+
+      return res.status(201).json(data);
+    }
+
+    // ── PUT: Update Topic ───────────────────────────────────────────────────
+    if (req.method === 'PUT' && action === 'update_topic') {
+      const { id: topicId, ...updates } = req.body || {};
+      if (!topicId) return res.status(400).json({ error: 'Topic id is required' });
+
+      const allowedFields = ['title', 'description', 'priority', 'status', 'completion_progress', 'understanding_progress', 'estimated_duration', 'target_date', 'order_index'];
+      const payload = { last_activity_at: new Date().toISOString() };
+      for (const f of allowedFields) {
+        if (updates[f] !== undefined) payload[f] = updates[f];
+      }
+
+      const { data, error } = await supabase
+        .from('learning_topics')
+        .update(payload)
+        .eq('id', topicId)
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[/api/learning] update_topic error:', error);
+        return res.status(500).json({ error: 'Failed to update topic' });
+      }
+
+      return res.status(200).json(data);
+    }
+
+    // ── PUT: Update Journey ─────────────────────────────────────────────────
+    if (req.method === 'PUT' && action === 'update_journey') {
+      const { id: journeyId, ...updates } = req.body || {};
+      if (!journeyId) return res.status(400).json({ error: 'Journey id is required' });
+
+      const allowedFields = ['title', 'description', 'personal_goal', 'category', 'icon', 'target_date'];
+      const payload = { updated_at: new Date().toISOString() };
+      for (const f of allowedFields) {
+        if (updates[f] !== undefined) payload[f] = updates[f];
+      }
+
+      const { data, error } = await supabase
+        .from('learning_journeys')
+        .update(payload)
+        .eq('id', journeyId)
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[/api/learning] update_journey error:', error);
+        return res.status(500).json({ error: 'Failed to update journey' });
+      }
+
+      return res.status(200).json(data);
+    }
+
+    // ── POST: Add Resource ──────────────────────────────────────────────────
+    if (req.method === 'POST' && action === 'add_resource') {
+      const { journey_id, topic_id, title, url, resource_type = 'Website' } = req.body || {};
+      if (!journey_id || !title?.trim() || !url?.trim()) {
+        return res.status(400).json({ error: 'journey_id, title and url are required' });
+      }
+
+      const { data, error } = await supabase
+        .from('learning_resources')
+        .insert({
+          user_id: userId,
+          journey_id,
+          topic_id: topic_id || null,
+          title: title.trim(),
+          url: url.trim(),
+          resource_type
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[/api/learning] add_resource error:', error);
+        return res.status(500).json({ error: 'Failed to add resource' });
+      }
+
+      return res.status(201).json(data);
+    }
+
+    // ── POST: Add Note ──────────────────────────────────────────────────────
+    if (req.method === 'POST' && action === 'add_note') {
+      const { journey_id, topic_id, content } = req.body || {};
+      if (!journey_id || !content?.trim()) {
+        return res.status(400).json({ error: 'journey_id and content are required' });
+      }
+
+      const { data, error } = await supabase
+        .from('learning_notes')
+        .insert({
+          user_id: userId,
+          journey_id,
+          topic_id: topic_id || null,
+          content: content.trim()
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[/api/learning] add_note error:', error);
+        return res.status(500).json({ error: 'Failed to add note' });
+      }
+
+      return res.status(201).json(data);
     }
 
     // ── DELETE: Delete Journey, Phase, Topic, Task, Resource, Note ──────────

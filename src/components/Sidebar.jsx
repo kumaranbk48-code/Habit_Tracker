@@ -4,29 +4,26 @@ import { useAuth } from '../contexts/AuthContext';
 import supabase from '../lib/supabase';
 import {
   LayoutDashboard, ListChecks, Calendar, Target, Bell, BarChart3, User,
-  LogOut, ListTodo, Menu, X, ChevronRight, GraduationCap
+  LogOut, GraduationCap, X, Flame
 } from 'lucide-react';
-import XPLevelBar from './XPLevelBar';
-import ThemeToggle from './ThemeToggle';
-import NotificationCenter from './NotificationCenter';
+import { motion, AnimatePresence } from 'framer-motion';
 import { calculateXP } from '../hooks/useGamification';
 
 const NAV = [
-  { to: '/',          label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/habits',    label: 'My Habits', icon: ListChecks },
+  { to: '/',          label: 'Dashboard',    icon: LayoutDashboard },
+  { to: '/habits',    label: 'My Habits',    icon: ListChecks },
   { to: '/learning',  label: 'Learning Hub', icon: GraduationCap },
-  { to: '/calendar',  label: 'Calendar',  icon: Calendar },
-  { to: '/goals',     label: 'Goals',     icon: Target },
-  { to: '/reminders', label: 'Reminders', icon: Bell },
-  { to: '/reports',   label: 'Reports',   icon: BarChart3 },
-  { to: '/profile',   label: 'Profile',   icon: User },
+  { to: '/goals',     label: 'Goals',        icon: Target },
+  { to: '/calendar',  label: 'Calendar',     icon: Calendar },
+  { to: '/reminders', label: 'Reminders',    icon: Bell },
+  { to: '/reports',   label: 'Reports',      icon: BarChart3 },
+  { to: '/profile',   label: 'Profile',      icon: User },
 ];
 
-export default function Sidebar() {
-  const { user }   = useAuth();
-  const navigate   = useNavigate();
-  const location   = useLocation();
-  const [open, setOpen]         = useState(false);
+export default function Sidebar({ mobileOpen = false, onCloseMobile }) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [dashStats, setDashStats] = useState(null);
 
   const fetchSidebarStats = useCallback(async () => {
@@ -59,106 +56,116 @@ export default function Sidebar() {
   };
 
   const displayName = user?.user_metadata?.full_name
-    || user?.email?.split('@')[0] || 'User';
-  const avatar   = user?.user_metadata?.avatar_url;
-  const initials = displayName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
-  const xp       = calculateXP(dashStats);
-  const streak   = dashStats?.currentStreak || 0;
+    || user?.email?.split('@')[0] || 'Bharathkumaran';
+  const email = user?.email || 'kumarankbk48@gmail.com';
+  const avatar = user?.user_metadata?.avatar_url;
+  const initial = displayName.charAt(0).toUpperCase() || 'B';
+  const streak = dashStats?.currentStreak || 0;
 
   const NavItem = ({ item }) => (
     <NavLink
       to={item.to}
       end={item.to === '/'}
-      onClick={() => setOpen(false)}
+      onClick={() => onCloseMobile?.()}
       className={({ isActive }) =>
-        `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 group ${
+        `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-colors duration-150 group relative ${
           isActive
-            ? 'bg-[#3d7a75] text-white shadow-sm'
-            : 'text-[#4b5563] dark:text-[#cbd5e1] hover:bg-[#eef2f4] dark:hover:bg-[#222b33] hover:text-[#1e293b] dark:hover:text-[#f1f5f9]'
+            ? 'text-[#2dd4bf]'
+            : 'text-[#8899a8] hover:text-[#f1f5f9] hover:bg-[#121b25]/60'
         }`
       }
     >
       {({ isActive }) => (
         <>
-          <item.icon size={18} className={isActive ? 'text-white' : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300'} />
-          <span className="flex-1">{item.label}</span>
+          {isActive && (
+            <motion.div
+              layoutId="sidebarActivePill"
+              className="absolute inset-0 bg-[#122e2c] border border-[#2dd4bf]/25 rounded-xl shadow-[0_0_15px_rgba(45,212,191,0.12)] z-0"
+              transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+            />
+          )}
+          <item.icon
+            size={17}
+            className={`transition-colors relative z-10 ${
+              isActive ? 'text-[#2dd4bf]' : 'text-[#64748b] group-hover:text-slate-300'
+            }`}
+          />
+          <span className="flex-1 relative z-10">{item.label}</span>
           {item.label === 'My Habits' && streak > 0 && (
-            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-              isActive ? 'bg-white/20 text-white' : 'bg-[#fbeedc] text-[#a9660f] dark:bg-[#3a2c14] dark:text-[#dcb579]'
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 relative z-10 ${
+              isActive
+                ? 'bg-[#2dd4bf]/20 text-[#2dd4bf]'
+                : 'bg-amber-500/15 text-amber-300 border border-amber-500/20'
             }`}>
-              🔥{streak}
+              🔥 {streak}
             </span>
           )}
-          {isActive && <ChevronRight size={14} className="text-white/70 ml-auto" />}
         </>
       )}
     </NavLink>
   );
 
   const SidebarContent = () => (
-    <div className="flex flex-col h-full">
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-3 py-5 mb-2">
-        <div className="w-9 h-9 bg-gradient-to-br from-[#3d7a75] to-[#2d3f56] rounded-xl flex items-center justify-center shadow-sm flex-shrink-0">
-          <ListTodo size={18} className="text-white" />
+    <div className="flex flex-col h-full bg-[#080d12] border-r border-white/[0.05] select-none">
+      {/* Brand Header */}
+      <div className="flex items-center gap-3 px-5 py-6">
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center p-1.5 flex-shrink-0 shadow-md ring-1 ring-[#2dd4bf]/25 bg-[#0b131a] relative overflow-hidden">
+          <div className="absolute inset-0 bg-[#2dd4bf]/10 blur-sm" />
+          <img src="/habiz-logo.png" alt="HabiZ" className="w-full h-full object-contain relative z-10 drop-shadow-[0_0_8px_rgba(45,212,191,0.4)]" />
         </div>
-        <div>
-          <div className="font-bold text-gray-900 dark:text-white text-sm leading-tight">HabitTracker</div>
-          <div className="text-[10px] text-gray-400 dark:text-gray-400 font-medium">Build Better Habits</div>
-        </div>
-        {/* Desktop top controls: Notification Center & Dark mode toggle */}
-        <div className="ml-auto hidden md:flex items-center gap-1">
-          <NotificationCenter />
-          <ThemeToggle compact />
+        <div className="min-w-0">
+          <div className="font-bold text-white text-base tracking-tight leading-tight">HabiZ</div>
+          <div className="text-[11px] text-[#2dd4bf]/80 font-medium tracking-wide">Small habits. Big shifts.</div>
         </div>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 px-2 space-y-0.5">
-        {NAV.map(item => <NavItem key={item.to} item={item} />)}
+      {/* Navigation Links */}
+      <nav className="flex-1 px-3 space-y-1.5 overflow-y-auto scrollbar-none py-2">
+        {NAV.map(item => (
+          <NavItem key={item.to} item={item} />
+        ))}
       </nav>
 
-      {/* XP bar */}
-      {dashStats && (
-        <div className="px-3 py-2">
-          <XPLevelBar xp={xp} compact />
-        </div>
-      )}
+      {/* Inspirational Quote */}
+      <div className="px-4 py-3 mx-3 my-2 rounded-xl bg-[#0c141d]/70 border border-white/[0.04]">
+        <p className="text-[11px] text-[#718292] leading-relaxed italic">
+          Progress isn't loud,
+          <br />
+          it's consistent.
+        </p>
+      </div>
 
-      {/* User & sign-out */}
-      <div className="p-3 border-t border-[#e2e8ec] dark:border-[#2a343d] mt-1">
-        {streak >= 3 && (
-          <div className="mb-3 px-3 py-2.5 bg-[#fbeedc] dark:bg-[#3a2c14] border border-[#c99a52]/40 rounded-xl">
-            <div className="flex items-center gap-2">
-              <span className="text-xl fire-bounce">🔥</span>
-              <div>
-                <div className="text-xs font-bold text-[#a9660f] dark:text-[#dcb579]">{streak}-Day Streak!</div>
-                <div className="text-[10px] text-[#8a5a24] dark:text-[#dcb579]/80">Keep it going today</div>
-              </div>
-            </div>
-          </div>
-        )}
-        <div
-          onClick={() => { setOpen(false); navigate('/profile'); }}
-          className="flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-[#eef2f4] dark:hover:bg-[#222b33] transition-colors cursor-pointer group"
-        >
-          <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 bg-[#d9ecea] dark:bg-[#14302e] flex items-center justify-center">
-            {avatar
-              ? <img src={avatar} alt={displayName} className="w-full h-full object-cover" />
-              : <span className="text-xs font-bold text-[#245854] dark:text-[#8fd0c4]">{initials}</span>
-            }
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate group-hover:text-[#3d7a75] dark:group-hover:text-[#5fae9e] transition-colors">{displayName}</div>
-            <div className="text-[10px] text-gray-400 dark:text-gray-500 truncate">{user?.email}</div>
-          </div>
-          <button
-            onClick={(e) => { e.stopPropagation(); handleSignOut(); }}
-            title="Sign out"
-            className="p-1.5 text-gray-400 hover:text-[#b3453f] hover:bg-[#fbebeb] dark:hover:bg-[#3a2020] dark:hover:text-[#e2a8a3] rounded-lg transition-colors flex-shrink-0"
+      {/* User Footer Profile */}
+      <div className="p-3 mx-2 mb-3 mt-1 rounded-2xl bg-[#0c131a] border border-white/[0.05]">
+        <div className="flex items-center gap-2.5">
+          <div
+            onClick={() => { onCloseMobile?.(); navigate('/profile'); }}
+            className="w-8 h-8 rounded-full bg-gradient-to-br from-teal-500 to-[#1d534f] text-white flex items-center justify-center font-bold text-xs ring-1 ring-white/10 flex-shrink-0 cursor-pointer overflow-hidden"
           >
-            <LogOut size={15} />
-          </button>
+            {avatar ? (
+              <img src={avatar} alt={displayName} className="w-full h-full object-cover" />
+            ) : (
+              <span>{initial}</span>
+            )}
+          </div>
+          <div
+            onClick={() => { onCloseMobile?.(); navigate('/profile'); }}
+            className="flex-1 min-w-0 cursor-pointer"
+          >
+            <div className="text-xs font-semibold text-slate-200 truncate hover:text-teal-400 transition-colors">
+              {displayName}
+            </div>
+            <div className="text-[10px] text-slate-500 truncate">{email}</div>
+          </div>
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={handleSignOut}
+            title="Sign out"
+            className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-950/30 rounded-lg transition-colors flex-shrink-0 cursor-pointer"
+          >
+            <LogOut size={14} />
+          </motion.button>
         </div>
       </div>
     </div>
@@ -166,40 +173,44 @@ export default function Sidebar() {
 
   return (
     <>
-      <button
-        onClick={() => setOpen(true)}
-        className="md:hidden fixed top-4 left-4 z-40 w-10 h-10 bg-white dark:bg-[#1a2129] rounded-xl shadow-md border border-[#e2e8ec] dark:border-[#2a343d] flex items-center justify-center text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
-        aria-label="Open menu"
-      >
-        <Menu size={20} />
-      </button>
-
-      {/* Mobile top-right quick controls */}
-      <div className="md:hidden fixed top-4 right-4 z-40 flex items-center gap-1 bg-white/90 dark:bg-[#1a2129]/90 backdrop-blur-sm px-1.5 py-1 rounded-xl shadow-md border border-[#e2e8ec] dark:border-[#2a343d]">
-        <NotificationCenter />
-        <ThemeToggle compact />
-      </div>
-
-      {open && (
-        <div
-          className="md:hidden fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
-          onClick={() => setOpen(false)}
-        />
-      )}
-
-      <div className={`md:hidden fixed top-0 left-0 z-50 h-full w-64 bg-white dark:bg-[#14181c] shadow-2xl transition-transform duration-300 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
-          <ThemeToggle compact />
-          <button onClick={() => setOpen(false)} className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg">
-            <X size={18} />
-          </button>
-        </div>
-        <SidebarContent />
-      </div>
-
-      <aside className="hidden md:flex fixed top-0 left-0 h-full w-64 bg-white dark:bg-[#14181c] border-r border-[#e2e8ec] dark:border-[#2a343d] flex-col shadow-sm z-30">
+      {/* Desktop Sidebar */}
+      <aside className="hidden md:flex fixed top-0 left-0 h-full w-60 z-30">
         <SidebarContent />
       </aside>
+
+      {/* Mobile Drawer */}
+      <AnimatePresence>
+        {mobileOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="md:hidden fixed inset-0 z-40 bg-black/70 backdrop-blur-sm"
+              onClick={onCloseMobile}
+            />
+            <motion.div
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+              className="md:hidden fixed top-0 left-0 z-50 h-full w-64 shadow-2xl"
+            >
+              <div className="relative h-full">
+                <button
+                  onClick={onCloseMobile}
+                  className="absolute top-4 right-4 z-10 p-1.5 text-slate-400 hover:text-white rounded-lg bg-white/5"
+                  aria-label="Close menu"
+                >
+                  <X size={18} />
+                </button>
+                <SidebarContent />
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </>
   );
 }

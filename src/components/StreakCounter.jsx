@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 
 const FLAME_CONFIGS = [
   { min: 0,   size: 'text-2xl', glow: 'none' },
-  { min: 3,   size: 'text-3xl', glow: 'drop-shadow(0 0 6px rgba(251,146,60,0.6))' },
-  { min: 7,   size: 'text-4xl', glow: 'drop-shadow(0 0 10px rgba(251,146,60,0.8))' },
-  { min: 30,  size: 'text-5xl', glow: 'drop-shadow(0 0 16px rgba(239,68,68,0.9))' },
-  { min: 100, size: 'text-6xl', glow: 'drop-shadow(0 0 24px rgba(239,68,68,1))' },
+  { min: 3,   size: 'text-3xl', glow: 'drop-shadow(0 0 6px rgba(201,154,82,0.6))' },
+  { min: 7,   size: 'text-4xl', glow: 'drop-shadow(0 0 10px rgba(201,154,82,0.8))' },
+  { min: 30,  size: 'text-5xl', glow: 'drop-shadow(0 0 16px rgba(220,181,121,0.9))' },
+  { min: 100, size: 'text-6xl', glow: 'drop-shadow(0 0 22px rgba(95,174,158,0.95))' },
 ];
 
 function getFlameConfig(streak) {
@@ -15,7 +15,7 @@ function getFlameConfig(streak) {
   return FLAME_CONFIGS[0];
 }
 
-export default function StreakCounter({ streak = 0, label = 'Current Streak', large = false }) {
+export default function StreakCounter({ streak = 0, label = 'Current Streak', large = false, lightText = false }) {
   const prevStreak = useRef(streak);
   const [pop, setPop] = useState(false);
   const config = getFlameConfig(streak);
@@ -38,17 +38,33 @@ export default function StreakCounter({ streak = 0, label = 'Current Streak', la
         >
           🔥
         </span>
-        <div className={`text-5xl font-extrabold text-gray-900 leading-none ${pop ? 'number-pop' : ''}`}>
+        <div
+          className={`text-5xl font-extrabold leading-none ${pop ? 'number-pop' : ''} ${
+            lightText ? 'text-white' : 'text-slate-900 dark:text-slate-100'
+          }`}
+        >
           {streak}
         </div>
-        <div className="text-sm font-medium text-gray-500">{label}</div>
+        <div className={`text-sm font-medium ${lightText ? 'text-[#a5d6cd]' : 'text-slate-500 dark:text-slate-400'}`}>
+          {label}
+        </div>
         {streak >= 7 && (
-          <div className={`mt-1 px-3 py-1 rounded-full text-xs font-semibold ${
-            streak >= 100 ? 'bg-red-100 text-red-700' :
-            streak >= 30  ? 'bg-orange-100 text-orange-700' :
-                            'bg-amber-100 text-amber-700'
-          }`}>
-            {streak >= 100 ? '🏆 Legend' : streak >= 30 ? '🚀 On Fire' : '⚡ Building Momentum'}
+          <div
+            className={`mt-1 px-3 py-1 rounded-full text-xs font-semibold ${
+              lightText
+                ? streak >= 100
+                  ? 'bg-amber-400/20 text-amber-200 border border-amber-400/40'
+                  : streak >= 30
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                  : 'bg-[#5fae9e]/20 text-[#a5d6cd] border border-[#5fae9e]/30'
+                : streak >= 100
+                ? 'bg-[#e2f0ef] text-[#244b48] dark:bg-[#14302e] dark:text-[#5fae9e] border border-[#3d7a75]/30'
+                : streak >= 30
+                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300/40'
+                : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300/40'
+            }`}
+          >
+            {streak >= 100 ? '🏆 Legend' : streak >= 30 ? '🚀 Consistent Master' : '⚡ Building Momentum'}
           </div>
         )}
       </div>
@@ -63,10 +79,10 @@ export default function StreakCounter({ streak = 0, label = 'Current Streak', la
       >
         {streak > 0 ? '🔥' : '—'}
       </span>
-      <span className={`text-2xl font-bold text-gray-900 ${pop ? 'number-pop' : ''}`}>
+      <span className={`text-2xl font-bold text-slate-900 dark:text-slate-100 ${pop ? 'number-pop' : ''}`}>
         {streak}
       </span>
-      <span className="text-sm text-gray-500">{label}</span>
+      <span className="text-sm text-slate-500 dark:text-slate-400">{label}</span>
     </div>
   );
 }

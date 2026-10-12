@@ -21,6 +21,7 @@ import pushSubscribeHandler from './api/push-subscribe.js';
 import pushSendHandler from './api/push-send.js';
 import learningHandler from './api/learning.js';
 import accountHandler from './api/account.js';
+import seasonsHandler from './api/seasons.js';
 
 const app = express();
 const PORT = process.env.PORT || process.env.API_PORT || 3001;
@@ -94,6 +95,8 @@ app.all('/api/push-send',      wrap(pushSendHandler));
 app.all('/api/learning',       wrap(learningHandler));
 app.all('/api/learning/*',     wrap(learningHandler));
 app.all('/api/account',        wrap(accountHandler));
+app.all('/api/seasons',        wrap(seasonsHandler));
+app.all('/api/seasons/*',      wrap(seasonsHandler));
 
 // The AI module is absent and its implementation cannot be established from
 // the project sources. Do not expose a route that would make startup fail or
@@ -113,6 +116,18 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n❌ Error: Port ${PORT} is already in use by another process.`);
+    console.error(`   To free port ${PORT} in PowerShell, run:`);
+    console.error(`   Get-NetTCPConnection -LocalPort ${PORT} | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }\n`);
+    process.exit(1);
+  } else {
+    console.error('Server error:', err);
+    process.exit(1);
+  }
 });

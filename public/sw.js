@@ -1,7 +1,7 @@
 // ─── HabitTracker Service Worker ──────────────────────────────────────────────
 // Handles: offline caching, push notifications, notification click routing
 // Version bump forces browsers to install the updated SW
-const SW_VERSION = 'habittracker-v4';
+const SW_VERSION = 'habittracker-v5';
 const STATIC_CACHE = `${SW_VERSION}-static`;
 
 // Files to pre-cache for offline use
@@ -99,22 +99,32 @@ self.addEventListener('push', (event) => {
     payload = { title: 'HabitTracker', body: event.data.text() };
   }
 
+  const isAlarm = Boolean(payload.isAlarm || payload.is_alarm);
+  const habitId = payload.habitId || payload.habit_id || null;
+
   const options = {
     body: payload.body || 'Time to check your habits!',
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
-    tag: payload.tag || 'habit-reminder',
+    tag: payload.tag || (isAlarm && habitId ? `alarm-habit-${habitId}` : 'habit-reminder'),
     renotify: true,
-    requireInteraction: false,
-    vibrate: [200, 100, 200],
+    requireInteraction: isAlarm,
+    vibrate: isAlarm ? [300, 100, 300, 100, 300] : [200, 100, 200],
     data: {
       url: payload.url || '/habits',
-      habitId: payload.habitId || null,
+      habitId,
+      reminderId: payload.reminderId || payload.reminder_id || null,
+      isAlarm,
     },
-    actions: [
-      { action: 'complete', title: '✅ Mark Done' },
-      { action: 'snooze',   title: '⏰ Snooze 10 min' },
-    ],
+    actions: isAlarm
+      ? [
+          { action: 'complete', title: '✅ Done' },
+          { action: 'skip',     title: '⏭️ Skip' },
+        ]
+      : [
+          { action: 'complete', title: '✅ Mark Done' },
+          { action: 'snooze',   title: '⏰ Snooze 10 min' },
+        ],
   };
 
   event.waitUntil(
@@ -142,8 +152,69 @@ self.addEventListener('notificationclick', (event) => {
     return;
   }
 
+  if (event.action === 'skip') {
+    const habitId = event.notification.data?.habitId;
+    const reminderId = event.notification.data?.reminderId;
+    event.waitUntil(
+      clients.matchAll({ type: 'window', includeUncontrolled: true })
+        .then(async (windowClients) => {
+          let clientNotified = false;
+          for (const client of windowClients) {
+            client.postMessage({ type: 'HABIT_ALARM_SKIPPED', habitId, reminderId });
+            clientNotified = true;
+          }
+          if (!clientNotified) {
+            // Re-show notification after 25 minutes
+            setTimeout(() => {
+              self.registration.showNotification(event.notification.title, {
+                ...event.notification,
+                body: '⏰ Re-ping (1/3): ' + event.notification.body,
+                tag: event.notification.tag,
+                requireInteraction: true,
+              });
+            }, 25 * 60 * 1000);
+          }
+        })
+    );
+    return;
+  }
+
+  if (event.action === 'complete') {
+    const habitId = event.notification.data?.habitId;
+    if (habitId) {
+      const today = new Date().toISOString().split('T')[0];
+      event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true })
+          .then(async (windowClients) => {
+            let clientHandled = false;
+            for (const client of windowClients) {
+              client.postMessage({ type: 'HABIT_MARK_COMPLETE', habitId, today });
+              clientHandled = true;
+            }
+
+            if (!clientHandled) {
+              // Open app with auto-complete query param
+              const targetUrl = (event.notification.data?.url || '/habits') + `?auto_complete=${habitId}`;
+              if (clients.openWindow) return clients.openWindow(targetUrl);
+            } else {
+              self.registration.showNotification('🎉 Habit Completed!', {
+                body: 'Your streak has been protected.',
+                icon: '/icons/icon-192.png',
+                tag: 'completion-toast',
+              });
+            }
+          })
+      );
+      return;
+    }
+  }
+
   // Open / focus the app on the right page
-  const targetUrl = event.notification.data?.url || '/habits';
+  let targetUrl = event.notification.data?.url || '/habits';
+  if (event.notification.data?.isAlarm && event.notification.data?.habitId) {
+    targetUrl += (targetUrl.includes('?') ? '&' : '?') + `alarm_habit_id=${event.notification.data.habitId}`;
+  }
+
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true })
       .then(windowClients => {
@@ -194,14 +265,25 @@ self.addEventListener('message', (event) => {
         if (targetDateStr !== checkYMD) return;
       } else {
         // Scheduled mode: check days of week
-        if (Array.isArray(reminder.days_of_week) && reminder.days_of_week.length > 0) {
-          if (!reminder.days_of_week.includes(currentDay)) return;
+        let daysList = reminder.days_of_week;
+        if (typeof daysList === 'string') {
+          try {
+            daysList = JSON.parse(daysList);
+          } catch {
+            daysList = daysList.replace(/[{}"']/g, '').split(',').map((s) => s.trim()).filter(Boolean);
+          }
+        }
+        if (Array.isArray(daysList) && daysList.length > 0) {
+          const cleanDays = daysList.map((d) => String(d).replace(/[{}"']/g, '').trim().toLowerCase());
+          const isAll = cleanDays.some((d) => d === 'everyday' || d === 'all' || d === 'daily');
+          if (!isAll && !cleanDays.includes(currentDay.toLowerCase())) return;
         }
       }
 
-      const timeList = Array.isArray(reminder.alerts) && reminder.alerts.length > 0
+      const rawAlerts = Array.isArray(reminder.alerts) && reminder.alerts.length > 0
         ? reminder.alerts
         : [reminder.reminder_time || '08:00'];
+      const timeList = rawAlerts.map((t) => String(t).replace(/[{}"'\s]/g, '').trim()).filter(Boolean);
 
       timeList.forEach((timeStr, idx) => {
         if (!timeStr || typeof timeStr !== 'string') return;
@@ -258,14 +340,30 @@ self.addEventListener('message', (event) => {
           targetUrl = '/learning';
         }
 
+        const isAlarm = Boolean(reminder.is_alarm || reminder.reminder_mode === 'alarm');
         const timerId = setTimeout(() => {
           self.registration.showNotification(title, {
             body,
             icon: '/icons/icon-192.png',
             badge: '/icons/icon-192.png',
-            tag: `local-${reminder.id}-${idx}`,
-            vibrate: [200, 100, 200],
-            data: { url: targetUrl },
+            tag: isAlarm ? `alarm-habit-${reminder.habit_id || reminder.id}` : `local-${reminder.id}-${idx}`,
+            vibrate: isAlarm ? [300, 100, 300, 100, 300] : [200, 100, 200],
+            requireInteraction: isAlarm,
+            data: {
+              url: isAlarm && reminder.habit_id ? `/habits?alarm_habit_id=${reminder.habit_id}` : targetUrl,
+              habitId: reminder.habit_id,
+              reminderId: reminder.id,
+              isAlarm,
+            },
+            actions: isAlarm
+              ? [
+                  { action: 'complete', title: '✅ Done' },
+                  { action: 'skip',     title: '⏭️ Skip' },
+                ]
+              : [
+                  { action: 'complete', title: '✅ Mark Done' },
+                  { action: 'snooze',   title: '⏰ Snooze 10 min' },
+                ],
           });
         }, delay);
 

@@ -70,68 +70,9 @@ export default function TopicWorkspaceModal({
     onUpdateTopic(topic.id, { understanding_progress: num });
   };
 
-  const handleStatusChange = (newStatus) => {
-    onUpdateTopic(topic.id, { status: newStatus });
-  };
-
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={topic.title} maxWidth="max-w-3xl">
       <div className="py-1 space-y-4">
-        {/* Status & Category Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-gray-50 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-2xl">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Status:</span>
-            <CustomSelect
-              value={topic.status || 'Not Started'}
-              onChange={e => handleStatusChange(e.target.value)}
-              className="text-xs font-semibold bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 px-3 py-1.5 rounded-xl text-gray-900 dark:text-white focus:outline-none min-w-[130px]"
-            >
-              <option value="Not Started">Not Started</option>
-              <option value="In Progress">In Progress</option>
-              <option value="Completed">Completed</option>
-              <option value="Paused">Paused</option>
-            </CustomSelect>
-
-            <button
-              type="button"
-              onClick={() => handleStatusChange(topic.status === 'Completed' ? 'In Progress' : 'Completed')}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-xl transition-colors cursor-pointer ${
-                topic.status === 'Completed'
-                  ? 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300'
-                  : 'bg-[#e3f3ee] dark:bg-[#1c3a32] text-[#2f6b5c] dark:text-[#7fd1b9] hover:bg-[#d5ece4]'
-              }`}
-            >
-              {topic.status === 'Completed' ? 'Undo Complete' : 'Mark Complete'}
-            </button>
-
-            {onDeleteTopic && (
-              <button
-                type="button"
-                onClick={() => {
-                  onDeleteTopic(topic.id);
-                  onClose();
-                }}
-                className="text-xs font-semibold text-red-500 hover:text-red-600 dark:text-red-400 px-2.5 py-1.5 rounded-xl hover:bg-red-50 dark:hover:bg-red-950/40 flex items-center gap-1 transition-colors cursor-pointer ml-1"
-                title="Delete this topic"
-              >
-                <Trash2 size={13} /> Delete Topic
-              </button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-4 text-xs font-medium">
-            <div>
-              <span className="text-gray-400 mr-1.5">Task Completion:</span>
-              <span className="font-bold text-[#3d7a75] dark:text-[#5fae9e]">{topic.completion_progress ?? 0}%</span>
-            </div>
-            <div className="h-4 w-px bg-gray-200 dark:bg-gray-700" />
-            <div>
-              <span className="text-gray-400 mr-1.5">My Understanding:</span>
-              <span className="font-bold text-[#7570ab] dark:text-[#b0aee0]">{masteryValue}%</span>
-            </div>
-          </div>
-        </div>
-
         {/* Dual Progress Rating Slider */}
         <div className="p-4 bg-[#eae7f5]/70 dark:bg-[#232042]/50 border border-[#eae7f5] dark:border-[#232042] rounded-2xl space-y-2">
           <div className="flex items-center justify-between text-xs">
@@ -156,37 +97,55 @@ export default function TopicWorkspaceModal({
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex items-center gap-2 border-b border-gray-100 dark:border-gray-800 pb-2">
-          <button
-            onClick={() => setActiveTab('tasks')}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
-              activeTab === 'tasks'
-                ? 'bg-[#3d7a75] text-white shadow-sm'
-                : 'text-gray-600 dark:text-gray-300 hover:bg-[#eef2f4] dark:hover:bg-[#222b33]'
-            }`}
-          >
-            <CheckSquare size={14} /> Tasks ({tasks.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('resources')}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
-              activeTab === 'resources'
-                ? 'bg-[#3d7a75] text-white shadow-sm'
-                : 'text-gray-600 dark:text-gray-300 hover:bg-[#eef2f4] dark:hover:bg-[#222b33]'
-            }`}
-          >
-            <Link size={14} /> Resources ({resources.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('notes')}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
-              activeTab === 'notes'
-                ? 'bg-[#3d7a75] text-white shadow-sm'
-                : 'text-gray-600 dark:text-gray-300 hover:bg-[#eef2f4] dark:hover:bg-[#222b33]'
-            }`}
-          >
-            <FileText size={14} /> Personal Notes ({notes.length})
-          </button>
+        <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-2">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveTab('tasks')}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                activeTab === 'tasks'
+                  ? 'bg-[#3d7a75] text-white shadow-sm'
+                  : 'text-gray-600 dark:text-gray-300 hover:bg-[#eef2f4] dark:hover:bg-[#222b33]'
+              }`}
+            >
+              <CheckSquare size={14} /> Tasks ({tasks.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('resources')}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                activeTab === 'resources'
+                  ? 'bg-[#3d7a75] text-white shadow-sm'
+                  : 'text-gray-600 dark:text-gray-300 hover:bg-[#eef2f4] dark:hover:bg-[#222b33]'
+              }`}
+            >
+              <Link size={14} /> Resources ({resources.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('notes')}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                activeTab === 'notes'
+                  ? 'bg-[#3d7a75] text-white shadow-sm'
+                  : 'text-gray-600 dark:text-gray-300 hover:bg-[#eef2f4] dark:hover:bg-[#222b33]'
+              }`}
+            >
+              <FileText size={14} /> Personal Notes ({notes.length})
+            </button>
+          </div>
+
+          {onDeleteTopic && (
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm('Are you sure you want to delete this topic?')) {
+                  onDeleteTopic(topic.id);
+                  onClose();
+                }
+              }}
+              className="text-xs font-semibold text-red-500 hover:text-red-600 dark:text-red-400 px-2.5 py-1.5 rounded-xl hover:bg-red-50 dark:hover:bg-red-950/40 flex items-center gap-1 transition-colors cursor-pointer"
+              title="Delete this topic"
+            >
+              <Trash2 size={13} /> Delete Topic
+            </button>
+          )}
         </div>
 
         {/* TAB 1: TASKS CHECKLIST */}

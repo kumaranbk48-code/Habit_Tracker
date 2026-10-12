@@ -1,16 +1,19 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import supabase from '../lib/supabase';
 import Modal from '../components/Modal';
 import Toast from '../components/Toast';
 import CustomSelect from '../components/CustomSelect';
 import CustomTimePicker from '../components/CustomTimePicker';
 import {
-  Plus, Pencil, Trash2, Bell, BellOff, BellRing, AlertCircle, ShieldCheck,
+  Plus, Pencil, Trash2, Bell, BellOff, AlertCircle, ShieldCheck,
   Sun, Sunset, Moon, Clock, Calendar, Check, MessageSquare, Sparkles,
   Target, GraduationCap, CheckCircle2, AlertTriangle, Layers, BookOpen
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import HabizLoader from '../components/HabizLoader';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -66,6 +69,7 @@ export default function Reminders() {
     routine_window: 'Morning',
     days_of_week: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
     notification_status: 'Active',
+    is_alarm: false,
   });
 
   const {
@@ -80,8 +84,9 @@ export default function Reminders() {
   const getTimeValue = (val) => {
     if (!val) return '08:00';
     const str = typeof val === 'string' ? val : (val.target?.value || val.value || '08:00');
-    if (typeof str === 'string' && str.includes(':')) {
-      const [h, m] = str.split(':');
+    const clean = String(str).replace(/[{}"'\s]/g, '').trim();
+    if (clean.includes(':')) {
+      const [h, m] = clean.split(':');
       const cleanH = String(parseInt(h, 10) || 0).padStart(2, '0');
       const cleanM = String(parseInt(m, 10) || 0).padStart(2, '0');
       return `${cleanH}:${cleanM}`;
@@ -90,14 +95,22 @@ export default function Reminders() {
   };
 
   const fetchData = useCallback(async () => {
-    if (!session) return;
+    let currentSession = session;
+    if (!currentSession) {
+      const { data } = await supabase.auth.getSession();
+      currentSession = data?.session;
+    }
+    if (!currentSession) {
+      setLoading(false);
+      return;
+    }
     setFetchError('');
     try {
       const [res, habitsRes, goalsRes, learningRes] = await Promise.all([
-        fetch('/api/reminders', { headers: { Authorization: `Bearer ${session.access_token}` } }),
-        fetch('/api/habits', { headers: { Authorization: `Bearer ${session.access_token}` } }),
-        fetch('/api/goals', { headers: { Authorization: `Bearer ${session.access_token}` } }),
-        fetch('/api/learning', { headers: { Authorization: `Bearer ${session.access_token}` } }),
+        fetch('/api/reminders', { headers: { Authorization: `Bearer ${currentSession.access_token}` } }),
+        fetch('/api/habits', { headers: { Authorization: `Bearer ${currentSession.access_token}` } }),
+        fetch('/api/goals', { headers: { Authorization: `Bearer ${currentSession.access_token}` } }),
+        fetch('/api/learning', { headers: { Authorization: `Bearer ${currentSession.access_token}` } }),
       ]);
 
       if (!res.ok) {
@@ -122,11 +135,18 @@ export default function Reminders() {
       setJourneys(j);
 
       const activeReminders = r
-        .filter((rem) => rem.notification_status === 'Active')
+        .filter((rem) => {
+          const s = (rem.notification_status || 'active').toLowerCase();
+          return s === 'active';
+        })
         .map((rem) => ({
           ...rem,
           target_type: rem.target_type || 'habit',
+          is_alarm: Boolean(rem.is_alarm || rem.reminder_mode === 'alarm'),
           habit_name: rem.habits?.habit_name || '',
+          tracking_type: rem.habits?.tracking_type || '',
+          target_quantity: rem.habits?.target_quantity || 1,
+          unit: rem.habits?.unit || '',
           goal_name: rem.goals?.goal_name || '',
           journey_title: rem.learning_journeys?.title || '',
           topic_title: rem.learning_topics?.title || '',
@@ -145,8 +165,8 @@ export default function Reminders() {
   }, [session, scheduleLocalReminders]);
 
   useEffect(() => {
-    if (session) fetchData();
-  }, [session, fetchData]);
+    fetchData();
+  }, [fetchData]);
 
   // Handle incoming navigation state (e.g. from Goal card or Learning Hub "Set Reminder")
   useEffect(() => {
@@ -159,8 +179,11 @@ export default function Reminders() {
       } else {
         openAdd('habit', prefillId);
       }
+      try {
+        window.history.replaceState({}, document.title);
+      } catch {}
     }
-  }, [location.state, habits, goals, journeys]); // eslint-disable-line
+  }, [location.state]);
 
   const handleEnablePush = async () => {
     const ok = await requestPermissionAndSubscribe();
@@ -193,6 +216,7 @@ export default function Reminders() {
       routine_window: 'Morning',
       days_of_week: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
       notification_status: 'Active',
+      is_alarm: preferredType === 'habit',
     });
     setModalOpen(true);
   };
@@ -212,7 +236,9 @@ export default function Reminders() {
       goal_id: targetType === 'goal' ? (reminder.goal_id || goals[0]?.id || '') : '',
       journey_id: targetType === 'learning_journey' ? (reminder.journey_id || journeys[0]?.id || '') : '',
       topic_id: targetType === 'learning_topic' ? (reminder.topic_id || '') : '',
-      reminder_mode: reminder.reminder_mode || (targetType === 'goal' ? 'deadline_proximity' : 'scheduled'),
+      reminder_mode: ['scheduled', 'deadline_proximity', 'smart_nudge'].includes(reminder.reminder_mode)
+        ? reminder.reminder_mode
+        : (targetType === 'goal' ? 'deadline_proximity' : 'scheduled'),
       days_before_deadline: reminder.days_before_deadline ?? 1,
       reminder_time: mainTime,
       alerts: parsedAlerts,
@@ -220,8 +246,33 @@ export default function Reminders() {
       routine_window: reminder.routine_window || getRoutineWindow(mainTime),
       days_of_week: Array.isArray(reminder.days_of_week) && reminder.days_of_week.length > 0 ? reminder.days_of_week : WEEKDAYS,
       notification_status: reminder.notification_status || 'Active',
+      is_alarm: Boolean(reminder.is_alarm || reminder.reminder_mode === 'alarm'),
     });
     setModalOpen(true);
+  };
+
+  const handleToggleAlarm = async (rem) => {
+    const currentIsAlarm = Boolean(rem.is_alarm || rem.reminder_mode === 'alarm');
+    const newIsAlarm = !currentIsAlarm;
+    try {
+      const res = await fetch('/api/reminders', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ ...rem, is_alarm: newIsAlarm }),
+      });
+      if (res.ok) {
+        setToast({
+          message: newIsAlarm ? 'Alarm Mode Enabled 🔔' : 'Alarm Mode Disabled 🔕',
+          type: 'success',
+        });
+        fetchData();
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setToast({ message: errJson.error || 'Failed to toggle alarm mode', type: 'error' });
+      }
+    } catch {
+      setToast({ message: 'Network error', type: 'error' });
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -249,11 +300,13 @@ export default function Reminders() {
 
       const payload = {
         target_type: form.target_type,
-        habit_id: form.target_type === 'habit' ? form.habit_id : null,
-        goal_id: form.target_type === 'goal' ? form.goal_id : null,
-        journey_id: form.target_type === 'learning_journey' ? form.journey_id : null,
-        topic_id: form.target_type === 'learning_topic' ? form.topic_id : null,
-        reminder_mode: form.reminder_mode,
+        habit_id: form.target_type === 'habit' ? (form.habit_id || null) : null,
+        goal_id: form.target_type === 'goal' ? (form.goal_id || null) : null,
+        journey_id: form.target_type === 'learning_journey' ? (form.journey_id || null) : null,
+        topic_id: form.target_type === 'learning_topic' ? (form.topic_id || null) : null,
+        reminder_mode: ['scheduled', 'deadline_proximity', 'smart_nudge'].includes(form.reminder_mode)
+          ? form.reminder_mode
+          : (form.target_type === 'goal' ? 'deadline_proximity' : 'scheduled'),
         reminder_time: cleanMainTime,
         alerts: cleanAlerts,
         routine_window: cleanRoutine,
@@ -261,6 +314,7 @@ export default function Reminders() {
         days_of_week: Array.isArray(form.days_of_week) && form.days_of_week.length > 0 ? form.days_of_week : WEEKDAYS,
         custom_text: form.custom_text || '',
         notification_status: form.notification_status || 'Active',
+        is_alarm: Boolean(form.is_alarm),
       };
 
       const method = editing ? 'PUT' : 'POST';
@@ -385,102 +439,57 @@ export default function Reminders() {
   });
 
   return (
-    <div className="space-y-6">
-      {/* Page Header */}
+    <div className="space-y-6 page-enter pb-10">
+      {/* ── Page Header (Matching Reference Screen 5) ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Smart Reminders</h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#eae7f5] dark:bg-[#201d36] text-[#554f8a] dark:text-[#b0aadb]">
-              Habits · Goals · Roadmaps
-            </span>
-          </div>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            Never miss habit routines, goal deadlines, or learning study sessions.
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+            Reminders
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-400 mt-1">
+            Never miss what matters.
           </p>
         </div>
 
-        <button
+        <motion.button
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.97 }}
           onClick={() => openAdd('habit')}
-          className="inline-flex items-center gap-2 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white px-4 py-2.5 rounded-xl font-semibold text-sm transition-all shadow-md shadow-[#3d7a75]/20 active:scale-95 flex-shrink-0"
+          className="inline-flex items-center gap-2 bg-[#178274] hover:bg-[#136c60] text-white px-4 py-2.5 rounded-xl font-bold text-xs transition-colors shadow-lg shadow-teal-950/40 flex-shrink-0 cursor-pointer"
         >
-          <Plus size={18} /> Add Reminder
-        </button>
+          <Plus size={16} /> New Reminder
+        </motion.button>
       </div>
 
-      {/* Push Notification Device Banner */}
-      {swReady && (
-        <div className="bg-white dark:bg-[#1a2129] rounded-2xl p-4 shadow-sm border border-slate-100 dark:border-[#2a343d] flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className={`w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 ${
-              subscribed
-                ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300'
-                : 'bg-[#e2f0ef] dark:bg-[#14302e] text-[#2c6560] dark:text-[#7cc3bb]'
-            }`}>
-              {subscribed ? <ShieldCheck size={22} /> : <BellRing size={22} />}
-            </div>
-            <div>
-              <p className="font-semibold text-slate-800 dark:text-slate-100 text-sm">
-                {subscribed ? 'Device Push Notifications Active & Synced' : 'Enable Device Push Notifications'}
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 max-w-xl">
-                {subscribed
-                  ? 'Your active habit alerts, goal deadlines, and study reminders will notify you directly on your device.'
-                  : 'Receive timely reminder alerts directly on your phone/browser even when HabitTracker is in the background.'}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {permission === 'denied' ? (
-              <div className="text-xs text-red-500 font-semibold px-3 py-2 bg-red-50 dark:bg-red-900/30 rounded-xl">
-                Blocked in Browser Settings
-              </div>
-            ) : subscribed ? (
-              <button
-                type="button"
-                onClick={handleDisablePush}
-                className="text-xs font-semibold px-3.5 py-2 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
-              >
-                Disable
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleEnablePush}
-                className="inline-flex items-center gap-2 text-xs font-semibold px-4 py-2.5 bg-[#3d7a75] text-white hover:bg-[#2f5f5b] rounded-xl transition-colors shadow-xs cursor-pointer"
-              >
-                <Bell size={14} /> Enable Notifications
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Top Category Filter Tabs: All, Habits, Goals, Learning */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-[#e2e8ec] dark:border-[#2a343d] pb-3">
+      {/* ── Category Filter Tabs: All, Habits, Goals, Learning (Matching Reference) ── */}
+      <div className="flex flex-wrap items-center gap-2 relative">
         {[
-          { id: 'All', label: 'All Reminders', count: reminders.length, icon: Layers },
-          { id: 'habit', label: 'Habits', count: habitRemindersCount, icon: CheckCircle2 },
-          { id: 'goal', label: 'Goals', count: goalRemindersCount, icon: Target },
-          { id: 'learning', label: 'Learning Roadmaps', count: learningRemindersCount, icon: GraduationCap },
+          { id: 'All', label: 'All', count: reminders.length },
+          { id: 'habit', label: 'Habits', count: habitRemindersCount },
+          { id: 'goal', label: 'Goals', count: goalRemindersCount },
+          { id: 'learning', label: 'Learning', count: learningRemindersCount },
         ].map(cat => {
-          const CatIcon = cat.icon;
           const active = categoryFilter === cat.id;
           return (
             <button
               key={cat.id}
               onClick={() => setCategoryFilter(cat.id)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+              className={`relative flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
                 active
-                  ? 'bg-[#3d7a75] text-white shadow-sm shadow-[#3d7a75]/30'
-                  : 'bg-white dark:bg-[#1a2129] border border-[#e2e8ec] dark:border-[#2a343d] text-slate-600 dark:text-slate-300 hover:border-[#3d7a75]/50'
+                  ? 'text-teal-300'
+                  : 'bg-white/[0.03] text-slate-400 hover:text-white border border-white/[0.05]'
               }`}
             >
-              <CatIcon size={14} />
-              <span>{cat.label}</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                active ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+              {active && (
+                <motion.div
+                  layoutId="activeReminderCategory"
+                  className="absolute inset-0 bg-[#153834] border border-teal-500/35 rounded-xl shadow-xs -z-0"
+                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                />
+              )}
+              <span className="relative z-10">{cat.label}</span>
+              <span className={`relative z-10 text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                active ? 'bg-teal-400/20 text-teal-300' : 'bg-white/[0.05] text-slate-400'
               }`}>
                 {cat.count}
               </span>
@@ -490,7 +499,7 @@ export default function Reminders() {
       </div>
 
       {/* Routine Filter Sub-Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none p-1 rounded-2xl border border-slate-200/50 dark:border-slate-700/50">
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none p-1 rounded-2xl border border-white/[0.06] bg-black/30 relative">
         {[
           { id: 'All', label: 'All Routines', icon: Clock },
           { id: 'Due Now', label: `Due Now (${currentWindow})`, icon: Sparkles },
@@ -504,14 +513,21 @@ export default function Reminders() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
+              className={`relative flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
                 active
-                  ? 'bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'text-white'
+                  : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <TabIcon size={13} />
-              {tab.label}
+              {active && (
+                <motion.div
+                  layoutId="activeReminderRoutine"
+                  className="absolute inset-0 bg-slate-800 rounded-xl -z-0"
+                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                />
+              )}
+              <TabIcon size={13} className="relative z-10" />
+              <span className="relative z-10">{tab.label}</span>
             </button>
           );
         })}
@@ -527,210 +543,218 @@ export default function Reminders() {
         </div>
       )}
 
-      {/* Reminders Grid */}
+      {/* Reminders List - Styled after Reference Screen 5 */}
       {loading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="w-8 h-8 border-4 border-[#e2f0ef] border-t-[#3d7a75] dark:border-[#14302e] dark:border-t-[#5fae9e] rounded-full animate-spin" />
-        </div>
+        <HabizLoader size="md" text="Loading reminders..." />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredReminders.map((rem) => {
-            const type = rem.target_type || 'habit';
-            const isHabit = type === 'habit';
-            const isGoal = type === 'goal';
-            const isLearning = type === 'learning_journey' || type === 'learning_topic';
+        <div className="space-y-4">
+          <motion.div layout className="space-y-3">
+          <AnimatePresence mode="popLayout">
+            {filteredReminders.map((rem) => {
+              const type = rem.target_type || 'habit';
+              const isHabit = type === 'habit';
+              const isGoal = type === 'goal';
+              const isLearning = type === 'learning_journey' || type === 'learning_topic';
 
-            const itemName = isHabit
-              ? rem.habits?.habit_name || 'Habit'
-              : isGoal
-              ? rem.goals?.goal_name || 'Goal'
-              : rem.learning_topics?.title || rem.learning_journeys?.title || 'Learning Roadmap';
+              const itemName = isHabit
+                ? rem.habits?.habit_name || 'Habit'
+                : isGoal
+                ? rem.goals?.goal_name || 'Goal'
+                : rem.learning_topics?.title || rem.learning_journeys?.title || 'Learning Roadmap';
 
-            const alertsList = Array.isArray(rem.alerts) && rem.alerts.length > 0
-              ? rem.alerts
-              : [rem.reminder_time || '08:00'];
-            const routine = rem.routine_window || getRoutineWindow(alertsList[0]);
-            const days = Array.isArray(rem.days_of_week) ? rem.days_of_week : WEEKDAYS;
-            const isActive = rem.notification_status === 'Active';
-            const isDeadlineMode = rem.reminder_mode === 'deadline_proximity';
+              const alertsList = Array.isArray(rem.alerts) && rem.alerts.length > 0
+                ? rem.alerts
+                : [rem.reminder_time || '08:00'];
+              const routine = rem.routine_window || getRoutineWindow(alertsList[0]);
+              const days = Array.isArray(rem.days_of_week) ? rem.days_of_week : WEEKDAYS;
+              const isActive = rem.notification_status === 'Active';
+              const isDeadlineMode = rem.reminder_mode === 'deadline_proximity';
 
-            return (
-              <div
-                key={rem.id}
-                className={`bg-white dark:bg-[#1a2129] rounded-2xl p-5 shadow-sm border transition-all duration-200 flex flex-col justify-between ${
-                  isActive
-                    ? 'border-[#e2e8ec] dark:border-[#2a343d] hover:shadow-md'
-                    : 'border-slate-200/60 dark:border-slate-700/40 opacity-70'
-                }`}
-              >
-                <div>
-                  {/* Top row: Category Badge & Active Toggle Switch */}
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-1.5">
-                        {isHabit && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-[#e2f0ef] dark:bg-[#14302e] text-[#2c6560] dark:text-[#7cc3bb]">
-                            <CheckCircle2 size={11} /> Habit
-                          </span>
-                        )}
-                        {isGoal && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300">
-                            <Target size={11} /> Goal Alert
-                          </span>
-                        )}
-                        {isLearning && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-indigo-100 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-300">
-                            <GraduationCap size={11} /> Roadmap
-                          </span>
-                        )}
+              // Humanized schedule text
+              let scheduleText = '';
+              if (isDeadlineMode) {
+                const daysBefore = rem.days_before_deadline ?? 1;
+                scheduleText = daysBefore === 0
+                  ? `On due date at ${format12Hour(rem.reminder_time || '09:00')}`
+                  : `${daysBefore} day${daysBefore > 1 ? 's' : ''} before deadline at ${format12Hour(rem.reminder_time || '09:00')}`;
+              } else if (days.length === 7) {
+                scheduleText = `Every day at ${alertsList.map(format12Hour).join(', ')}`;
+              } else if (days.length === 5 && !days.includes('Sat') && !days.includes('Sun')) {
+                scheduleText = `Weekdays at ${alertsList.map(format12Hour).join(', ')}`;
+              } else {
+                scheduleText = `${days.join(', ')} at ${alertsList.map(format12Hour).join(', ')}`;
+              }
 
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800">
-                          {routine}
-                        </span>
-                      </div>
-
-                      <h3 className="font-bold text-slate-800 dark:text-slate-100 text-base truncate max-w-[210px]">
-                        {itemName}
-                      </h3>
-
-                      {isGoal && rem.goals?.target_date && (
-                        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 flex items-center gap-1">
-                          <Calendar size={11} /> Deadline: {rem.goals.target_date}
-                        </p>
-                      )}
-                      {isLearning && rem.learning_journeys?.title && rem.learning_topics?.title && (
-                        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 flex items-center gap-1">
-                          <BookOpen size={11} /> In: {rem.learning_journeys.title}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Active/Inactive Toggle Switch */}
-                    <button
-                      onClick={() => handleToggleStatus(rem)}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        isActive ? 'bg-[#3d7a75] dark:bg-[#5fae9e]' : 'bg-slate-300 dark:bg-slate-600'
-                      }`}
-                      title={isActive ? 'Deactivate Reminder' : 'Activate Reminder'}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white dark:bg-[#0e2320] transition-transform ${
-                          isActive ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
+              return (
+                <motion.div
+                  layout
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
+                  whileHover={{ y: -2 }}
+                  transition={{ duration: 0.2 }}
+                  key={rem.id}
+                  className={`habiz-panel p-4 sm:p-5 rounded-2xl transition-colors duration-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                    isActive ? 'hover:border-white/15' : 'opacity-65'
+                  }`}
+                >
+                {/* Left: Icon Circle + Details */}
+                <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 transition-transform ${
+                    isHabit
+                      ? 'bg-teal-500/10 text-teal-400 border border-teal-500/20'
+                      : isGoal
+                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                      : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                  }`}>
+                    {isHabit ? <CheckCircle2 size={20} /> : isGoal ? <Target size={20} /> : <GraduationCap size={20} />}
                   </div>
 
-                  {/* Deadline Alert Info or Scheduled Time */}
-                  {isDeadlineMode ? (
-                    <div className="mb-3 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 text-xs">
-                      <div className="flex items-center gap-1.5 font-bold text-amber-800 dark:text-amber-300">
-                        <AlertTriangle size={13} />
-                        {rem.days_before_deadline === 0
-                          ? 'Triggers on Target Due Date'
-                          : rem.days_before_deadline === 1
-                          ? 'Triggers 1 Day Before Deadline'
-                          : `Triggers ${rem.days_before_deadline} Days Before Deadline`}
-                      </div>
-                      <p className="text-[10px] text-amber-700/80 dark:text-amber-400/80 mt-0.5">
-                        Alert at {format12Hour(rem.reminder_time || '09:00')}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="mb-3 space-y-1">
-                      <span className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                        Scheduled Alerts ({alertsList.length})
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-white text-sm sm:text-base tracking-tight truncate">
+                        {itemName}
+                      </h3>
+                      {rem.is_alarm && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-red-500/15 text-red-400 border border-red-500/30">
+                          <BellRing size={10} /> Alarm
+                        </span>
+                      )}
+                      <span className="text-[10px] px-1.5 py-0.5 rounded text-slate-400 bg-white/[0.04] border border-white/[0.04]">
+                        {routine}
                       </span>
-                      <div className="flex flex-wrap gap-1.5 pt-0.5">
-                        {alertsList.map((time, idx) => (
-                          <div
-                            key={idx}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200/60 dark:border-[#2a343d]"
-                          >
-                            <Clock size={12} className="text-[#3d7a75] dark:text-[#5fae9e]" />
-                            {format12Hour(time)}
-                          </div>
-                        ))}
-                      </div>
                     </div>
-                  )}
 
-                  {/* Custom Message preview */}
-                  {rem.custom_text && (
-                    <div className="mb-3 p-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl text-xs text-slate-600 dark:text-slate-300 flex items-start gap-2 border border-slate-100 dark:border-[#2a343d]">
-                      <MessageSquare size={13} className="text-[#3d7a75] dark:text-[#5fae9e] flex-shrink-0 mt-0.5" />
-                      <span className="italic">"{rem.custom_text}"</span>
-                    </div>
-                  )}
+                    <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5 truncate">
+                      <Clock size={12} className="text-teal-400 flex-shrink-0" />
+                      <span>{scheduleText}</span>
+                    </p>
 
-                  {/* Active Days Pills (for Scheduled mode) */}
-                  {!isDeadlineMode && (
-                    <div className="flex items-center gap-1 mb-4">
-                      {WEEKDAYS.map((d) => {
-                        const selected = days.includes(d);
-                        return (
-                          <span
-                            key={d}
-                            className={`w-6 h-6 rounded-md text-[10px] font-bold flex items-center justify-center ${
-                              selected
-                                ? 'bg-[#3d7a75] text-white'
-                                : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
-                            }`}
-                          >
-                            {d[0]}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
+                    {rem.custom_text && (
+                      <p className="text-[11px] text-slate-400 italic mt-1 truncate">
+                        "{rem.custom_text}"
+                      </p>
+                    )}
+                  </div>
                 </div>
 
-                {/* Bottom Actions */}
-                <div className="pt-3 border-t border-slate-100 dark:border-[#2a343d] flex items-center justify-end">
+                {/* Right: Alarm switch + Toggle + Edit/Delete */}
+                <div className="flex items-center justify-between sm:justify-end gap-3 self-end sm:self-center w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-white/[0.04]">
+                  {isHabit && (
+                    <button
+                      type="button"
+                      onClick={() => handleToggleAlarm(rem)}
+                      className={`text-[11px] font-medium px-2.5 py-1 rounded-lg transition-colors cursor-pointer border ${
+                        rem.is_alarm
+                          ? 'bg-red-500/15 text-red-300 border-red-500/30'
+                          : 'bg-white/[0.03] text-slate-400 border-white/[0.06] hover:text-white'
+                      }`}
+                      title="Toggle Full-Screen Alarm Mode"
+                    >
+                      {rem.is_alarm ? 'Alarm: ON' : 'Alarm: OFF'}
+                    </button>
+                  )}
+
+                  {/* Toggle Switch */}
+                  <button
+                    onClick={() => handleToggleStatus(rem)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer flex-shrink-0 ${
+                      isActive ? 'bg-[#178274]' : 'bg-white/10'
+                    }`}
+                    title={isActive ? 'Deactivate reminder' : 'Activate reminder'}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow-xs ${
+                        isActive ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+
+                  {/* Action icons */}
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => openEdit(rem)}
-                      className="p-1.5 text-slate-400 hover:text-[#3d7a75] dark:hover:text-[#5fae9e] hover:bg-[#e2f0ef] dark:hover:bg-[#14302e] rounded-lg transition-colors"
+                      className="p-1.5 text-slate-400 hover:text-teal-300 hover:bg-white/[0.05] rounded-lg transition-colors cursor-pointer"
                       title="Edit Reminder"
                     >
-                      <Pencil size={15} />
+                      <Pencil size={14} />
                     </button>
                     <button
                       onClick={() => handleDelete(rem.id)}
-                      className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
                       title="Delete Reminder"
                     >
-                      <Trash2 size={15} />
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
-              </div>
+              </motion.div>
             );
           })}
+        </AnimatePresence>
+      </motion.div>
 
           {filteredReminders.length === 0 && !fetchError && (
-            <div className="col-span-full">
-              <div className="bg-white dark:bg-[#1a2129] rounded-3xl border border-[#e2e8ec] dark:border-[#2a343d] py-16 flex flex-col items-center gap-3 text-center px-4">
-                <div className="w-14 h-14 bg-[#e2f0ef] dark:bg-[#14302e] rounded-2xl flex items-center justify-center text-[#3d7a75] dark:text-[#5fae9e]">
-                  <Bell size={28} />
-                </div>
-                <h3 className="text-slate-800 dark:text-slate-100 font-semibold text-lg">No reminders found</h3>
-                <p className="text-slate-400 text-sm max-w-sm">
-                  {categoryFilter !== 'All'
-                    ? `No reminders set for ${categoryFilter}.`
-                    : 'Set custom alerts for your habits, goals, and learning roadmaps.'}
-                </p>
-                <button
-                  onClick={() => openAdd('habit')}
-                  className="mt-2 px-4 py-2 bg-[#3d7a75] text-white rounded-xl font-medium text-sm hover:bg-[#2f5f5b] transition-colors shadow-xs"
-                >
-                  Add Reminder
-                </button>
+            <div className="habiz-panel rounded-2xl py-14 flex flex-col items-center gap-3 text-center px-4">
+              <div className="w-12 h-12 bg-teal-500/10 border border-teal-500/20 rounded-2xl flex items-center justify-center text-teal-400">
+                <Bell size={24} />
               </div>
+              <h3 className="text-white font-bold text-base">No reminders found</h3>
+              <p className="text-slate-400 text-xs max-w-sm">
+                {categoryFilter !== 'All'
+                  ? `No reminders set for ${categoryFilter}.`
+                  : 'Set custom alerts for your habits, goals, and learning roadmaps.'}
+              </p>
+              <button
+                onClick={() => openAdd('habit')}
+                className="mt-1 px-4 py-2 bg-[#178274] hover:bg-[#136c60] text-white rounded-xl font-bold text-xs transition-colors cursor-pointer"
+              >
+                + Add Reminder
+              </button>
             </div>
           )}
         </div>
       )}
+
+      {/* ── Bottom Enable Notifications Banner (Matching Reference Screen 5) ── */}
+      <div className="habiz-panel p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-6">
+        <div className="flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center flex-shrink-0">
+            <BellRing size={20} />
+          </div>
+          <div>
+            <h4 className="text-sm font-bold text-white tracking-tight">
+              Enable Notifications
+            </h4>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Get timely reminders and stay on track with your routine.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 self-end sm:self-center">
+          {permission === 'granted' && subscribed ? (
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-teal-500/15 text-teal-300 border border-teal-500/25">
+                <ShieldCheck size={14} /> Active
+              </span>
+              <button
+                onClick={handleDisablePush}
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-red-400 font-medium transition-colors cursor-pointer"
+              >
+                Disable
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleEnablePush}
+              className="bg-[#178274] hover:bg-[#136c60] text-white px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-md shadow-teal-950/40 active:scale-95 cursor-pointer"
+            >
+              Enable
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Add / Edit Unified Modal */}
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit Reminder' : 'Add Smart Reminder'}>
@@ -1012,6 +1036,32 @@ export default function Reminders() {
             />
           </div>
 
+          {/* Alarm-Style Reminder Toggle (For Habits) */}
+          {form.target_type === 'habit' && (
+            <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-[#3a2c14]/40 border border-amber-200/80 dark:border-amber-800/40 flex flex-col gap-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900 dark:text-amber-200">
+                    <BellRing size={14} className="text-amber-600 dark:text-amber-400" />
+                    <span>Alarm-Style Takeover Reminder</span>
+                  </div>
+                  <p className="text-[11px] text-amber-700/90 dark:text-amber-300/80 mt-0.5">
+                    Takes over the screen when open, looping alarm sound, sticky notifications, and 25-min re-pings.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.is_alarm)}
+                    onChange={(e) => setForm({ ...form, is_alarm: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-10 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#3d7a75]" />
+                </label>
+              </div>
+            </div>
+          )}
+
           {/* Modal Actions */}
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-[#2a343d]">
             <button
@@ -1024,7 +1074,7 @@ export default function Reminders() {
             <button
               type="submit"
               disabled={formLoading}
-              className="px-5 py-2 text-sm font-bold text-white bg-[#3d7a75] hover:bg-[#2f5f5b] rounded-xl transition-all shadow-md shadow-[#3d7a75]/20 active:scale-95 disabled:opacity-50"
+              className="px-5 py-2 text-sm font-bold text-white bg-[#178274] hover:bg-[#136c60] rounded-xl transition-all shadow-md shadow-teal-950/40 active:scale-95 disabled:opacity-50 cursor-pointer"
             >
               {formLoading ? 'Saving...' : editing ? 'Update Reminder' : 'Create Reminder'}
             </button>

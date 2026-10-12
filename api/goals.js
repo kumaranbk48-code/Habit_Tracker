@@ -136,17 +136,19 @@ export default async function handler(req, res) {
       if (!id) return res.status(400).json({ error: 'id is required for update' });
       if (goal_name !== undefined && !goal_name?.trim()) return res.status(400).json({ error: 'goal_name cannot be empty' });
 
-      // Check milestones if status is being updated
-      const { data: milestones } = await supabase
-        .from('goal_milestones')
-        .select('completed')
-        .eq('goal_id', id)
-        .eq('user_id', user_id);
-
       let finalStatus = status;
-      if (milestones && milestones.length > 0) {
-        const done = milestones.filter(m => m.completed).length;
-        finalStatus = done === milestones.length ? 'Completed' : done > 0 ? 'In Progress' : 'Pending';
+      // Only auto-derive status from milestones if status is not explicitly specified
+      if (finalStatus === undefined) {
+        const { data: milestones } = await supabase
+          .from('goal_milestones')
+          .select('completed')
+          .eq('goal_id', id)
+          .eq('user_id', user_id);
+
+        if (milestones && milestones.length > 0) {
+          const done = milestones.filter(m => m.completed).length;
+          finalStatus = done === milestones.length ? 'Completed' : done > 0 ? 'In Progress' : 'Pending';
+        }
       }
 
       // Preserve omitted fields to prevent accidental resets on partial updates

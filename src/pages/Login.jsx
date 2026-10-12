@@ -4,6 +4,7 @@ import supabase from '../lib/supabase';
 import { signInWithGoogle } from '../lib/googleAuth';
 import { useAuth } from '../contexts/AuthContext';
 import { ListChecks, Mail, Lock, UserPlus, LogIn, Eye, EyeOff, Sparkles } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
@@ -77,7 +78,7 @@ export default function Login() {
       } else if (data?.session) {
         navigate('/');
       } else {
-        setInfo('Account created! Check your email inbox to confirm your account and sign in to HabitTracker.');
+        setInfo('Account created! Check your email inbox to confirm your account and sign in to HabiZ.');
         setIsSignUp(false);
         setPassword('');
       }
@@ -127,34 +128,35 @@ export default function Login() {
 
         {/* Logo */}
         <div className="flex items-center gap-3 relative">
-          <div className="w-10 h-10 bg-gradient-to-br from-[#3d7a75] to-[#2d3f56] rounded-xl flex items-center justify-center shadow-lg shadow-black/30">
-            <ListChecks className="text-white" size={22} />
+          <div className="w-11 h-11 rounded-2xl flex items-center justify-center p-1.5 shadow-md ring-1 ring-[#2dd4bf]/25 bg-[#0b131a] relative overflow-hidden">
+            <div className="absolute inset-0 bg-[#2dd4bf]/10 blur-sm" />
+            <img src="/habiz-logo.png" alt="HabiZ" className="w-full h-full object-contain relative z-10 drop-shadow-[0_0_8px_rgba(45,212,191,0.5)]" />
           </div>
-          <span className="text-white font-bold text-xl">HabitTracker</span>
+          <span className="text-white font-extrabold text-2xl tracking-tight">HabiZ</span>
         </div>
 
         {/* Hero copy */}
         <div className="relative space-y-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#3d7a75]/20 border border-[#3d7a75]/30 rounded-full">
-            <Sparkles size={14} className="text-[#8fd0c4]" />
-            <span className="text-[#8fd0c4] text-xs font-medium">Build habits that stick</span>
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-teal-500/15 border border-teal-500/25 rounded-full">
+            <Sparkles size={14} className="text-teal-300" />
+            <span className="text-teal-300 text-xs font-semibold">Small habits. Big shifts.</span>
           </div>
-          <h2 className="text-4xl font-bold text-white leading-tight">
+          <h2 className="text-4xl font-black text-white leading-tight">
             Small habits,<br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#8fd0c4] to-[#5fae9e]">
-              massive results.
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#2dd4bf] to-[#178274]">
+              massive shifts.
             </span>
           </h2>
-          <p className="text-slate-400 text-lg leading-relaxed max-w-sm">
-            Track daily habits, set meaningful goals, and watch your streaks grow — one day at a time.
+          <p className="text-slate-400 text-base leading-relaxed max-w-sm">
+            Track daily rituals, master learning tracks, and turn consistency into second nature.
           </p>
 
           {/* Features list */}
           <ul className="space-y-3">
-            {['Daily habit tracking with streaks', 'Smart reminders & notifications', 'Visual progress reports'].map((f) => (
+            {['Daily habit tracking with streaks', 'Full-screen alarms & smart pings', 'Learning Roadmaps & Goal progress'].map((f) => (
               <li key={f} className="flex items-center gap-3 text-slate-300 text-sm">
-                <div className="w-5 h-5 rounded-full bg-[#3d7a75]/30 flex items-center justify-center flex-shrink-0">
-                  <div className="w-2 h-2 rounded-full bg-[#8fd0c4]" />
+                <div className="w-5 h-5 rounded-full bg-teal-500/20 flex items-center justify-center flex-shrink-0">
+                  <div className="w-2 h-2 rounded-full bg-teal-400" />
                 </div>
                 {f}
               </li>
@@ -163,15 +165,15 @@ export default function Login() {
         </div>
 
         {/* Testimonial */}
-        <div className="relative bg-white/5 border border-white/10 rounded-2xl p-5">
+        <div className="relative bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5">
           <p className="text-slate-300 text-sm italic leading-relaxed">
-            "HabitTracker changed how I approach my daily routine. My productivity has never been higher."
+            "HabiZ changed how I approach my daily routine. Progress isn't loud, it's consistent."
           </p>
           <div className="flex items-center gap-2 mt-3">
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#3d7a75] to-[#5fae9e] flex items-center justify-center">
-              <span className="text-white text-xs font-bold">A</span>
+            <div className="w-7 h-7 rounded-full bg-teal-500/20 text-teal-300 flex items-center justify-center font-bold text-xs">
+              H
             </div>
-            <span className="text-slate-400 text-xs">Alex M. · Product Designer</span>
+            <span className="text-slate-400 text-xs">HabiZ Member</span>
           </div>
         </div>
       </div>
@@ -180,32 +182,81 @@ export default function Login() {
       <div className="flex-1 flex items-center justify-center p-6 lg:p-12">
         <div className="w-full max-w-md">
           {/* Card */}
-          <div className="bg-white dark:bg-[#1a2129] rounded-3xl shadow-2xl shadow-black/30 p-8 border border-transparent dark:border-[#2a343d]">
+          <motion.div
+            initial={{ opacity: 0, y: 22, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.35, ease: 'easeOut' }}
+            className="habiz-panel rounded-3xl p-8 border border-white/[0.08] shadow-2xl"
+          >
             {/* Mobile logo */}
-            <div className="flex items-center gap-2.5 mb-7 lg:hidden">
-              <div className="w-9 h-9 bg-gradient-to-br from-[#3d7a75] to-[#2d3f56] rounded-xl flex items-center justify-center">
-                <ListChecks className="text-white" size={19} />
+            <div className="flex items-center gap-2.5 mb-6 lg:hidden">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center p-1.5 shadow-md ring-1 ring-[#2dd4bf]/25 bg-[#0b131a] relative overflow-hidden">
+                <div className="absolute inset-0 bg-[#2dd4bf]/10 blur-sm" />
+                <img src="/habiz-logo.png" alt="HabiZ" className="w-full h-full object-contain relative z-10 drop-shadow-[0_0_6px_rgba(45,212,191,0.5)]" />
               </div>
-              <span className="font-bold text-gray-900 dark:text-white text-lg">HabitTracker</span>
+              <span className="font-extrabold text-white text-xl tracking-tight">HabiZ</span>
             </div>
 
-            <h2 className="text-2xl font-bold text-gray-900 mb-1">
+            {/* Framer Motion Segmented Auth Switcher Tabs */}
+            <div className="flex bg-white/[0.04] p-1 rounded-2xl border border-white/[0.06] mb-6 relative select-none">
+              <button
+                type="button"
+                onClick={() => { if (isSignUp) switchMode(); }}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl relative transition-colors cursor-pointer text-center z-10 ${
+                  !isSignUp ? 'text-teal-300' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {!isSignUp && (
+                  <motion.div
+                    layoutId="activeAuthTab"
+                    className="absolute inset-0 bg-[#122e2c] border border-teal-500/35 rounded-xl shadow-xs"
+                    transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                  />
+                )}
+                <span className="relative z-10 flex items-center justify-center gap-1.5">
+                  <LogIn size={13} /> Sign In
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { if (!isSignUp) switchMode(); }}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl relative transition-colors cursor-pointer text-center z-10 ${
+                  isSignUp ? 'text-teal-300' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {isSignUp && (
+                  <motion.div
+                    layoutId="activeAuthTab"
+                    className="absolute inset-0 bg-[#122e2c] border border-teal-500/35 rounded-xl shadow-xs"
+                    transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                  />
+                )}
+                <span className="relative z-10 flex items-center justify-center gap-1.5">
+                  <UserPlus size={13} /> Create Account
+                </span>
+              </button>
+            </div>
+
+            <h2 className="text-2xl font-black text-white mb-1">
               {isSignUp ? 'Create account' : 'Welcome back'}
             </h2>
-            <p className="text-gray-500 text-sm mb-7">
+            <p className="text-slate-400 text-sm mb-6">
               {isSignUp
-                ? 'Start your journey to better habits today.'
+                ? 'Start your journey with HabiZ today.'
                 : 'Sign in to continue your habit streak.'}
             </p>
 
             {/* Google Button */}
-            <button
+            <motion.button
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.98 }}
               onClick={handleGoogle}
               disabled={googleLoading}
-              className="w-full flex items-center justify-center gap-3 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-700 py-3 rounded-xl font-medium text-sm transition-all duration-150 mb-5 disabled:opacity-60 shadow-sm"
+              className="w-full flex items-center justify-center gap-3 border border-white/[0.1] hover:border-white/[0.2] bg-white/[0.04] hover:bg-white/[0.07] text-white py-3 rounded-xl font-medium text-sm transition-colors mb-5 disabled:opacity-60 shadow-sm cursor-pointer"
             >
               {googleLoading ? (
-                <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               ) : (
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
@@ -215,13 +266,13 @@ export default function Login() {
                 </svg>
               )}
               Continue with Google
-            </button>
+            </motion.button>
 
             {/* Divider */}
             <div className="flex items-center gap-3 mb-5">
-              <div className="flex-1 h-px bg-gray-100" />
-              <span className="text-xs text-gray-400 font-medium uppercase tracking-widest">or</span>
-              <div className="flex-1 h-px bg-gray-100" />
+              <div className="flex-1 h-px bg-white/[0.08]" />
+              <span className="text-xs text-slate-500 font-medium uppercase tracking-widest">or</span>
+              <div className="flex-1 h-px bg-white/[0.08]" />
             </div>
 
             {/* Email/Password Form */}
@@ -278,23 +329,39 @@ export default function Login() {
                 )}
               </div>
 
-              {error && (
-                <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-100 rounded-xl">
-                  <div className="w-1.5 h-1.5 rounded-full bg-red-500 mt-1.5 flex-shrink-0" />
-                  <p className="text-sm text-red-600">{error}</p>
-                </div>
-              )}
-              {info && (
-                <div className="flex items-start gap-2 p-3 bg-green-50 border border-green-100 rounded-xl">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 mt-1.5 flex-shrink-0" />
-                  <p className="text-sm text-green-700">{info}</p>
-                </div>
-              )}
+              <AnimatePresence>
+                {error && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6, height: 0 }}
+                    animate={{ opacity: 1, y: 0, height: 'auto' }}
+                    exit={{ opacity: 0, y: -6, height: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl"
+                  >
+                    <div className="w-1.5 h-1.5 rounded-full bg-red-400 mt-1.5 flex-shrink-0" />
+                    <p className="text-xs text-red-300">{error}</p>
+                  </motion.div>
+                )}
+                {info && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6, height: 0 }}
+                    animate={{ opacity: 1, y: 0, height: 'auto' }}
+                    exit={{ opacity: 0, y: -6, height: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="flex items-start gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-xl"
+                  >
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-400 mt-1.5 flex-shrink-0" />
+                    <p className="text-xs text-green-300">{info}</p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-              <button
+              <motion.button
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.98 }}
                 type="submit"
                 disabled={loading}
-                className="w-full flex items-center justify-center gap-2 bg-[#3d7a75] hover:bg-[#2f5f5b] text-white py-3 rounded-xl font-semibold text-sm transition-all duration-150 shadow-md shadow-[#3d7a75]/20 hover:shadow-[#3d7a75]/30 disabled:opacity-60 mt-1"
+                className="w-full flex items-center justify-center gap-2 bg-[#178274] hover:bg-[#136c60] text-white py-3 rounded-xl font-bold text-sm transition-colors shadow-md shadow-teal-950/40 disabled:opacity-60 mt-1 cursor-pointer"
               >
                 {loading ? (
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -303,19 +370,19 @@ export default function Login() {
                 ) : (
                   <><LogIn size={16} /> Sign In</>
                 )}
-              </button>
+              </motion.button>
             </form>
 
-            <p className="text-center text-sm text-gray-500 mt-5">
+            <p className="text-center text-sm text-slate-400 mt-5">
               {isSignUp ? 'Already have an account?' : "Don't have an account?"}{' '}
               <button
                 onClick={switchMode}
-                className="text-[#3d7a75] dark:text-[#5fae9e] font-semibold hover:underline"
+                className="text-teal-400 font-bold hover:underline cursor-pointer"
               >
                 {isSignUp ? 'Sign In' : 'Sign Up'}
               </button>
             </p>
-          </div>
+          </motion.div>
         </div>
       </div>
     </div>
