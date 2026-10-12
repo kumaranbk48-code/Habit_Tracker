@@ -532,21 +532,27 @@ export default function Dashboard() {
 
   if (fetchError) {
     return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <div className="flex items-center gap-3 p-5 bg-red-50 border border-red-100 rounded-2xl">
-          <AlertCircle size={20} className="text-red-500 flex-shrink-0" />
-          <div className="flex-1">
-            <p className="font-medium text-red-700">Unable to load dashboard</p>
-            <p className="text-sm text-red-600 mt-0.5">{fetchError}</p>
+      <div className="space-y-6 pt-6">
+        <h1 className="text-2xl font-extrabold text-white tracking-tight">Dashboard</h1>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 bg-rose-950/30 border border-rose-900/50 rounded-2xl">
+          <div className="flex items-center gap-3">
+            <AlertCircle size={22} className="text-rose-400 flex-shrink-0" />
+            <div>
+              <p className="font-semibold text-rose-200 text-sm">Unable to load dashboard data</p>
+              <p className="text-xs text-rose-400/90 mt-0.5">{fetchError}</p>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => { setLoading(true); fetchAll(); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition-colors">
-              <RefreshCw size={14} /> Retry
+          <div className="flex items-center gap-2.5 flex-shrink-0">
+            <button
+              onClick={() => { setLoading(true); fetchAll(); }}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] text-slate-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+            >
+              <RefreshCw size={13} /> Retry
             </button>
-            <button onClick={async () => { await signOut?.(); navigate('/login', { replace: true }); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors shadow-sm">
+            <button
+              onClick={async () => { await signOut?.(); navigate('/login', { replace: true }); }}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-xl transition-colors shadow-sm cursor-pointer"
+            >
               Sign Out & Login
             </button>
           </div>
