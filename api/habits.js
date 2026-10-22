@@ -74,6 +74,7 @@ export default async function handler(req, res) {
       if (timer_duration !== undefined) insertObj.timer_duration = timer_duration ? Number(timer_duration) : null;
       if (req.body?.status !== undefined) insertObj.status = req.body.status;
       if (req.body?.season_id !== undefined) insertObj.season_id = req.body.season_id;
+      insertObj.created_at = req.body?.created_at || new Date().toISOString();
 
       const { data, error } = await supabase
         .from('habits')

@@ -1,14 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import DateBulkActionModal from '../components/DateBulkActionModal';
 import Toast from '../components/Toast';
 import {
-  AlertCircle, RefreshCw, ChevronLeft, ChevronRight, Calendar as CalIcon,
-  Flame, Award, Target, CheckCircle2
+  AlertCircle, ChevronLeft, ChevronRight, Calendar as CalIcon,
+  CheckCircle2, XCircle, Clock, Info
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useConfetti } from '../hooks/useConfetti';
-import { calculateMonthlyAnalytics, isHabitScheduledOnDate } from '../lib/calendarLogic';
+import { motion } from 'framer-motion';
+import { calculateMonthlyAnalytics, isHabitScheduledOnDate, getHabitStartDateStr } from '../lib/calendarLogic';
 import HabizLoader from '../components/HabizLoader';
 
 export default function CalendarPage() {
@@ -22,9 +20,6 @@ export default function CalendarPage() {
 
   // Month navigation state
   const [viewDate, setViewDate] = useState(() => new Date());
-
-  // Safe Date Bulk Action Modal state
-  const [dateModal, setDateModal] = useState({ open: false, dateStr: '', scheduledCount: 0 });
 
   const todayStr = useMemo(() => {
     const d = new Date();
@@ -54,7 +49,6 @@ export default function CalendarPage() {
       setHabits(Array.isArray(h) ? h : []);
       setTrackingLogs(Array.isArray(t) ? t : []);
       setDashStats(d);
-      window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
     } catch (err) {
       console.error(err);
       setFetchError('Network error — check your connection.');
@@ -82,94 +76,6 @@ export default function CalendarPage() {
 
   const handleNextMonth = () => {
     setViewDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
-  };
-
-  // Toggle single cell completion
-  const handleToggleHabitDate = async (habitOrId, completionDate) => {
-    const habitId = typeof habitOrId === 'object' && habitOrId !== null ? habitOrId.id : habitOrId;
-    if (!habitId || !completionDate) return;
-
-    const prevLogs = [...trackingLogs];
-    const existing = trackingLogs.find(t => t.habit_id === habitId && t.completion_date === completionDate);
-    const newStatus = existing ? !existing.status : true;
-
-    // Optimistic instant update
-    let nextLogs;
-    if (existing) {
-      nextLogs = trackingLogs.map(t =>
-        t.habit_id === habitId && t.completion_date === completionDate
-          ? { ...t, status: newStatus }
-          : t
-      );
-    } else {
-      nextLogs = [...trackingLogs, { habit_id: habitId, completion_date: completionDate, status: newStatus }];
-    }
-    setTrackingLogs(nextLogs);
-    if (newStatus) fireSmall();
-
-    try {
-      const res = await fetch('/api/tracking', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ habit_id: habitId, completion_date: completionDate, status: newStatus }),
-      });
-
-      if (res.ok) {
-        window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
-      } else {
-        setTrackingLogs(prevLogs);
-        setToast({ message: 'Failed to update habit on date. Reverted.', type: 'error' });
-      }
-    } catch {
-      setTrackingLogs(prevLogs);
-      setToast({ message: 'Network connection error.', type: 'error' });
-    }
-  };
-
-  // Bulk action handlers
-  const handleOpenDateActionModal = (dateStr, scheduledCount) => {
-    setDateModal({ open: true, dateStr, scheduledCount });
-  };
-
-  const handleConfirmAllComplete = async (dateStr) => {
-    const scheduledHabits = habits.filter(h => !h.is_archived && isHabitScheduledOnDate(h, dateStr));
-    if (!scheduledHabits.length) return;
-
-    try {
-      const promises = scheduledHabits.map(h =>
-        fetch('/api/tracking', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ habit_id: h.id, completion_date: dateStr, status: true }),
-        })
-      );
-      await Promise.all(promises);
-      fireSmall();
-      fetchData();
-      setToast({ message: `Marked all ${scheduledHabits.length} scheduled habits complete for ${dateStr}! 🎉`, type: 'success' });
-    } catch {
-      setToast({ message: 'Failed to update scheduled habits.', type: 'error' });
-    }
-  };
-
-  const handleConfirmAllIncomplete = async (dateStr) => {
-    const scheduledHabits = habits.filter(h => !h.is_archived && isHabitScheduledOnDate(h, dateStr));
-    if (!scheduledHabits.length) return;
-
-    try {
-      const promises = scheduledHabits.map(h =>
-        fetch('/api/tracking', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ habit_id: h.id, completion_date: dateStr, status: false }),
-        })
-      );
-      await Promise.all(promises);
-      fetchData();
-      setToast({ message: `Reset completion for scheduled habits on ${dateStr}`, type: 'info' });
-    } catch {
-      setToast({ message: 'Failed to reset habits.', type: 'error' });
-    }
   };
 
   // Monthly Analytics Calculations
@@ -213,16 +119,31 @@ export default function CalendarPage() {
     return days;
   }, [firstDayOfWeek, daysInMonth]);
 
-  // Habits scheduled on selected day
-  const habitsOnSelectedDay = useMemo(() => {
-    return habits.filter(h => !h.is_archived && isHabitScheduledOnDate(h, selectedDayStr));
-  }, [habits, selectedDayStr]);
-
   const trackingMap = useMemo(() => {
     const map = new Map();
     trackingLogs.forEach(t => map.set(`${t.habit_id}_${t.completion_date}`, t.status));
     return map;
   }, [trackingLogs]);
+
+  // Habits scheduled on selected day (never display habits on dates prior to creation)
+  const habitsOnSelectedDay = useMemo(() => {
+    return habits.filter(h => {
+      if (h.is_archived) return false;
+      const startDate = getHabitStartDateStr(h);
+      if (startDate && selectedDayStr < startDate) {
+        return false;
+      }
+      return isHabitScheduledOnDate(h, selectedDayStr);
+    });
+  }, [habits, selectedDayStr]);
+
+  const completedOnSelectedDayCount = useMemo(() => {
+    return habitsOnSelectedDay.filter(h => trackingMap.get(`${h.id}_${selectedDayStr}`) === true).length;
+  }, [habitsOnSelectedDay, trackingMap, selectedDayStr]);
+
+  const isSelectedFuture = selectedDayStr > todayStr;
+  const isSelectedToday = selectedDayStr === todayStr;
+  const isSelectedPast = selectedDayStr < todayStr;
 
   if (loading) {
     return <HabizLoader size="lg" text="Loading calendar..." />;
@@ -303,8 +224,12 @@ export default function CalendarPage() {
               const isSelected = dStr === selectedDayStr;
               const isToday = dStr === todayStr;
 
-              // Count completed habits on this date
-              const completedCount = habits.filter(h => trackingMap.get(`${h.id}_${dStr}`) === true).length;
+              // Count completed habits on this date (only for habits that existed on this date)
+              const completedCount = habits.filter(h => {
+                const startDate = getHabitStartDateStr(h);
+                if (startDate && dStr < startDate) return false;
+                return trackingMap.get(`${h.id}_${dStr}`) === true;
+              }).length;
               const hasActivity = completedCount > 0;
 
               return (
@@ -343,7 +268,7 @@ export default function CalendarPage() {
           </div>
         </div>
 
-        {/* Right Column: Day Schedule & Scheduled Habits */}
+        {/* Right Column: Day Schedule & Habit Status (Read-Only) */}
         <div className="lg:col-span-5 xl:col-span-4 space-y-6">
           <div className="habiz-panel p-5 sm:p-6 rounded-3xl space-y-4">
             <div className="flex items-center justify-between">
@@ -354,73 +279,81 @@ export default function CalendarPage() {
                 <p className="text-xs text-slate-400">{selectedDateLabel}</p>
               </div>
 
-              <button
-                onClick={() => handleOpenDateActionModal(selectedDayStr, habitsOnSelectedDay.length)}
-                className="text-xs font-semibold text-teal-400 hover:text-teal-300 cursor-pointer"
-              >
-                + Bulk Action
-              </button>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-white/[0.04] border border-white/10 text-slate-300">
+                <span className="text-teal-400 font-bold">{completedOnSelectedDayCount}</span> / {habitsOnSelectedDay.length} Completed
+              </span>
             </div>
 
-            {/* Scheduled Habits for selected date with sleek scroll containment */}
+            {/* Scheduled Habits for selected date with read-only completion status */}
             <div className="space-y-2.5 pt-1 max-h-[480px] overflow-y-auto pr-1">
               {habitsOnSelectedDay.length === 0 ? (
-                <div className="p-6 text-center text-xs text-slate-400 bg-white/[0.02] rounded-2xl">
-                  No habits scheduled for {selectedDateLabel}.
+                <div className="p-8 text-center bg-white/[0.02] border border-white/[0.04] rounded-2xl space-y-1.5">
+                  <p className="text-xs font-semibold text-slate-300">
+                    No habits scheduled for {selectedDateLabel}.
+                  </p>
+                  {isSelectedPast && (
+                    <p className="text-[11px] text-slate-400">
+                      Habits are tracked starting from the day they are created.
+                    </p>
+                  )}
                 </div>
               ) : (
-                <motion.div layout className="space-y-2.5">
-                  <AnimatePresence mode="popLayout">
-                    {habitsOnSelectedDay.map(h => {
-                      const isDone = trackingMap.get(`${h.id}_${selectedDayStr}`) === true;
-                      return (
-                        <motion.div
-                          layout
-                          initial={{ opacity: 0, scale: 0.96 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.96 }}
-                          whileHover={{ x: 3 }}
-                          transition={{ duration: 0.15 }}
-                          key={h.id}
-                          onClick={() => handleToggleHabitDate(h.id, selectedDayStr)}
-                          className="habiz-panel-subtle habiz-panel-interactive p-3.5 rounded-2xl flex items-center justify-between cursor-pointer group"
-                        >
-                          <div className="min-w-0">
-                            <h4 className={`text-xs font-bold truncate ${isDone ? 'line-through text-slate-500' : 'text-white'}`}>
-                              {h.habit_name}
-                            </h4>
-                            <p className="text-[10px] text-slate-400 mt-0.5">
-                              {h.category} • {h.time_of_day === 'morning' ? 'Morning' : h.time_of_day === 'afternoon' ? 'Afternoon' : h.time_of_day === 'evening' ? 'Evening' : 'Anytime'}
-                            </p>
-                          </div>
+                <div className="space-y-2.5">
+                  {habitsOnSelectedDay.map(h => {
+                    const isDone = trackingMap.get(`${h.id}_${selectedDayStr}`) === true;
+                    return (
+                      <div
+                        key={h.id}
+                        className="habiz-panel-subtle p-3.5 rounded-2xl flex items-center justify-between gap-3 border border-white/[0.06] bg-black/20"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <h4 className={`text-xs font-bold truncate ${isDone ? 'text-teal-300' : 'text-white'}`}>
+                            {h.habit_name}
+                          </h4>
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            {h.category} • {h.time_of_day === 'morning' ? 'Morning' : h.time_of_day === 'afternoon' ? 'Afternoon' : h.time_of_day === 'evening' ? 'Evening' : 'Anytime'}
+                          </p>
+                        </div>
 
-                          <div className={`w-5 h-5 rounded-lg border flex items-center justify-center text-xs font-bold transition-colors ${
-                            isDone
-                              ? 'bg-[#178274] border-[#178274] text-white shadow-[0_0_8px_rgba(23,130,116,0.5)]'
-                              : 'border-white/20 text-transparent group-hover:border-teal-400'
-                          }`}>
-                            ✓
-                          </div>
-                        </motion.div>
-                      );
-                    })}
-                  </AnimatePresence>
-                </motion.div>
+                        {/* Read-Only Status Indicator */}
+                        <div className="flex-shrink-0">
+                          {isDone ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+                              <CheckCircle2 size={13} className="text-emerald-400" />
+                              Completed
+                            </span>
+                          ) : isSelectedFuture ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-white/[0.04] text-slate-400 border border-white/10">
+                              <Clock size={13} className="text-slate-400" />
+                              Scheduled
+                            </span>
+                          ) : isSelectedToday ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/25">
+                              <Clock size={13} className="text-amber-400" />
+                              Not Completed
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                              <XCircle size={13} className="text-rose-400" />
+                              Not Completed
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
+            </div>
+
+            {/* Read-only reminder footer */}
+            <div className="mt-4 pt-3 border-t border-white/[0.04] flex items-center gap-2 text-[11px] text-slate-400">
+              <Info size={13} className="text-teal-400 flex-shrink-0" />
+              <span>Calendar is view-only. Habit completion is logged on your Dashboard.</span>
             </div>
           </div>
         </div>
       </div>
-
-      {/* Date Safe Bulk Action Modal */}
-      <DateBulkActionModal
-        open={dateModal.open}
-        onClose={() => setDateModal({ open: false, dateStr: '', scheduledCount: 0 })}
-        dateStr={dateModal.dateStr}
-        scheduledHabitsCount={dateModal.scheduledCount}
-        onConfirmAllComplete={handleConfirmAllComplete}
-        onConfirmAllIncomplete={handleConfirmAllIncomplete}
-      />
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>

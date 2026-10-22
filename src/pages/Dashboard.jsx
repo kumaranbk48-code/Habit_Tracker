@@ -77,6 +77,7 @@ export default function Dashboard() {
   const [goalsList,   setGoalsList]   = useState([]);
   const [milestonesList, setMilestonesList] = useState([]);
   const [listModal,   setListModal]   = useState(null);
+  const [listModalTab, setListModalTab] = useState('all');
   
   // Phase 6 extensions: modals
   const [timerOpen, setTimerOpen] = useState(false);
@@ -194,9 +195,20 @@ export default function Dashboard() {
   }, [session, fetchAll]);
 
   useEffect(() => {
-    const handleUpdate = () => { if (session) fetchAll(); };
+    let timer = null;
+    const handleUpdate = (e) => {
+      if (e?.detail?.source === 'dashboard') return;
+      if (!session) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        fetchAll();
+      }, 250);
+    };
     window.addEventListener('habittracker-stats-updated', handleUpdate);
-    return () => window.removeEventListener('habittracker-stats-updated', handleUpdate);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('habittracker-stats-updated', handleUpdate);
+    };
   }, [session, fetchAll]);
 
   const lastCelebrationRef = useRef(0);
@@ -285,7 +297,16 @@ export default function Dashboard() {
       });
       
       if (res.ok) {
-        window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+        const saved = await res.json().catch(() => null);
+        if (saved && saved.habit_id) {
+          setAllTracking(prev => {
+            const has = prev.some(t => t.habit_id === saved.habit_id && t.completion_date === saved.completion_date);
+            return has
+              ? prev.map(t => (t.habit_id === saved.habit_id && t.completion_date === saved.completion_date ? { ...t, ...saved } : t))
+              : [...prev, saved];
+          });
+        }
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'dashboard' } }));
       } else {
         // Rollback on server error
         setAllTracking(prevTracking);
@@ -359,7 +380,7 @@ export default function Dashboard() {
       });
 
       if (res.ok) {
-        window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'dashboard' } }));
         setToast({
           message: `Auto-marked "${habit.habit_name}" as done!`,
           type: 'success',
@@ -409,7 +430,7 @@ export default function Dashboard() {
           amount: 0,
         }),
       });
-      window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+      window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'dashboard' } }));
       setToast({ message: `Reverted "${habit.habit_name}".`, type: 'info' });
     } catch (err) {
       console.warn('[Dashboard] Undo error:', err);
@@ -433,7 +454,7 @@ export default function Dashboard() {
       if (res.ok) {
         setHabitsList(prev => prev.map(h => h.id === habit.id ? { ...h, status: 'active' } : h));
         setToast({ message: `Resumed "${habit.habit_name}".`, type: 'success' });
-        window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'dashboard' } }));
       }
     } catch {
       setToast({ message: 'Failed to resume habit.', type: 'error' });
@@ -461,7 +482,7 @@ export default function Dashboard() {
       );
       setHabitsList(prev => prev.map(h => ({ ...h, status: 'active' })));
       setToast({ message: `Resumed all ${pausedHabitsList.length} habits into daily routine!`, type: 'success' });
-      window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+      window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'dashboard' } }));
     } catch {
       setToast({ message: 'Failed to resume habits.', type: 'error' });
     }
@@ -715,7 +736,7 @@ export default function Dashboard() {
           <motion.div
             whileHover={{ y: -2 }}
             transition={{ duration: 0.15 }}
-            onClick={() => setListModal('completed')}
+            onClick={() => { setListModalTab('all'); setListModal(true); }}
             className="flex items-center gap-3.5 p-3 rounded-2xl bg-black/35 border border-white/[0.05] cursor-pointer hover:border-teal-500/40 transition-colors group"
           >
             <div className="relative w-12 h-12 flex-shrink-0 flex items-center justify-center">
@@ -1227,54 +1248,90 @@ export default function Dashboard() {
       <Modal
         open={!!listModal}
         onClose={() => setListModal(null)}
-        title={listModal === 'completed' ? 'Completed Today' : 'Pending Today'}
+        title="Today's Habits"
       >
-        <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-          {(listModal === 'completed' ? completedHabitsToday : pendingHabitsToday).map((h, i) => {
-            const isDone = todayCompletedIds.has(h.id);
-            return (
-              <button
-                key={h.id}
-                onClick={() => toggleHabit(h)}
-                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all duration-200 cursor-pointer text-left ${
-                  isDone
-                    ? 'bg-[#e2f0ef] hover:bg-[#d9ecea] border-[#3d7a75]/20 dark:bg-[#14302e] dark:border-[#3d7a75]/30 hover:scale-[1.01] active:scale-[0.99]'
-                    : 'bg-[#f5ecdb] hover:bg-[#ede0ca] border-[#c99a52]/20 dark:bg-[#3a2c14] dark:border-[#c99a52]/30 hover:scale-[1.01] active:scale-[0.99]'
-                }`}
-                style={{ animation: `fadeIn 0.2s ease ${i * 0.03}s both` }}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`w-6 h-6 rounded-md border flex items-center justify-center flex-shrink-0 transition-colors ${
-                    isDone
-                      ? 'bg-[#3d7a75] border-[#3d7a75] text-white'
-                      : 'border-[#c99a52] text-[#c99a52] dark:border-[#c99a52]'
+        <div className="space-y-3">
+          {/* Filter tabs */}
+          <div className="flex items-center gap-1.5 p-1 bg-white/[0.03] border border-white/[0.05] rounded-xl">
+            {[
+              { id: 'all', label: 'All Habits', count: activeHabitsList.length },
+              { id: 'pending', label: 'Pending', count: pendingHabitsToday.length },
+              { id: 'completed', label: 'Completed', count: completedHabitsToday.length },
+            ].map(tab => {
+              const active = (listModalTab || 'all') === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setListModalTab(tab.id)}
+                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    active
+                      ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    active ? 'bg-teal-500/30 text-teal-200' : 'bg-white/[0.06] text-slate-400'
                   }`}>
-                    {isDone ? '✓' : ''}
-                  </div>
-                  <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
-                    {h.habit_name}
-                    {h.tracking_type === 'quantity' && (
-                      <span className="text-xs text-gray-400 block mt-0.5">
-                        Progress: {allTracking.find(t => t.habit_id === h.id && t.completion_date === today)?.quantity_completed || 0} / {h.target_quantity} {h.unit}
-                      </span>
-                    )}
+                    {tab.count}
                   </span>
-                </div>
-                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold flex-shrink-0 ml-2 ${
-                  isDone
-                    ? 'bg-[#e3f3ee] text-[#2f6b5c] dark:bg-[#1c3a32] dark:text-[#7fd1b9]'
-                    : 'bg-[#f5ecdb] text-[#8a5a24] dark:bg-[#3a2c14] dark:text-[#dcb579]'
-                }`}>
-                  {h.category}
-                </span>
-              </button>
-            );
-          })}
-          {(listModal === 'completed' ? completedHabitsToday : pendingHabitsToday).length === 0 && (
-            <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-8">
-              {listModal === 'completed' ? 'Nothing completed yet today — time to get started!' : 'Everything is done for today! 🎉'}
-            </p>
-          )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+            {((listModalTab === 'completed'
+              ? completedHabitsToday
+              : listModalTab === 'pending'
+              ? pendingHabitsToday
+              : activeHabitsList)
+            ).map((h) => {
+              const isDone = todayCompletedIds.has(h.id);
+              return (
+                <button
+                  key={h.id}
+                  onClick={() => toggleHabit(h)}
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all duration-200 cursor-pointer text-left ${
+                    isDone
+                      ? 'bg-teal-950/20 hover:bg-teal-950/30 border-teal-500/25'
+                      : 'bg-white/[0.02] hover:bg-white/[0.05] border-white/[0.06]'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-lg border flex items-center justify-center flex-shrink-0 text-xs font-bold transition-colors ${
+                      isDone
+                        ? 'bg-[#178274] border-teal-500 text-white shadow-[0_0_8px_rgba(23,130,116,0.4)]'
+                        : 'border-white/20 text-transparent hover:border-teal-400'
+                    }`}>
+                      ✓
+                    </div>
+                    <span className={`text-xs sm:text-sm font-semibold truncate ${isDone ? 'text-teal-300 line-through opacity-80' : 'text-white'}`}>
+                      {h.habit_name}
+                      {h.tracking_type === 'quantity' && (
+                        <span className="text-[11px] text-slate-400 block mt-0.5 no-underline">
+                          Progress: {allTracking.find(t => t.habit_id === h.id && t.completion_date === today)?.quantity_completed || 0} / {h.target_quantity} {h.unit}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold flex-shrink-0 ml-2 ${
+                    isDone
+                      ? 'bg-teal-500/15 text-teal-300 border border-teal-500/25'
+                      : 'bg-white/[0.04] text-slate-400 border border-white/[0.08]'
+                  }`}>
+                    {h.category}
+                  </span>
+                </button>
+              );
+            })}
+            {((listModalTab === 'completed' ? completedHabitsToday : listModalTab === 'pending' ? pendingHabitsToday : activeHabitsList).length === 0) && (
+              <p className="text-xs text-slate-400 text-center py-8">
+                {listModalTab === 'completed' ? 'Nothing completed yet today — time to get started!' : 'Everything is done for today! 🎉'}
+              </p>
+            )}
+          </div>
         </div>
       </Modal>
 

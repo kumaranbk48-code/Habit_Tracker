@@ -91,7 +91,6 @@ export default function Goals() {
 
       setGoals(enrichedGoals);
       setMilestones(Array.isArray(milestonesData) ? milestonesData : []);
-      window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
     } catch (err) {
       console.error(err);
       setFetchError('Network error — check your connection.');
@@ -102,6 +101,15 @@ export default function Goals() {
 
   useEffect(() => {
     if (session) fetchGoals();
+  }, [session, fetchGoals]);
+
+  useEffect(() => {
+    const handleStatsUpdated = (e) => {
+      if (e?.detail?.source === 'goals') return;
+      if (session) fetchGoals();
+    };
+    window.addEventListener('habittracker-stats-updated', handleStatsUpdated);
+    return () => window.removeEventListener('habittracker-stats-updated', handleStatsUpdated);
   }, [session, fetchGoals]);
 
   const openAdd = (typeOverride) => {
@@ -219,17 +227,21 @@ export default function Goals() {
   };
 
   const handleUpdateProgress = async (id, newValue) => {
+    const targetGoal = goals.find((g) => g.id === id);
+    if (!targetGoal) return;
+    const isCompleted = targetGoal && targetGoal.target_value && Number(newValue) >= Number(targetGoal.target_value);
+    const newStatus = isCompleted ? 'Completed' : 'In Progress';
+
+    // Instant optimistic update
+    setGoals((prev) => prev.map((g) => g.id === id ? { ...g, current_value: Number(newValue), status: newStatus } : g));
+
+    const localMeta = getLocalGoalsMeta();
+    if (localMeta[id]) {
+      localMeta[id].current_value = Number(newValue);
+      saveLocalGoalsMeta(localMeta);
+    }
+
     try {
-      const targetGoal = goals.find((g) => g.id === id);
-      const isCompleted = targetGoal && targetGoal.target_value && Number(newValue) >= Number(targetGoal.target_value);
-      const newStatus = isCompleted ? 'Completed' : 'In Progress';
-
-      const localMeta = getLocalGoalsMeta();
-      if (localMeta[id]) {
-        localMeta[id].current_value = Number(newValue);
-        saveLocalGoalsMeta(localMeta);
-      }
-
       const res = await fetch('/api/goals', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
@@ -247,19 +259,26 @@ export default function Goals() {
           fireMilestone();
           setToast({ message: 'Goal Reached! 🎉 Excellent job!', type: 'success' });
         }
-        fetchGoals();
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'goals' } }));
+      } else {
+        // Rollback
+        setGoals((prev) => prev.map((g) => g.id === id ? { ...g, current_value: targetGoal.current_value, status: targetGoal.status } : g));
       }
     } catch (err) {
       console.error(err);
+      setGoals((prev) => prev.map((g) => g.id === id ? { ...g, current_value: targetGoal.current_value, status: targetGoal.status } : g));
     }
   };
 
   const handleMarkComplete = async (id, undo = false) => {
-    try {
-      const targetGoal = goals.find((g) => g.id === id);
-      if (!targetGoal) return;
-      const newStatus = undo ? 'In Progress' : 'Completed';
+    const targetGoal = goals.find((g) => g.id === id);
+    if (!targetGoal) return;
+    const newStatus = undo ? 'In Progress' : 'Completed';
 
+    // Instant optimistic update
+    setGoals((prev) => prev.map((g) => g.id === id ? { ...g, status: newStatus } : g));
+
+    try {
       const res = await fetch('/api/goals', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
@@ -278,12 +297,16 @@ export default function Goals() {
         } else {
           setToast({ message: 'Goal reverted to In Progress.', type: 'success' });
         }
-        fetchGoals();
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'goals' } }));
       } else {
+        // Rollback on server rejection
+        setGoals((prev) => prev.map((g) => g.id === id ? { ...g, status: targetGoal.status } : g));
         const errData = await res.json().catch(() => ({}));
         setToast({ message: errData.error || 'Failed to update goal.', type: 'error' });
       }
     } catch {
+      // Rollback on network failure
+      setGoals((prev) => prev.map((g) => g.id === id ? { ...g, status: targetGoal.status } : g));
       setToast({ message: 'Network error — check your connection.', type: 'error' });
     }
   };
@@ -344,6 +367,12 @@ export default function Goals() {
     const willBeDone = goalMilestones.filter((m) => (m.id === id ? completed : m.completed)).length;
     const willComplete = completed && goalMilestones.length > 0 && willBeDone === goalMilestones.length;
 
+    // Instant optimistic update for milestones
+    setMilestones((prev) => prev.map((m) => m.id === id ? { ...m, completed } : m));
+    if (willComplete) {
+      setGoals((prev) => prev.map((g) => g.id === goal_id ? { ...g, status: 'Completed' } : g));
+    }
+
     try {
       const res = await fetch('/api/milestones', {
         method: 'PUT',
@@ -355,17 +384,36 @@ export default function Goals() {
           fireMilestone();
           setToast({ message: 'Goal completed! 🎉 All milestones done.', type: 'success' });
         }
-        fetchGoals();
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'goals' } }));
       } else {
+        // Rollback
+        setMilestones((prev) => prev.map((m) => m.id === id ? { ...m, completed: !completed } : m));
+        if (willComplete) {
+          const originalGoal = goals.find((g) => g.id === goal_id);
+          if (originalGoal) {
+            setGoals((prev) => prev.map((g) => g.id === goal_id ? { ...g, status: originalGoal.status } : g));
+          }
+        }
         const e = await res.json().catch(() => ({}));
         setToast({ message: e.error || 'Failed to update milestone.', type: 'error' });
       }
     } catch {
+      // Rollback
+      setMilestones((prev) => prev.map((m) => m.id === id ? { ...m, completed: !completed } : m));
+      if (willComplete) {
+        const originalGoal = goals.find((g) => g.id === goal_id);
+        if (originalGoal) {
+          setGoals((prev) => prev.map((g) => g.id === goal_id ? { ...g, status: originalGoal.status } : g));
+        }
+      }
       setToast({ message: 'Network error — check your connection.', type: 'error' });
     }
   };
 
   const handleDeleteMilestone = async (id) => {
+    const prevMilestones = milestones;
+    // Optimistic UI update for immediate removal
+    setMilestones(prev => prev.filter(m => m.id !== id));
     try {
       const res = await fetch('/api/milestones', {
         method: 'DELETE',
@@ -373,12 +421,15 @@ export default function Goals() {
         body: JSON.stringify({ id }),
       });
       if (res.ok) {
+        setToast({ message: 'Milestone deleted', type: 'success' });
         fetchGoals();
       } else {
+        setMilestones(prevMilestones);
         const e = await res.json().catch(() => ({}));
         setToast({ message: e.error || 'Failed to delete milestone.', type: 'error' });
       }
     } catch {
+      setMilestones(prevMilestones);
       setToast({ message: 'Network error — check your connection.', type: 'error' });
     }
   };

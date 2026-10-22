@@ -415,13 +415,20 @@ export default function GoalCard({
               }`}>
                 {m.title}
               </span>
-              <button
-                type="button"
-                onClick={() => onDeleteMilestone(m.id)}
-                className="opacity-0 group-hover/item:opacity-100 text-slate-300 dark:text-slate-600 hover:text-[#b3453f] dark:hover:text-[#e2a8a3] transition-opacity p-0.5"
-              >
-                <X size={12} />
-              </button>
+              {onDeleteMilestone && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteMilestone(m.id);
+                  }}
+                  className="p-1 rounded-md text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 dark:hover:bg-rose-950/30 transition-all cursor-pointer opacity-70 group-hover/item:opacity-100 flex-shrink-0"
+                  title="Delete milestone"
+                  aria-label="Delete milestone"
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
             </div>
           ))}
           {milestones.length === 0 && (

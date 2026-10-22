@@ -114,7 +114,6 @@ export default function Habits() {
       const activeHabitsCount = h.filter(item => item.status !== 'paused').length;
       const completed = t.filter((r) => r.status === true).length;
       setPerfectDay(activeHabitsCount > 0 && completed >= activeHabitsCount);
-      window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
     } catch (err) {
       console.error(err);
       setFetchError('Network error — check your connection.');
@@ -144,7 +143,7 @@ export default function Habits() {
           message: newStatus === 'paused' ? `Paused "${habit.habit_name}" (streaks protected).` : `Resumed "${habit.habit_name}".`,
           type: 'success',
         });
-        window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
       }
     } catch {
       setToast({ message: 'Failed to update habit status.', type: 'error' });
@@ -193,7 +192,8 @@ export default function Habits() {
   }, [session, fetchData]);
 
   useEffect(() => {
-    const handleStatsUpdated = () => {
+    const handleStatsUpdated = (e) => {
+      if (e?.detail?.source === 'habits') return;
       if (session) fetchData();
     };
     window.addEventListener('habittracker-stats-updated', handleStatsUpdated);
@@ -329,7 +329,7 @@ export default function Habits() {
       if (res.ok) {
         const saved = await res.json();
         setTracking((prev) => prev.map((t) => t.habit_id === habitId ? { ...t, ...saved } : t));
-        window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
       } else {
         const errJson = await res.json().catch(() => ({}));
         setTracking(previousTracking);
@@ -383,7 +383,7 @@ export default function Habits() {
       if (res.ok) {
         const saved = await res.json();
         setTracking((prev) => prev.map((t) => t.habit_id === habitId ? { ...t, ...saved } : t));
-        window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
       } else {
         const errJson = await res.json().catch(() => ({}));
         setTracking(previousTracking);
@@ -448,7 +448,7 @@ export default function Habits() {
       });
 
       if (res.ok) {
-        window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+        window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
         setToast({
           message: `Auto-marked "${habit.habit_name}" as done!`,
           type: 'success',
@@ -489,7 +489,7 @@ export default function Habits() {
           amount: 0,
         }),
       });
-      window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+      window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
       setToast({ message: `Reverted "${habit.habit_name}".`, type: 'info' });
     } catch (err) {
       console.warn('[Habits] Undo error:', err);

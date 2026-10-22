@@ -2,11 +2,71 @@ const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const FULL_WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 /**
+ * Safely extracts the local YYYY-MM-DD start date for a habit from start_date, created_at, or aliases.
+ */
+export function getHabitStartDateStr(habit) {
+  if (!habit) return null;
+
+  const raw = habit.start_date || habit.startDate || habit.created_at || habit.createdAt || habit.creation_date;
+  if (!raw) {
+    // If habit has no creation date recorded, default to today's local date so it never appears on past dates
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }
+
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+    try {
+      const normalized = trimmed.includes(' ') && !trimmed.includes('T')
+        ? trimmed.replace(' ', 'T')
+        : trimmed;
+      const d = new Date(normalized);
+      if (!isNaN(d.getTime())) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      }
+    } catch {
+      // ignore
+    }
+    const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+  } else if (raw instanceof Date && !isNaN(raw.getTime())) {
+    const y = raw.getFullYear();
+    const m = String(raw.getMonth() + 1).padStart(2, '0');
+    const day = String(raw.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  } else if (typeof raw === 'number') {
+    const d = new Date(raw);
+    if (!isNaN(d.getTime())) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+  }
+
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+/**
  * Determines whether a habit is scheduled to run on a specific date.
+ * Habits are NEVER scheduled on dates prior to their creation or start date.
  */
 export function isHabitScheduledOnDate(habit, dateStr) {
-  if (!habit) return false;
-  
+  if (!habit || !dateStr) return false;
+
+  // A habit cannot be scheduled before it was created / started
+  const startDateStr = getHabitStartDateStr(habit);
+  if (startDateStr && dateStr < startDateStr) {
+    return false;
+  }
+
   const d = new Date(dateStr + 'T00:00:00');
   const dayIndex = d.getDay(); // 0 = Sun, 1 = Mon ...
   const dayNameShort = WEEKDAY_NAMES[dayIndex];
@@ -43,9 +103,29 @@ export function isHabitScheduledOnDate(habit, dateStr) {
 export function getCellStatus(habit, dateStr, log, todayStr) {
   const isFuture = dateStr > todayStr;
   const isToday = dateStr === todayStr;
-  const scheduled = isHabitScheduledOnDate(habit, dateStr);
 
+  // 1. Days before the habit existed are NOT_CREATED (never missed, never scheduled, never displayed)
+  const startDateStr = getHabitStartDateStr(habit);
+  if (startDateStr && dateStr < startDateStr) {
+    return {
+      type: 'NOT_CREATED',
+      symbol: '',
+      label: 'Not Created',
+      scheduled: false,
+      isDone: false,
+      isPartial: false,
+      isMissed: false,
+      isNotScheduled: true,
+      isFuture: false,
+      quantityDone: 0,
+      targetQuantity: habit?.target_quantity || 1,
+      progressPct: 0,
+    };
+  }
+
+  // 2. Future Dates
   if (isFuture) {
+    const scheduled = isHabitScheduledOnDate(habit, dateStr);
     return {
       type: 'FUTURE',
       symbol: '',
@@ -57,14 +137,13 @@ export function getCellStatus(habit, dateStr, log, todayStr) {
       isNotScheduled: !scheduled,
       isFuture: true,
       quantityDone: 0,
-      targetQuantity: habit?.target_quantity || 0,
+      targetQuantity: habit?.target_quantity || 1,
       progressPct: 0,
     };
   }
 
-  // Feature 3: Paused habits are never marked as missed
-  const statusDone = log?.status === true;
-  if (habit?.status === 'paused' && !statusDone) {
+  // 3. Paused Habits
+  if (habit?.status === 'paused') {
     return {
       type: 'PAUSED',
       symbol: '⏸',
@@ -76,11 +155,12 @@ export function getCellStatus(habit, dateStr, log, todayStr) {
       isNotScheduled: true,
       isFuture: false,
       quantityDone: 0,
-      targetQuantity: habit?.target_quantity || 0,
+      targetQuantity: habit?.target_quantity || 1,
       progressPct: 0,
     };
   }
 
+  const scheduled = isHabitScheduledOnDate(habit, dateStr);
   if (!scheduled) {
     return {
       type: 'NOT_SCHEDULED',
@@ -93,11 +173,12 @@ export function getCellStatus(habit, dateStr, log, todayStr) {
       isNotScheduled: true,
       isFuture: false,
       quantityDone: 0,
-      targetQuantity: habit?.target_quantity || 0,
+      targetQuantity: habit?.target_quantity || 1,
       progressPct: 0,
     };
   }
 
+  const statusDone = log?.status === true;
   const isQuantity = habit?.tracking_type === 'quantity';
   const target = habit?.target_quantity || 1;
   const quantityDone = log?.quantity_completed || 0;
@@ -216,11 +297,16 @@ export function calculateMonthlyAnalytics(habits = [], trackingLogs = [], viewYe
       // Only count days up to today for historical accuracy
       if (dateStr > todayStr) continue;
 
+      const startDate = getHabitStartDateStr(habit);
+      if (startDate && dateStr < startDate) {
+        continue;
+      }
+
       if (isHabitScheduledOnDate(habit, dateStr)) {
         const log = trackingMap.get(`${habit.id}_${dateStr}`);
         const status = getCellStatus(habit, dateStr, log, todayStr);
-        if (status.type === 'PAUSED') {
-          // Feature 3: Paused days are excluded from completion-rate math
+        if (status.type === 'PAUSED' || status.type === 'NOT_CREATED') {
+          // Feature 3 & Uncreated Habits: Excluded from completion-rate math
           continue;
         }
         scheduledDays++;
@@ -259,11 +345,18 @@ export function calculateMonthlyAnalytics(habits = [], trackingLogs = [], viewYe
     let dayCompleted = 0;
 
     habits.forEach(habit => {
+      const startDate = getHabitStartDateStr(habit);
+      if (startDate && dateStr < startDate) {
+        return;
+      }
+
       if (isHabitScheduledOnDate(habit, dateStr)) {
-        dayScheduled++;
         const log = trackingMap.get(`${habit.id}_${dateStr}`);
         const status = getCellStatus(habit, dateStr, log, todayStr);
-        if (status.isDone) dayCompleted++;
+        if (status.type !== 'PAUSED' && status.type !== 'NOT_CREATED') {
+          dayScheduled++;
+          if (status.isDone) dayCompleted++;
+        }
       }
     });
 

@@ -1,6 +1,7 @@
 import supabase from './db-client.js';
 import { verifyUserToken } from './auth-helper.js';
 import { applyCors } from './cors.js';
+import { getUserTimeZone, getDateInTimeZone } from './date-utils.js';
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -42,6 +43,13 @@ export default async function handler(req, res) {
       } = req.body ?? {};
       if (!habit_id) return res.status(400).json({ error: 'habit_id is required' });
       if (!completion_date) return res.status(400).json({ error: 'completion_date is required' });
+
+      // Security check: Never allow logging completion for future dates
+      const timeZone = getUserTimeZone(req, user);
+      const today = getDateInTimeZone(new Date(), timeZone);
+      if (completion_date > today && (status === true || action === 'complete' || action === 'add' || action === 'set')) {
+        return res.status(400).json({ error: 'Cannot mark habits as completed for future dates' });
+      }
 
       // Verify habit belongs to this user
       const { data: habit, error: habitErr } = await supabase
