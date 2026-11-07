@@ -1,6 +1,15 @@
+import crypto from 'crypto';
 import webPush from 'web-push';
 import supabase from './db-client.js';
 import { applyCors } from './cors.js';
+
+function safeCompare(a, b) {
+  if (!a || !b || typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 if (process.env.VAPID_EMAIL && process.env.VITE_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
   try {
@@ -17,9 +26,11 @@ if (process.env.VAPID_EMAIL && process.env.VITE_VAPID_PUBLIC_KEY && process.env.
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
 
-  // Verify cron secret for background trigger
-  const secret = req.headers['x-cron-secret'] || req.query.secret;
-  if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
+  // Strict cron secret verification (CWE-306 fix: reject if unset or mismatched)
+  const cronSecret = process.env.CRON_SECRET;
+  const providedSecret = req.headers['x-cron-secret'] || req.query.secret;
+
+  if (!cronSecret || !safeCompare(providedSecret, cronSecret)) {
     return res.status(401).json({ error: 'Unauthorized — invalid or missing cron secret' });
   }
 

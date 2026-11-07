@@ -14,6 +14,7 @@ import {
   resumeAudioContext,
   isAudioContextSuspended
 } from '../utils/alarmSound';
+import { isNative, NativeAlarmScheduler, stopNativeAlarm } from '../lib/nativeNotifications';
 
 const BATCH_SIZE = 3;
 
@@ -59,6 +60,21 @@ export default function AlarmTakeoverModal() {
       stopAlarmSound();
     };
   }, [activeAlarm]);
+
+  // Pause in-app audio when app is minimized or phone is on home screen
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopAlarmSound();
+      } else if (activeAlarm && !muted) {
+        startAlarmSound();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [activeAlarm, muted]);
 
   const handleToggleMute = (e) => {
     e?.stopPropagation?.();
@@ -150,8 +166,25 @@ export default function AlarmTakeoverModal() {
       });
     };
 
+    const handleAlarmDismissed = (e) => {
+      const { habitId, reminderId } = e.detail || {};
+      setAlarmQueue((prev) => prev.filter((item) => {
+        if (habitId && (item.id === habitId || item.habit_id === habitId)) return false;
+        if (reminderId && item.reminderId === reminderId) return false;
+        return true;
+      }));
+      stopNativeAlarm();
+    };
+
     window.addEventListener('habittracker-alarm-fired', handleAlarmFired);
-    return () => window.removeEventListener('habittracker-alarm-fired', handleAlarmFired);
+    window.addEventListener('habittracker-alarm-dismissed', handleAlarmDismissed);
+    window.addEventListener('habittracker-alarm-snoozed', handleAlarmDismissed);
+
+    return () => {
+      window.removeEventListener('habittracker-alarm-fired', handleAlarmFired);
+      window.removeEventListener('habittracker-alarm-dismissed', handleAlarmDismissed);
+      window.removeEventListener('habittracker-alarm-snoozed', handleAlarmDismissed);
+    };
   }, []);
 
   // Check URL query parameters (e.g. launched by clicking notification on mobile/desktop)
@@ -210,7 +243,12 @@ export default function AlarmTakeoverModal() {
   }, [session, fireSmall]);
 
   const popActiveAlarm = useCallback(() => {
-    setAlarmQueue((prev) => prev.slice(1));
+    setAlarmQueue((prev) => {
+      if (prev.length <= 1) {
+        stopNativeAlarm();
+      }
+      return prev.slice(1);
+    });
   }, []);
 
   // Helper for local YYYY-MM-DD
@@ -252,6 +290,9 @@ export default function AlarmTakeoverModal() {
         }
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
         window.dispatchEvent(new CustomEvent('habittracker-reminders-updated'));
+        window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+          detail: { targetType: 'habit', entityId: activeAlarm.id, date: today }
+        }));
 
         setTimeout(() => {
           popActiveAlarm();
@@ -294,6 +335,9 @@ export default function AlarmTakeoverModal() {
         fireSmall();
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
         window.dispatchEvent(new CustomEvent('habittracker-reminders-updated'));
+        window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+          detail: { targetType: 'habit', entityId: activeAlarm.id, date: today }
+        }));
         setTimeout(() => {
           popActiveAlarm();
           setLoading(false);
@@ -307,46 +351,73 @@ export default function AlarmTakeoverModal() {
     }
   };
 
-  // Skip handler (schedules re-ping)
-  const handleSkip = async (delayMinutes = 25) => {
-    if (!activeAlarm || !session?.access_token || loading) return;
+  // Snooze handler (+10 min) - stops sound/vibration, dismisses screen, schedules 10m alert
+  const handleSnooze10Min = async () => {
+    if (!activeAlarm || loading) return;
     setLoading(true);
 
     try {
-      const res = await fetch('/api/reminders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action: 'skip',
-          reminder_id: activeAlarm.reminderId,
-          habit_id: activeAlarm.id,
-          delay_minutes: delayMinutes,
-        }),
-      });
+      // 1. Immediately stop alarm sound and native vibration/service
+      stopAlarmSound();
+      await stopNativeAlarm().catch(() => {});
 
-      const data = res.ok ? await res.json() : null;
-      if (data?.next_reping_at) {
-        window.dispatchEvent(new CustomEvent('habittracker-reping-scheduled', {
-          detail: {
-            habitId: activeAlarm.id,
-            reminderId: activeAlarm.reminderId,
-            nextRepingAt: data.next_reping_at,
-            delayMinutes,
-            habitName: activeAlarm.habit_name,
-          }
-        }));
+      // 2. Schedule native Android alarm for +10 minutes if running native
+      if (isNative) {
+        const snoozeTime = Date.now() + 10 * 60 * 1000;
+        const snoozeId = Math.floor((Date.now() / 1000) % 2000000000);
+        await NativeAlarmScheduler.schedule({
+          alarms: [{
+            id: snoozeId,
+            at: snoozeTime,
+            title: `🚨 ALARM: ${activeAlarm.habit_name}`,
+            body: `⏰ Snoozed: Time to complete "${activeAlarm.habit_name}"!`,
+            reminderId: String(activeAlarm.reminderId || activeAlarm.id || ''),
+            habitId: String(activeAlarm.id || ''),
+            targetType: activeAlarm.target_type || 'habit',
+            isSnooze: true,
+          }]
+        }).catch((err) => console.warn('[AlarmModal] Native snooze schedule error:', err));
       }
-      window.dispatchEvent(new CustomEvent('habittracker-reminders-updated'));
+
+      // 3. Inform backend of 10 minute snooze without canceling recurring schedule
+      if (session?.access_token) {
+        const res = await fetch('/api/reminders', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            action: 'skip',
+            reminder_id: activeAlarm.reminderId,
+            habit_id: activeAlarm.id,
+            delay_minutes: 10,
+          }),
+        }).catch(() => null);
+
+        const data = res?.ok ? await res.json().catch(() => null) : null;
+        if (data?.next_reping_at) {
+          window.dispatchEvent(new CustomEvent('habittracker-reping-scheduled', {
+            detail: {
+              habitId: activeAlarm.id,
+              reminderId: activeAlarm.reminderId,
+              nextRepingAt: data.next_reping_at,
+              delayMinutes: 10,
+              habitName: activeAlarm.habit_name,
+            }
+          }));
+        }
+      }
     } catch (err) {
-      console.warn('[AlarmTakeoverModal] Skip API error:', err);
+      console.warn('[AlarmTakeoverModal] Snooze 10 min error:', err);
     } finally {
       popActiveAlarm();
       setLoading(false);
     }
   };
+
+  // Backwards compatibility alias
+  const handleSkip = (delayMinutes = 10) => handleSnooze10Min();
 
   // Handle individual batch item completion
   const handleBatchItemDone = async (habit) => {
@@ -495,31 +566,35 @@ export default function AlarmTakeoverModal() {
     }
   };
 
-  // Skip entire current batch
-  const handleSkipBatch = async (batchItems, delayMinutes = 25) => {
-    if (!session?.access_token || loading || !batchItems.length) return;
+  // Snooze entire current batch (+10 min)
+  const handleSkipBatch = async (batchItems, delayMinutes = 10) => {
+    if (loading || !batchItems.length) return;
     setLoading(true);
 
-    const unhandled = batchItems.filter((h) => !batchProgress[h.id]);
-
     try {
-      await Promise.all(
-        unhandled.map((h) =>
-          fetch('/api/reminders', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${session.access_token}`,
-            },
-            body: JSON.stringify({
-              action: 'skip',
-              reminder_id: h.reminderId,
-              habit_id: h.id,
-              delay_minutes: delayMinutes,
-            }),
-          })
-        )
-      );
+      stopAlarmSound();
+      await stopNativeAlarm().catch(() => {});
+
+      const unhandled = batchItems.filter((h) => !batchProgress[h.id]);
+      if (session?.access_token) {
+        await Promise.all(
+          unhandled.map((h) =>
+            fetch('/api/reminders', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${session.access_token}`,
+              },
+              body: JSON.stringify({
+                action: 'skip',
+                reminder_id: h.reminderId,
+                habit_id: h.id,
+                delay_minutes: delayMinutes,
+              }),
+            })
+          )
+        );
+      }
       window.dispatchEvent(new CustomEvent('habittracker-reminders-updated'));
     } catch (err) {
       console.warn('[AlarmTakeoverModal] Skip batch error:', err);
@@ -566,7 +641,7 @@ export default function AlarmTakeoverModal() {
       aria-modal="true"
       aria-labelledby="alarm-title"
       onClick={() => resumeAudioContext()}
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn"
       style={{ animationDuration: '0.2s' }}
     >
       <div
@@ -574,7 +649,7 @@ export default function AlarmTakeoverModal() {
           e.stopPropagation();
           resumeAudioContext();
         }}
-        className="relative w-full max-w-lg bg-white dark:bg-[#1a2129] border border-[#e2e8ec] dark:border-[#2a343d] rounded-3xl shadow-2xl overflow-hidden p-5 sm:p-7 flex flex-col justify-between milestone-in"
+        className="relative w-full max-w-sm sm:max-w-md bg-[#0d151c] border-2 border-[#138a78]/70 rounded-[32px] shadow-[0_0_40px_rgba(19,138,120,0.2)] overflow-hidden p-6 sm:p-7 flex flex-col justify-between milestone-in"
       >
         {/* Accent Glow Line at top */}
         <div
@@ -594,9 +669,9 @@ export default function AlarmTakeoverModal() {
               e.stopPropagation();
               resumeAudioContext();
             }}
-            className="w-full mb-3 py-2 px-3 rounded-xl bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs font-semibold flex items-center justify-center gap-2 animate-pulse cursor-pointer"
+            className="w-full mb-3 py-2 px-3 rounded-xl bg-amber-950/60 border border-amber-800 text-amber-200 text-xs font-semibold flex items-center justify-center gap-2 animate-pulse cursor-pointer"
           >
-            <Volume2 size={15} className="text-amber-600" />
+            <Volume2 size={15} className="text-amber-500" />
             <span>Tap anywhere to enable alarm sound 🔔</span>
           </button>
         )}
@@ -608,8 +683,8 @@ export default function AlarmTakeoverModal() {
           <div className="flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between gap-3 mb-4">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 text-xs font-bold tracking-wide animate-pulse">
-                <BellRing size={13} />
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#2a171a] border border-[#5c2429] text-[#f87171] text-xs font-bold tracking-wider">
+                <BellRing size={13} className="text-[#f87171]" />
                 <span>MULTIPLE ALARMS</span>
               </div>
 
@@ -617,36 +692,36 @@ export default function AlarmTakeoverModal() {
                 <button
                   onClick={handleToggleMute}
                   type="button"
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all bg-slate-100 dark:bg-[#222b33] text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-[#2c3742]"
-                  title={muted ? 'Unmute Alarm Sound' : 'Mute Alarm Sound'}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#f87171] hover:opacity-85 transition-opacity cursor-pointer bg-transparent border-0 p-1"
+                  title={muted ? 'Turn Sound ON' : 'Turn Sound OFF'}
                 >
                   {muted ? (
                     <>
-                      <VolumeX size={13} className="text-slate-400" />
-                      <span>Muted</span>
+                      <VolumeX size={15} className="text-[#f87171]" />
+                      <span>Sound OFF</span>
                     </>
                   ) : (
                     <>
-                      <Volume2 size={13} className="text-red-500 animate-pulse" />
-                      <span className="text-red-600 dark:text-red-400">Sound ON</span>
+                      <Volume2 size={15} className="text-[#f87171] animate-pulse" />
+                      <span>Sound ON</span>
                     </>
                   )}
                 </button>
 
-                <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/50 text-indigo-700 dark:text-indigo-300">
-                  {alarmQueue.length} Habits Due
+                <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-[#1e293b] border border-[#334155] text-slate-300">
+                  {alarmQueue.length} Due
                 </span>
               </div>
             </div>
 
             {/* Subhead / Batch Progress */}
             <div className="flex items-center justify-between mb-3 text-xs">
-              <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+              <span className="font-bold text-slate-200 flex items-center gap-1.5">
                 <Layers size={14} className="text-[#3d7a75]" />
                 Batch 1 of {totalBatches}
               </span>
               {remainingInQueueTotal > 0 && (
-                <span className="text-slate-500 dark:text-slate-400 font-medium">
+                <span className="text-slate-400 font-medium">
                   +{remainingInQueueTotal} more queued
                 </span>
               )}
@@ -667,10 +742,10 @@ export default function AlarmTakeoverModal() {
                     key={habit.id}
                     className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
                       isItemDone
-                        ? 'bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800/60 opacity-90'
+                        ? 'bg-emerald-950/20 border-emerald-800/60 opacity-90'
                         : isItemSkipped
-                        ? 'bg-slate-100/60 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 opacity-60'
-                        : 'bg-slate-50 dark:bg-[#151b22] border-slate-200 dark:border-[#2a343d] hover:border-slate-300 dark:hover:border-slate-600'
+                        ? 'bg-slate-800/40 border-slate-700 opacity-60'
+                        : 'bg-[#151b22] border-[#2a343d] hover:border-slate-600'
                     }`}
                   >
                     {/* Left: Avatar & Habit Info */}
@@ -683,22 +758,22 @@ export default function AlarmTakeoverModal() {
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 truncate">
+                          <h3 className="font-bold text-sm text-slate-100 truncate">
                             {habit.habit_name}
                           </h3>
                           {habitStreak > 0 && (
-                            <span className="inline-flex items-center gap-0.5 text-[11px] font-extrabold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-1.5 py-0.5 rounded-md">
+                            <span className="inline-flex items-center gap-0.5 text-[11px] font-extrabold text-amber-400 bg-amber-950/50 px-1.5 py-0.5 rounded-md">
                               <Flame size={11} className="fire-bounce" />
                               {habitStreak}d
                             </span>
                           )}
                         </div>
                         {isQty ? (
-                          <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                          <p className="text-xs text-slate-400 truncate">
                             Goal: {habit.target_quantity || 1} {habit.unit || ''}
                           </p>
                         ) : habit.custom_text ? (
-                          <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                          <p className="text-xs text-slate-400 truncate">
                             {habit.custom_text}
                           </p>
                         ) : null}
@@ -708,13 +783,13 @@ export default function AlarmTakeoverModal() {
                     {/* Right: Actions */}
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       {isItemDone ? (
-                        <span className="px-2.5 py-1 rounded-xl bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 font-bold text-xs flex items-center gap-1">
+                        <span className="px-2.5 py-1 rounded-xl bg-emerald-900/60 text-emerald-200 font-bold text-xs flex items-center gap-1">
                           <Check size={13} />
                           Done
                         </span>
                       ) : isItemSkipped ? (
-                        <span className="px-2.5 py-1 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold">
-                          Postponed
+                        <span className="px-2.5 py-1 rounded-xl bg-slate-700 text-slate-300 text-xs font-semibold">
+                          Snoozed
                         </span>
                       ) : (
                         <>
@@ -724,7 +799,7 @@ export default function AlarmTakeoverModal() {
                               disabled={loading}
                               type="button"
                               title={`+1 ${habit.unit || ''}`}
-                              className="px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#222b33] hover:bg-slate-200 dark:hover:bg-[#2c3742] text-slate-700 dark:text-slate-200 text-xs font-bold transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                              className="px-2.5 py-1.5 rounded-xl bg-[#222b33] hover:bg-[#2c3742] text-slate-200 text-xs font-bold transition-all active:scale-95 cursor-pointer disabled:opacity-50"
                             >
                               +1
                             </button>
@@ -733,7 +808,7 @@ export default function AlarmTakeoverModal() {
                             onClick={() => handleBatchItemDone(habit)}
                             disabled={loading}
                             type="button"
-                            className="px-3 py-1.5 rounded-xl bg-[#3d7a75] hover:bg-[#2f5f5b] text-white text-xs font-bold transition-all flex items-center gap-1 active:scale-95 cursor-pointer disabled:opacity-50 shadow-sm"
+                            className="px-3 py-1.5 rounded-xl bg-[#138a78] hover:bg-[#0f766e] text-white text-xs font-bold transition-all flex items-center gap-1 active:scale-95 cursor-pointer disabled:opacity-50 shadow-sm"
                           >
                             <Check size={13} />
                             <span>Done</span>
@@ -742,8 +817,8 @@ export default function AlarmTakeoverModal() {
                             onClick={() => handleBatchItemSkip(habit)}
                             disabled={loading}
                             type="button"
-                            title="Skip this habit"
-                            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#222b33] transition-colors cursor-pointer disabled:opacity-50"
+                            title="Snooze this habit 10m"
+                            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-[#222b33] transition-colors cursor-pointer disabled:opacity-50"
                           >
                             <ArrowRight size={14} />
                           </button>
@@ -756,10 +831,10 @@ export default function AlarmTakeoverModal() {
             </div>
 
             {/* Batch Master Action Controls */}
-            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-[#2a343d] flex flex-col gap-2">
+            <div className="mt-4 pt-3 border-t border-white/[0.08] flex flex-col gap-2.5">
               {completedAnim ? (
-                <div className="w-full py-3.5 rounded-2xl bg-[#3d7a75] text-white font-bold text-center flex items-center justify-center gap-2 shadow-lg animate-pulse">
-                  <Check size={18} />
+                <div className="w-full py-3.5 rounded-2xl bg-[#138a78] text-white font-extrabold text-center flex items-center justify-center gap-2 shadow-lg animate-pulse">
+                  <Check size={18} strokeWidth={3} />
                   <span>Batch Completed! Streaks Protected ✓</span>
                 </div>
               ) : (
@@ -767,45 +842,33 @@ export default function AlarmTakeoverModal() {
                   <button
                     onClick={() => handleCompleteAllBatch(currentBatch)}
                     disabled={loading}
-                    className="w-full py-3 px-4 rounded-2xl bg-[#3d7a75] hover:bg-[#2f5f5b] text-white font-extrabold text-sm shadow-md shadow-[#3d7a75]/25 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer disabled:opacity-50"
+                    className="w-full py-4 px-4 rounded-2xl bg-[#138a78] hover:bg-[#0f766e] text-white font-extrabold text-base shadow-lg shadow-[#138a78]/25 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer disabled:opacity-50"
                   >
-                    <CheckCircle2 size={17} />
-                    <span>
-                      Complete All in This Batch ({currentBatch.filter((h) => !batchProgress[h.id]).length})
-                    </span>
+                    <Check size={20} strokeWidth={3} />
+                    <span>✓ Mark Done ({currentBatch.filter((h) => !batchProgress[h.id]).length})</span>
                   </button>
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleSkipBatch(currentBatch, 25)}
-                      disabled={loading}
-                      className="flex-1 py-2.5 px-3 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100/80 dark:bg-[#222b33]/80 hover:bg-slate-200 dark:hover:bg-[#2c3742] rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
-                    >
-                      <Clock size={13} className="text-[#3d7a75] dark:text-[#5fae9e]" />
-                      <span>Re-ping Batch (25m)</span>
-                    </button>
-                    <button
-                      onClick={() => handleSkipBatch(currentBatch, 10)}
-                      disabled={loading}
-                      className="py-2.5 px-3 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 bg-slate-100/50 dark:bg-[#222b33]/50 hover:bg-slate-200 dark:hover:bg-[#2c3742] rounded-xl transition-all cursor-pointer active:scale-95 disabled:opacity-50"
-                      title="Snooze batch for 10 minutes"
-                    >
-                      +10m
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => handleSkipBatch(currentBatch, 10)}
+                    disabled={loading}
+                    className="w-full py-3 px-4 rounded-xl bg-[#141d26] hover:bg-[#1a2530] border border-white/[0.08] active:scale-[0.98] text-slate-300 hover:text-white font-semibold text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    title="Snooze batch for 10 minutes"
+                  >
+                    +10 min
+                  </button>
                 </>
               )}
             </div>
           </div>
         ) : (
           /* ============================================================ */
-          /* APPROACH 1: SINGLE HABIT HERO TAKEOVER CARD                 */
+          /* APPROACH 1: SINGLE HABIT HERO TAKEOVER CARD (RESTORED UI)   */
           /* ============================================================ */
           <div className="flex flex-col">
             {/* Top Header Badge */}
-            <div className="flex items-center justify-between gap-3 mb-6">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 text-xs font-bold tracking-wide animate-pulse">
-                <BellRing size={14} />
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#2a171a] border border-[#5c2429] text-[#f87171] text-xs font-bold tracking-wider">
+                <BellRing size={13} className="text-[#f87171]" />
                 <span>ALARM REMINDER</span>
               </div>
 
@@ -813,151 +876,154 @@ export default function AlarmTakeoverModal() {
                 <button
                   onClick={handleToggleMute}
                   type="button"
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all bg-slate-100 dark:bg-[#222b33] text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-[#2c3742]"
-                  title={muted ? 'Unmute Alarm Sound' : 'Mute Alarm Sound'}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#f87171] hover:opacity-85 transition-opacity cursor-pointer bg-transparent border-0 p-1"
+                  title={muted ? 'Turn Sound ON' : 'Turn Sound OFF'}
                 >
                   {muted ? (
                     <>
-                      <VolumeX size={14} className="text-slate-400" />
-                      <span>Muted</span>
+                      <VolumeX size={15} className="text-[#f87171]" />
+                      <span>Sound OFF</span>
                     </>
                   ) : (
                     <>
-                      <Volume2 size={14} className="text-red-500 animate-pulse" />
-                      <span className="text-red-600 dark:text-red-400">Sound ON</span>
+                      <Volume2 size={15} className="text-[#f87171] animate-pulse" />
+                      <span>Sound ON</span>
                     </>
                   )}
                 </button>
 
                 {remainingInQueue > 0 && (
-                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-gray-100 dark:bg-[#222b33] text-gray-600 dark:text-gray-300">
-                    +{remainingInQueue} more due
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-[#1e293b] text-slate-300">
+                    +{remainingInQueue} more
                   </span>
                 )}
               </div>
             </div>
 
             {/* Habit Identity & Streak Callout */}
-            <div className="text-center my-3">
+            <div className="text-center my-2">
               <div
-                className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white text-2xl font-bold shadow-lg mb-4"
-                style={{ backgroundColor: habitColor }}
+                className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white text-2xl font-extrabold shadow-md mb-3"
+                style={{ backgroundColor: habitColor || '#3d7a75' }}
               >
                 {activeAlarm.habit_name?.[0]?.toUpperCase() || 'H'}
               </div>
 
               <h2
                 id="alarm-title"
-                className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight"
+                className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight mb-2"
               >
                 {activeAlarm.habit_name}
               </h2>
 
               {activeAlarm.custom_text && (
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
+                <p className="text-sm text-slate-300 mt-1 max-w-md mx-auto mb-2">
                   {activeAlarm.custom_text}
                 </p>
               )}
 
               {/* Real Streak Badge */}
-              <div className="inline-flex items-center gap-2 mt-4 px-4 py-2 rounded-2xl bg-amber-50 dark:bg-[#3a2c14] border border-amber-200/80 dark:border-amber-800/40 text-amber-800 dark:text-amber-300">
-                <Flame size={20} className="text-amber-500 fire-bounce" />
-                <span className="text-base font-extrabold">
-                  {streak > 0 ? `${streak} Day Streak` : 'Start Streak'}
-                </span>
+              <div className="flex justify-center mb-2">
+                <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[#2a2214] border border-[#54401c] text-[#f59e0b] font-bold text-sm">
+                  <Flame size={16} className="text-[#f59e0b] fill-[#f59e0b] fire-bounce" />
+                  <span>
+                    {streak > 0 ? `${streak} Day Streak` : 'Start Streak'}
+                  </span>
+                </div>
               </div>
 
               {/* Streak-at-Stake Line */}
-              <p className="text-sm font-semibold text-slate-800 dark:text-slate-200 mt-2.5">
+              <p className="text-sm font-medium text-slate-300 mt-1 mb-2">
                 {streakAtStake}
               </p>
             </div>
 
             {/* Motivational Quote Card */}
             {quote && (
-              <div className="my-5 p-4 rounded-2xl bg-slate-50 dark:bg-[#14181c] border border-slate-200/80 dark:border-[#2a343d] text-left relative overflow-hidden min-h-[85px] flex flex-col justify-center">
+              <div className="my-3 p-4 rounded-2xl bg-[#090e13]/70 border border-white/[0.06] text-left relative overflow-hidden min-h-[75px] flex flex-col justify-center">
                 <Quote
-                  size={32}
-                  className="absolute -right-2 -bottom-2 text-slate-200 dark:text-[#222b33] pointer-events-none"
+                  size={36}
+                  className="absolute -right-2 -bottom-2 text-white/[0.04] pointer-events-none"
                 />
-                <blockquote className="text-xs sm:text-sm italic font-medium text-slate-700 dark:text-slate-300 leading-relaxed pr-4">
+                <blockquote className="text-xs sm:text-sm italic font-medium text-slate-300 leading-relaxed pr-4">
                   "{quote.text}"
                 </blockquote>
-                <p className="text-[11px] font-bold text-[#3d7a75] dark:text-[#5fae9e] mt-2">
+                <p className="text-[11px] font-bold text-[#3d7a75] mt-1.5">
                   — {quote.author}
                 </p>
               </div>
             )}
 
             {/* Action Controls */}
-            <div className="mt-4 pt-4 border-t border-slate-100 dark:border-[#2a343d] flex flex-col gap-2.5">
+            <div className="mt-2 flex flex-col gap-2.5">
               {completedAnim ? (
-                <div className="w-full py-4 rounded-2xl bg-[#3d7a75] text-white font-bold text-center flex items-center justify-center gap-2 shadow-lg animate-pulse">
-                  <Check size={20} />
-                  <span>Streak Protected! Saved ✓</span>
+                <div className="w-full py-4 rounded-2xl bg-[#138a78] text-white font-extrabold text-center flex items-center justify-center gap-2 shadow-lg animate-pulse">
+                  <Check size={20} strokeWidth={3} />
+                  <span>Marked Done! Streak Protected ✓</span>
                 </div>
               ) : (
                 <>
                   {isQuantity ? (
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <button
-                        onClick={() => handleAddQuantity(1)}
-                        disabled={loading}
-                        className="w-full py-3.5 px-4 rounded-2xl bg-slate-100 dark:bg-[#222b33] hover:bg-slate-200 dark:hover:bg-[#2c3742] text-slate-800 dark:text-slate-100 font-bold text-sm transition-all flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-50"
-                      >
-                        <Plus size={16} />
-                        <span>+1 {activeAlarm.unit || ''}</span>
-                      </button>
+                    <div className="flex flex-col gap-2.5">
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <button
+                          onClick={() => handleAddQuantity(1)}
+                          disabled={loading}
+                          className="w-full py-3.5 px-4 rounded-2xl bg-[#141d26] hover:bg-[#1a2530] border border-white/[0.08] text-slate-200 font-bold text-sm transition-all flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-50"
+                        >
+                          <Plus size={16} />
+                          <span>+1 {activeAlarm.unit || ''}</span>
+                        </button>
+
+                        <button
+                          onClick={handleDone}
+                          disabled={loading}
+                          className="w-full py-3.5 px-4 rounded-2xl bg-[#138a78] hover:bg-[#0f766e] text-white font-extrabold text-sm shadow-lg shadow-[#138a78]/25 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer disabled:opacity-50"
+                        >
+                          <Check size={18} strokeWidth={3} />
+                          <span>Mark Done</span>
+                        </button>
+                      </div>
 
                       <button
-                        onClick={handleDone}
+                        onClick={() => handleSnooze10Min()}
                         disabled={loading}
-                        className="w-full py-3.5 px-4 rounded-2xl bg-[#3d7a75] hover:bg-[#2f5f5b] text-white font-bold text-sm shadow-lg shadow-[#3d7a75]/25 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer disabled:opacity-50"
+                        className="w-full py-3 px-4 rounded-xl bg-[#141d26] hover:bg-[#1a2530] border border-white/[0.08] active:scale-[0.98] text-slate-300 hover:text-white font-semibold text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        title="Snooze for 10 minutes"
                       >
-                        <Check size={18} />
-                        <span>Target Done</span>
+                        +10 min
                       </button>
                     </div>
                   ) : (
-                    <button
-                      onClick={handleDone}
-                      disabled={loading}
-                      className="w-full py-4 px-6 rounded-2xl bg-[#3d7a75] hover:bg-[#2f5f5b] text-white font-extrabold text-base shadow-lg shadow-[#3d7a75]/25 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer disabled:opacity-50"
-                    >
-                      <Check size={20} />
-                      <span>Mark Done (Protect Streak)</span>
-                    </button>
-                  )}
+                    <>
+                      <button
+                        onClick={handleDone}
+                        disabled={loading}
+                        className="w-full py-4 px-6 rounded-2xl bg-[#138a78] hover:bg-[#0f766e] active:scale-[0.98] text-white font-extrabold text-base shadow-lg shadow-[#138a78]/25 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        <Check size={20} strokeWidth={3} />
+                        <span>Mark Done</span>
+                      </button>
 
-                  {/* Skip / Re-ping controls */}
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleSkip(25)}
-                      disabled={loading}
-                      className="flex-1 py-2.5 px-3 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white bg-slate-100 hover:bg-slate-200 dark:bg-[#222b33] dark:hover:bg-[#2c3742] rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
-                      title="Postpone alarm and re-ping in 25 minutes"
-                    >
-                      <Clock size={13} className="text-[#3d7a75] dark:text-[#5fae9e]" />
-                      <span>Re-ping in 25 min</span>
-                    </button>
-                    <button
-                      onClick={() => handleSkip(10)}
-                      disabled={loading}
-                      className="py-2.5 px-3 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-slate-100/60 dark:bg-[#222b33]/60 hover:bg-slate-200 dark:hover:bg-[#2c3742] rounded-xl transition-all cursor-pointer active:scale-95 disabled:opacity-50"
-                      title="Snooze for 10 minutes"
-                    >
-                      +10 min
-                    </button>
-                  </div>
+                      <button
+                        onClick={() => handleSnooze10Min()}
+                        disabled={loading}
+                        className="w-full py-3 px-4 rounded-xl bg-[#141d26] hover:bg-[#1a2530] border border-white/[0.08] active:scale-[0.98] text-slate-300 hover:text-white font-semibold text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        title="Snooze for 10 minutes"
+                      >
+                        +10 min
+                      </button>
+                    </>
+                  )}
                 </>
               )}
             </div>
           </div>
         )}
 
-        {/* Small Notice at Bottom */}
-        <p className="text-[10px] text-center text-slate-400 dark:text-slate-500 mt-3">
-          This alarm stays active until completed or postponed.
+        {/* Recurring Reminder Notice */}
+        <p className="text-[11px] text-center text-slate-400 mt-4 px-2 leading-relaxed">
+          This reminder will continue on its regular schedule until you mark it done. Snoozing only delays this alert by 10 minutes.
         </p>
       </div>
     </div>

@@ -84,17 +84,53 @@ export default function Profile() {
     return () => window.removeEventListener('habittracker-stats-updated', handleUpdate);
   }, [fetchProfileData]);
 
-  // Handle Direct Image File Upload
+  // Handle Direct Image File Upload with strict validation & canvas compression
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Image size should be less than 5MB.');
+
+    const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      alert('Please upload a valid image file (JPEG, PNG, or WebP).');
       return;
     }
+    if (file.size > 3 * 1024 * 1024) {
+      alert('Image file size should be less than 3MB.');
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (event) => {
-      setAvatarUrl(event.target.result);
+      const img = new window.Image();
+      img.onload = () => {
+        // Resize and compress via canvas to max 160x160 to prevent JWT header bloat
+        const canvas = document.createElement('canvas');
+        const maxDim = 160;
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > maxDim) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          }
+        } else {
+          if (height > maxDim) {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          setAvatarUrl(compressedDataUrl);
+        } else {
+          setAvatarUrl(event.target.result);
+        }
+      };
+      img.src = event.target.result;
     };
     reader.readAsDataURL(file);
   };

@@ -30,7 +30,9 @@ export default async function handler(req, res) {
         resourcesRes,
         notesRes,
         logsRes,
-        profileRes
+        profileRes,
+        seasonsRes,
+        seasonHabitsRes
       ] = await Promise.all([
         supabase.from('habits').select('*').eq('user_id', user_id),
         supabase.from('habit_tracking').select('*').eq('user_id', user_id),
@@ -45,7 +47,9 @@ export default async function handler(req, res) {
         supabase.from('learning_resources').select('*').eq('user_id', user_id),
         supabase.from('learning_notes').select('*').eq('user_id', user_id),
         supabase.from('learning_practice_logs').select('*').eq('user_id', user_id),
-        supabase.from('profiles').select('*').eq('id', user_id).maybeSingle()
+        supabase.from('profiles').select('*').eq('id', user_id).maybeSingle(),
+        supabase.from('seasons').select('*').eq('user_id', user_id),
+        supabase.from('season_habits').select('*').eq('user_id', user_id)
       ]);
 
       const exportPayload = {
@@ -65,6 +69,8 @@ export default async function handler(req, res) {
         goalMilestones: milestonesRes.data || [],
         reminders: remindersRes.data || [],
         achievements: achievementsRes.data || [],
+        seasons: seasonsRes.data || [],
+        seasonHabits: seasonHabitsRes.data || [],
         learning: {
           journeys: journeysRes.data || [],
           phases: phasesRes.data || [],
@@ -86,20 +92,23 @@ export default async function handler(req, res) {
         supabase.from('learning_practice_logs').delete().eq('user_id', user_id),
         supabase.from('learning_notes').delete().eq('user_id', user_id),
         supabase.from('learning_resources').delete().eq('user_id', user_id),
-        supabase.from('learning_tasks').delete().eq('user_id', user_id)
+        supabase.from('learning_tasks').delete().eq('user_id', user_id),
+        supabase.from('reminder_events').delete().eq('user_id', user_id)
       ]);
       await supabase.from('learning_topics').delete().eq('user_id', user_id);
       await supabase.from('learning_phases').delete().eq('user_id', user_id);
       await supabase.from('learning_journeys').delete().eq('user_id', user_id);
 
-      // 2. Delete tracking, reminders, milestones, goals, habits, achievements, subscriptions
+      // 2. Delete tracking, reminders, milestones, goals, habits, achievements, seasons, subscriptions
       await Promise.allSettled([
         supabase.from('habit_tracking').delete().eq('user_id', user_id),
         supabase.from('reminders').delete().eq('user_id', user_id),
         supabase.from('goal_milestones').delete().eq('user_id', user_id),
         supabase.from('push_subscriptions').delete().eq('user_id', user_id),
-        supabase.from('user_achievements').delete().eq('user_id', user_id)
+        supabase.from('user_achievements').delete().eq('user_id', user_id),
+        supabase.from('season_habits').delete().eq('user_id', user_id)
       ]);
+      await supabase.from('seasons').delete().eq('user_id', user_id);
       await supabase.from('goals').delete().eq('user_id', user_id);
       await supabase.from('habits').delete().eq('user_id', user_id);
       await supabase.from('profiles').delete().eq('id', user_id);

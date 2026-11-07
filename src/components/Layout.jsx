@@ -1,12 +1,15 @@
 import { useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, Outlet } from 'react-router-dom';
 import { Menu } from 'lucide-react';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import AlarmTakeoverModal from './AlarmTakeoverModal';
 import { useReminderScheduler } from '../hooks/useReminderScheduler';
 
-export default function Layout({ children }) {
+/**
+ * @param {{ children?: React.ReactNode }} [props]
+ */
+export default function Layout({ children } = {}) {
   // Continuously monitors active reminders and fires notifications when reminder times match
   useReminderScheduler();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -62,17 +65,19 @@ export default function Layout({ children }) {
         )}
 
         <main className={`flex-1 px-3 sm:px-6 md:px-8 max-w-7xl w-full mx-auto pb-10 ${!isDashboard ? 'pt-4 sm:pt-6 md:pt-8' : ''}`}>
-          {children}
+          {children || <Outlet />}
         </main>
 
         {/* Global Editorial Footer matching reference */}
         <footer className="w-full max-w-7xl mx-auto px-4 sm:px-8 py-5 border-t border-white/[0.04] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span>HabiZ</span>
             <span>•</span>
-            <span>Build Better Habits</span>
+            <a href="/privacy" className="hover:text-slate-300 transition-colors">Privacy</a>
             <span>•</span>
-            <span className="text-slate-600">Version 1.0</span>
+            <a href="/terms" className="hover:text-slate-300 transition-colors">Terms</a>
+            <span>•</span>
+            <span className="text-slate-600">v1.0</span>
           </div>
           <div className="flex items-center gap-1.5 text-teal-400/80 font-medium">
             <span>“Progress, not perfection.”</span>

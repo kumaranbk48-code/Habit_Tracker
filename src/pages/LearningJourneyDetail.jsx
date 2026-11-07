@@ -341,6 +341,9 @@ export default function LearningJourneyDetail() {
       if (res.ok) {
         fireSmall();
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+        window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+          detail: { targetType: 'habit', entityId: habit.id, date: todayDate }
+        }));
         setConfirmModalData(null);
         setToast({
           message: `Marked "${habit.habit_name}" as done! 🎯`,
@@ -363,6 +366,9 @@ export default function LearningJourneyDetail() {
                 })
               });
               window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+              window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+                detail: { targetType: 'habit', entityId: habit.id, date: todayDate }
+              }));
               setToast({ message: `Reverted "${habit.habit_name}".`, type: 'info' });
             } catch (err) {
               console.warn('[Learning] Undo error:', err);

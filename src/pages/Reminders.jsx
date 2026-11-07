@@ -14,6 +14,13 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import HabizLoader from '../components/HabizLoader';
+import {
+  isNative,
+  scheduleSingleNativeReminder,
+  cancelNativeReminder,
+  checkExactAlarmPermission,
+  requestExactAlarmPermission,
+} from '../lib/nativeNotifications';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -188,9 +195,9 @@ export default function Reminders() {
   const handleEnablePush = async () => {
     const ok = await requestPermissionAndSubscribe();
     if (ok) {
-      setToast({ message: 'Push notifications enabled! 🔔', type: 'success' });
+      setToast({ message: 'Notifications enabled! 🔔', type: 'success' });
     } else {
-      setToast({ message: 'Could not enable notifications. Check browser settings.', type: 'error' });
+      setToast({ message: 'Could not enable notifications. Check notification permissions in device settings.', type: 'error' });
     }
   };
 
@@ -254,6 +261,18 @@ export default function Reminders() {
   const handleToggleAlarm = async (rem) => {
     const currentIsAlarm = Boolean(rem.is_alarm || rem.reminder_mode === 'alarm');
     const newIsAlarm = !currentIsAlarm;
+
+    // Immediately schedule or update alarm natively on Android
+    if (isNative) {
+      if (newIsAlarm) {
+        checkExactAlarmPermission().then((ok) => {
+          if (!ok) requestExactAlarmPermission();
+        });
+      }
+      const targetName = rem.habits?.habit_name || rem.goals?.goal_name || rem.learning_journeys?.title || 'Reminder';
+      scheduleSingleNativeReminder({ ...rem, is_alarm: newIsAlarm }, targetName).catch(() => {});
+    }
+
     try {
       const res = await fetch('/api/reminders', {
         method: 'PUT',
@@ -317,6 +336,32 @@ export default function Reminders() {
         is_alarm: Boolean(form.is_alarm),
       };
 
+      // CRITICAL: Schedule directly with Android AlarmManager immediately on Save tap
+      // Do not wait for backend network round-trips or JS tickers
+      if (isNative) {
+        try {
+          if (payload.is_alarm) {
+            const exactAllowed = await checkExactAlarmPermission();
+            if (!exactAllowed) {
+              await requestExactAlarmPermission();
+            }
+          }
+          const targetName = form.target_type === 'habit'
+            ? habits.find((h) => h.id === form.habit_id)?.habit_name
+            : form.target_type === 'goal'
+            ? goals.find((g) => g.id === form.goal_id)?.goal_name
+            : journeys.find((j) => j.id === form.journey_id)?.title || 'Reminder';
+
+          const clientReminder = {
+            ...payload,
+            id: editing ? editing.id : `client_${form.habit_id || form.goal_id || Date.now()}`,
+          };
+          await scheduleSingleNativeReminder(clientReminder, targetName || 'Habit');
+        } catch (nativeErr) {
+          console.warn('[Reminders] Immediate native schedule warning:', nativeErr);
+        }
+      }
+
       const method = editing ? 'PUT' : 'POST';
       const body = editing ? { ...payload, id: editing.id } : payload;
       const res = await fetch('/api/reminders', {
@@ -342,6 +387,17 @@ export default function Reminders() {
 
   const handleToggleStatus = async (reminder) => {
     const newStatus = reminder.notification_status === 'Active' ? 'Inactive' : 'Active';
+
+    // Immediately update Android AlarmManager scheduling on device
+    if (isNative) {
+      if (newStatus === 'Active') {
+        const targetName = reminder.habits?.habit_name || reminder.goals?.goal_name || reminder.learning_journeys?.title || 'Reminder';
+        scheduleSingleNativeReminder({ ...reminder, notification_status: 'Active' }, targetName).catch(() => {});
+      } else {
+        cancelNativeReminder(reminder.id).catch(() => {});
+      }
+    }
+
     try {
       const res = await fetch('/api/reminders', {
         method: 'PUT',
@@ -362,6 +418,12 @@ export default function Reminders() {
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this reminder?')) return;
+
+    // Immediately remove from Android AlarmManager
+    if (isNative) {
+      cancelNativeReminder(id).catch(() => {});
+    }
+
     try {
       const res = await fetch('/api/reminders', {
         method: 'DELETE',
@@ -460,6 +522,34 @@ export default function Reminders() {
           <Plus size={16} /> New Reminder
         </motion.button>
       </div>
+
+      {/* ── Top Enable Notifications Banner (Dismissed/Removed once enabled) ── */}
+      {permission !== 'granted' && (
+        <div className="habiz-panel p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-teal-500/25 bg-gradient-to-r from-teal-950/40 via-teal-900/20 to-transparent">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-teal-500/15 border border-teal-500/30 text-teal-300 flex items-center justify-center flex-shrink-0 shadow-sm">
+              <BellRing size={20} className="animate-pulse" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-white tracking-tight">
+                Enable Notifications
+              </h4>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Get timely reminders and stay on track with your routine.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-end sm:self-center">
+            <button
+              onClick={handleEnablePush}
+              className="bg-[#178274] hover:bg-[#136c60] text-white px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-md shadow-teal-950/40 active:scale-95 cursor-pointer"
+            >
+              Enable
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Category Filter Tabs: All, Habits, Goals, Learning (Matching Reference) ── */}
       <div className="flex flex-wrap items-center gap-2 relative">
@@ -715,46 +805,6 @@ export default function Reminders() {
           )}
         </div>
       )}
-
-      {/* ── Bottom Enable Notifications Banner (Matching Reference Screen 5) ── */}
-      <div className="habiz-panel p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-6">
-        <div className="flex items-center gap-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center flex-shrink-0">
-            <BellRing size={20} />
-          </div>
-          <div>
-            <h4 className="text-sm font-bold text-white tracking-tight">
-              Enable Notifications
-            </h4>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Get timely reminders and stay on track with your routine.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 self-end sm:self-center">
-          {permission === 'granted' && subscribed ? (
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-teal-500/15 text-teal-300 border border-teal-500/25">
-                <ShieldCheck size={14} /> Active
-              </span>
-              <button
-                onClick={handleDisablePush}
-                className="px-3 py-1.5 text-xs text-slate-400 hover:text-red-400 font-medium transition-colors cursor-pointer"
-              >
-                Disable
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={handleEnablePush}
-              className="bg-[#178274] hover:bg-[#136c60] text-white px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-md shadow-teal-950/40 active:scale-95 cursor-pointer"
-            >
-              Enable
-            </button>
-          )}
-        </div>
-      </div>
 
       {/* Add / Edit Unified Modal */}
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit Reminder' : 'Add Smart Reminder'}>
@@ -1053,7 +1103,16 @@ export default function Reminders() {
                   <input
                     type="checkbox"
                     checked={Boolean(form.is_alarm)}
-                    onChange={(e) => setForm({ ...form, is_alarm: e.target.checked })}
+                    onChange={async (e) => {
+                      const checked = e.target.checked;
+                      setForm({ ...form, is_alarm: checked });
+                      if (checked && isNative) {
+                        const exactAllowed = await checkExactAlarmPermission();
+                        if (!exactAllowed) {
+                          await requestExactAlarmPermission();
+                        }
+                      }
+                    }}
                     className="sr-only peer"
                   />
                   <div className="w-10 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#3d7a75]" />

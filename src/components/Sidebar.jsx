@@ -21,7 +21,7 @@ const NAV = [
 ];
 
 export default function Sidebar({ mobileOpen = false, onCloseMobile }) {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [dashStats, setDashStats] = useState(null);
@@ -51,7 +51,11 @@ export default function Sidebar({ mobileOpen = false, onCloseMobile }) {
   }, [fetchSidebarStats]);
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    if (signOut) {
+      await signOut();
+    } else {
+      await supabase.auth.signOut();
+    }
     navigate('/login', { replace: true });
   };
 

@@ -144,6 +144,15 @@ export default function Habits() {
           type: 'success',
         });
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
+        if (newStatus) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'habit', entityId: habitId, date: today }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+            detail: { targetType: 'habit', entityId: habitId, date: today }
+          }));
+        }
       }
     } catch {
       setToast({ message: 'Failed to update habit status.', type: 'error' });
@@ -330,6 +339,15 @@ export default function Habits() {
         const saved = await res.json();
         setTracking((prev) => prev.map((t) => t.habit_id === habitId ? { ...t, ...saved } : t));
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
+        if (newStatus) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'habit', entityId: habitId, date: today }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+            detail: { targetType: 'habit', entityId: habitId, date: today }
+          }));
+        }
       } else {
         const errJson = await res.json().catch(() => ({}));
         setTracking(previousTracking);
@@ -384,6 +402,15 @@ export default function Habits() {
         const saved = await res.json();
         setTracking((prev) => prev.map((t) => t.habit_id === habitId ? { ...t, ...saved } : t));
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
+        if (newStatus) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'habit', entityId: habitId, date: today }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+            detail: { targetType: 'habit', entityId: habitId, date: today }
+          }));
+        }
       } else {
         const errJson = await res.json().catch(() => ({}));
         setTracking(previousTracking);
@@ -449,6 +476,15 @@ export default function Habits() {
 
       if (res.ok) {
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
+        if (newStatus) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'habit', entityId: habitId, date: today }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+            detail: { targetType: 'habit', entityId: habitId, date: today }
+          }));
+        }
         setToast({
           message: `Auto-marked "${habit.habit_name}" as done!`,
           type: 'success',

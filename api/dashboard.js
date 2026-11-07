@@ -108,6 +108,7 @@ export default async function handler(req, res) {
       pendingToday: totalHabits - completedToday,
       currentStreak,
       longestStreak,
+      totalConsistencyDays: dateSet.size,
       completionPercentage: totalHabits > 0 ? Math.round((completedToday / totalHabits) * 100) : 0,
       totalGoals,
       completedGoals,

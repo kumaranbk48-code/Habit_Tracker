@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { isNative, checkNativePermission, requestNativePermission } from '../lib/nativeNotifications';
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
 
@@ -17,15 +18,25 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 export function usePushNotifications(session) {
-  const [permission, setPermission] = useState(
-    'Notification' in window ? Notification.permission : 'denied'
-  );
+  const [permission, setPermission] = useState(() => {
+    if (isNative) return 'default';
+    return 'Notification' in window ? Notification.permission : 'denied';
+  });
   const [swRegistration, setSwRegistration] = useState(null);
   const [subscribed, setSubscribed] = useState(false);
   const [swReady, setSwReady] = useState(false);
 
-  // Register service worker on mount
+  // Initialize permissions and service worker
   useEffect(() => {
+    if (isNative) {
+      checkNativePermission().then((status) => {
+        setPermission(status);
+        setSubscribed(status === 'granted');
+        setSwReady(true);
+      });
+      return;
+    }
+
     if (!('serviceWorker' in navigator)) return;
 
     navigator.serviceWorker.register('/sw.js')
@@ -44,6 +55,13 @@ export function usePushNotifications(session) {
   }, []);
 
   const requestPermissionAndSubscribe = useCallback(async () => {
+    if (isNative) {
+      const ok = await requestNativePermission();
+      setPermission(ok ? 'granted' : 'denied');
+      setSubscribed(ok);
+      return ok;
+    }
+
     if (!('Notification' in window)) return false;
 
     try {
@@ -88,6 +106,12 @@ export function usePushNotifications(session) {
   }, [swRegistration, session]);
 
   const unsubscribe = useCallback(async () => {
+    if (isNative) {
+      setSubscribed(false);
+      setPermission('default');
+      return;
+    }
+
     if (!swRegistration || !session) return;
     try {
       const sub = await swRegistration.pushManager?.getSubscription();

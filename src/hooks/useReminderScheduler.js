@@ -1,5 +1,14 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import {
+  isNative,
+  syncNativeReminders,
+  setupNativeNotificationListeners,
+  hashStringToId,
+  recordNativeCompletion,
+  recordNativeUncompletion,
+} from '../lib/nativeNotifications';
+import { LocalNotifications } from '@capacitor/local-notifications';
 
 function getTimeValue(val) {
   if (!val) return '';
@@ -32,18 +41,32 @@ export function useReminderScheduler() {
   }, []);
 
   const completedHabitsRef = useRef(new Set());
+  const completedGoalsRef = useRef(new Set());
+  const completedLearningRef = useRef(new Set());
   const repingEventsRef = useRef([]);
   const statsRef = useRef(null);
   const lastMinuteLoggedRef = useRef('');
+  const isRefreshingRef = useRef(false);
+  const pendingRefreshReasonRef = useRef(null);
 
   // Fetch and cache active reminders, today's completions, and reping statuses
-  const refreshReminders = useCallback(async () => {
+  const refreshReminders = useCallback(async (reason = 'manual') => {
     if (!session?.access_token) return;
+
+    if (isRefreshingRef.current) {
+      console.log(`[ReminderScheduler] Refresh already in flight, queuing reason: '${reason}'`);
+      pendingRefreshReasonRef.current = reason;
+      return;
+    }
+
+    isRefreshingRef.current = true;
+    console.log(`[ReminderScheduler] Starting refresh (reason: '${reason}')`);
+
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
     try {
-      const [remRes, trackRes, repingRes, dashRes] = await Promise.all([
+      const [remRes, trackRes, repingRes, dashRes, goalsRes] = await Promise.all([
         fetch('/api/reminders', {
           headers: { Authorization: `Bearer ${session.access_token}` },
         }),
@@ -56,6 +79,9 @@ export function useReminderScheduler() {
         fetch('/api/dashboard', {
           headers: { Authorization: `Bearer ${session.access_token}` },
         }),
+        fetch('/api/goals', {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }),
       ]);
 
       if (remRes.ok) {
@@ -66,6 +92,18 @@ export function useReminderScheduler() {
             return s === 'active';
           });
           remindersRef.current = activeOnly;
+
+          // Extract completed learning journeys and topics
+          const completedLearning = new Set();
+          for (const r of activeOnly) {
+            if (r.learning_journeys?.status === 'Completed' && r.journey_id) {
+              completedLearning.add(r.journey_id);
+            }
+            if (r.learning_topics?.status === 'Completed' && r.topic_id) {
+              completedLearning.add(r.topic_id);
+            }
+          }
+          completedLearningRef.current = completedLearning;
 
           // Also post to SW as fallback
           if ('serviceWorker' in navigator && swRegRef.current) {
@@ -89,6 +127,15 @@ export function useReminderScheduler() {
         }
       }
 
+      if (goalsRes.ok) {
+        const goalsData = await goalsRes.json().catch(() => []);
+        if (Array.isArray(goalsData)) {
+          completedGoalsRef.current = new Set(
+            goalsData.filter((g) => g.status === 'Completed').map((g) => g.id)
+          );
+        }
+      }
+
       if (repingRes.ok) {
         const repings = await repingRes.json();
         if (Array.isArray(repings)) {
@@ -102,15 +149,46 @@ export function useReminderScheduler() {
       if (dashRes.ok) {
         statsRef.current = await dashRes.json();
       }
+
+      // Synchronize native Android AlarmManager schedules with reason and complete completion sets
+      if (isNative && Array.isArray(remindersRef.current)) {
+        await syncNativeReminders(
+          remindersRef.current,
+          {
+            completedHabitIds: completedHabitsRef.current,
+            completedGoalIds: completedGoalsRef.current,
+            completedLearningIds: completedLearningRef.current,
+            today,
+          },
+          false,
+          reason
+        );
+      }
     } catch (err) {
       console.warn('[ReminderScheduler] Failed to refresh scheduler data:', err);
+    } finally {
+      isRefreshingRef.current = false;
+      if (pendingRefreshReasonRef.current) {
+        const nextReason = pendingRefreshReasonRef.current;
+        pendingRefreshReasonRef.current = null;
+        console.log(`[ReminderScheduler] Executing pending refresh (reason: '${nextReason}')`);
+        refreshReminders(nextReason);
+      }
     }
   }, [session]);
 
   // Listen to custom update events across the app
   useEffect(() => {
-    refreshReminders();
-    const handleUpdate = () => refreshReminders();
+    refreshReminders('mount');
+
+    let debounceTimer = null;
+    const handleUpdate = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        refreshReminders('event_update');
+      }, 400);
+    };
+
     const handleRepingScheduled = (e) => {
       const { habitId, reminderId, nextRepingAt, habitName } = e.detail || {};
       if (habitId && nextRepingAt) {
@@ -126,22 +204,91 @@ export function useReminderScheduler() {
           },
         ];
       }
-      refreshReminders();
+      handleUpdate();
+    };
+
+    const handleEntityCompleted = (e) => {
+      const { targetType, entityId, date, reminderId } = e.detail || {};
+      const type = (targetType || 'habit').toLowerCase();
+      if (entityId) {
+        if (type === 'habit') {
+          completedHabitsRef.current.add(entityId);
+        } else if (type === 'goal') {
+          completedGoalsRef.current.add(entityId);
+        } else if (type === 'learning_journey' || type === 'learning_topic' || type === 'learning') {
+          completedLearningRef.current.add(entityId);
+        }
+        recordNativeCompletion(type, entityId, date, reminderId);
+      }
+      handleUpdate();
+    };
+
+    const handleEntityUncompleted = (e) => {
+      const { targetType, entityId, date } = e.detail || {};
+      const type = (targetType || 'habit').toLowerCase();
+      if (entityId) {
+        if (type === 'habit') {
+          completedHabitsRef.current.delete(entityId);
+        } else if (type === 'goal') {
+          completedGoalsRef.current.delete(entityId);
+        } else if (type === 'learning_journey' || type === 'learning_topic' || type === 'learning') {
+          completedLearningRef.current.delete(entityId);
+        }
+        recordNativeUncompletion(type, entityId, date);
+      }
+      handleUpdate();
     };
 
     window.addEventListener('habittracker-reminders-updated', handleUpdate);
     window.addEventListener('habittracker-stats-updated', handleUpdate);
     window.addEventListener('habittracker-reping-scheduled', handleRepingScheduled);
+    window.addEventListener('habittracker-entity-completed', handleEntityCompleted);
+    window.addEventListener('habittracker-entity-uncompleted', handleEntityUncompleted);
 
-    // Periodic refresh every 30 seconds to keep repings and sync in lockstep
+    const handleNativeAlarmHandled = (e) => {
+      const { reminderId, habitId } = e.detail || {};
+      if (reminderId) firedRef.current.add(reminderId);
+      if (habitId) firedRef.current.add(habitId);
+      const currentTime = lastMinuteLoggedRef.current;
+      if (currentTime) {
+        if (reminderId) firedRef.current.add(`${reminderId}-${currentTime}`);
+        if (habitId) firedRef.current.add(`${habitId}-${currentTime}`);
+      }
+    };
+    window.addEventListener('habittracker-alarm-dismissed', handleNativeAlarmHandled);
+    window.addEventListener('habittracker-alarm-snoozed', handleNativeAlarmHandled);
+    window.addEventListener('habittracker-alarm-completed', handleNativeAlarmHandled);
+
+    // Periodic refresh every 30 seconds only when tab/app is visible
     const syncInterval = setInterval(() => {
-      refreshReminders();
+      if (typeof document !== 'undefined' && !document.hidden) {
+        refreshReminders('periodic_interval');
+      }
     }, 30000);
 
+    // Refresh immediately when returning to foreground
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        refreshReminders('app_foregrounded');
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       window.removeEventListener('habittracker-reminders-updated', handleUpdate);
       window.removeEventListener('habittracker-stats-updated', handleUpdate);
       window.removeEventListener('habittracker-reping-scheduled', handleRepingScheduled);
+      window.removeEventListener('habittracker-entity-completed', handleEntityCompleted);
+      window.removeEventListener('habittracker-entity-uncompleted', handleEntityUncompleted);
+      window.removeEventListener('habittracker-alarm-dismissed', handleNativeAlarmHandled);
+      window.removeEventListener('habittracker-alarm-snoozed', handleNativeAlarmHandled);
+      window.removeEventListener('habittracker-alarm-completed', handleNativeAlarmHandled);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
       clearInterval(syncInterval);
     };
   }, [refreshReminders]);
@@ -195,6 +342,61 @@ export function useReminderScheduler() {
 
     navigator.serviceWorker.addEventListener('message', handleSwMessage);
     return () => navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+  }, [session, refreshReminders]);
+
+  // Listen to native Android notification actions (Mark Done, Snooze, Tap)
+  useEffect(() => {
+    if (!isNative) return;
+
+    const cleanup = setupNativeNotificationListeners(async (action) => {
+      const extra = action.notification?.extra || {};
+      const actionId = action.actionId;
+
+      if (actionId === 'dismiss') {
+        return;
+      }
+
+      if (actionId === 'complete' && extra.habitId && session?.access_token) {
+        const today = new Date().toISOString().split('T')[0];
+        try {
+          await fetch('/api/tracking', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              habit_id: extra.habitId,
+              completion_date: today,
+              status: true,
+            }),
+          });
+          window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
+          refreshReminders();
+        } catch (err) {
+          console.warn('[NativeNotifications] Failed to mark complete:', err);
+        }
+      } else if (actionId === 'snooze') {
+        // Already rescheduled by setupNativeNotificationListeners
+        console.log('[NativeNotifications] Snooze handled');
+      } else {
+        // Tapped or opened from notification
+        if (extra.isAlarm) {
+          const matchedReminder = remindersRef.current?.find((r) => r.id === extra.reminderId);
+          window.dispatchEvent(
+            new CustomEvent('habittracker-alarm-fired', {
+              detail: {
+                reminder: matchedReminder || { id: extra.reminderId, habit_id: extra.habitId, is_alarm: true },
+                habit: matchedReminder?.habits || { id: extra.habitId, habit_name: extra.itemName || 'Habit' },
+                streak: statsRef.current?.currentStreak || 0,
+              },
+            })
+          );
+        }
+      }
+    });
+
+    return cleanup;
   }, [session, refreshReminders]);
 
   // Main active interval ticker (checks every 5 seconds)
@@ -339,13 +541,20 @@ export function useReminderScheduler() {
         );
         const isHabitEvent = (type || '').toLowerCase() === 'habit' || Boolean(reminder.habit_id);
 
-        // If this is a habit reminder and the habit was already completed today:
-        // Passive reminders can be skipped to avoid spam, but EXPLICIT ALARMS must always ring!
+        // Check A for in-app / ticker: Suppress alert if activity is already completed
         if (type === 'habit' && reminder.habit_id && completedHabitsRef.current.has(reminder.habit_id)) {
-          if (!isAlarmEvent) {
-            console.log(`[ReminderScheduler] Skipping passive notification for already-completed habit "${reminder.habits?.habit_name || reminder.habit_id}"`);
-            continue;
-          }
+          console.log(`[ReminderScheduler] Skipping notification/alarm for already-completed habit "${reminder.habits?.habit_name || reminder.habit_id}"`);
+          continue;
+        }
+
+        if (type === 'goal' && reminder.goal_id && completedGoalsRef.current.has(reminder.goal_id)) {
+          console.log(`[ReminderScheduler] Skipping notification/alarm for already-completed goal "${reminder.goals?.goal_name || reminder.goal_id}"`);
+          continue;
+        }
+
+        if ((type === 'learning_journey' || type === 'learning_topic') && completedLearningRef.current.has(reminder.journey_id || reminder.topic_id)) {
+          console.log(`[ReminderScheduler] Skipping notification/alarm for already-completed learning activity`);
+          continue;
         }
 
         console.log(`[ReminderScheduler] 🔔 Triggering reminder/alarm at ${currentTime}:`, {
@@ -355,8 +564,8 @@ export function useReminderScheduler() {
           name: reminder.habits?.habit_name || reminder.goals?.goal_name || reminder.custom_text || 'Reminder'
         });
 
-        // 5. Fire Native System Notification
-        if ('Notification' in window && Notification.permission === 'granted') {
+        // 5. Fire Native System Notification (in web browsers; on native Android, LocalNotifications handles it)
+        if (!isNative && 'Notification' in window && Notification.permission === 'granted') {
           const isAlarm = isAlarmEvent;
           const notificationOptions = {
             body,

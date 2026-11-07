@@ -4,14 +4,13 @@ import { useAuth } from '../contexts/AuthContext';
 import {
   ListChecks, CheckCircle2, Clock, Flame, Trophy, TrendingUp, AlertCircle, RefreshCw,
   Activity, Timer, Sparkles, Sun, Moon, Sunset, Plus, Check, Share2, Star, Zap,
-  ChevronRight, ArrowRight, GraduationCap, Target, Award, Shield, Play, Pause, ShieldCheck
+  ChevronRight, ArrowRight, GraduationCap, Target, Award, Shield, Play, Pause, ShieldCheck, Link2
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import HabitHeatmap       from '../components/HabitHeatmap';
 import StreakCounter      from '../components/StreakCounter';
 import MilestoneToast, { isMilestone } from '../components/MilestoneToast';
 import XPLevelBar          from '../components/XPLevelBar';
-import BadgeGrid           from '../components/BadgeGrid';
 import DailyQuoteCard      from '../components/DailyQuoteCard';
 import ShareCard           from '../components/ShareCard';
 import Modal                from '../components/Modal';
@@ -307,6 +306,15 @@ export default function Dashboard() {
           });
         }
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'dashboard' } }));
+        if (saved?.status === true) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'habit', entityId: saved.habit_id, date: saved.completion_date }
+          }));
+        } else if (saved?.status === false) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+            detail: { targetType: 'habit', entityId: saved.habit_id, date: saved.completion_date }
+          }));
+        }
       } else {
         // Rollback on server error
         setAllTracking(prevTracking);
@@ -381,6 +389,15 @@ export default function Dashboard() {
 
       if (res.ok) {
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'dashboard' } }));
+        if (saved?.status === true) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'habit', entityId: saved.habit_id, date: saved.completion_date }
+          }));
+        } else if (saved?.status === false) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+            detail: { targetType: 'habit', entityId: saved.habit_id, date: saved.completion_date }
+          }));
+        }
         setToast({
           message: `Auto-marked "${habit.habit_name}" as done!`,
           type: 'success',
@@ -455,6 +472,15 @@ export default function Dashboard() {
         setHabitsList(prev => prev.map(h => h.id === habit.id ? { ...h, status: 'active' } : h));
         setToast({ message: `Resumed "${habit.habit_name}".`, type: 'success' });
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'dashboard' } }));
+        if (saved?.status === true) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'habit', entityId: saved.habit_id, date: saved.completion_date }
+          }));
+        } else if (saved?.status === false) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+            detail: { targetType: 'habit', entityId: saved.habit_id, date: saved.completion_date }
+          }));
+        }
       }
     } catch {
       setToast({ message: 'Failed to resume habit.', type: 'error' });
@@ -669,7 +695,36 @@ export default function Dashboard() {
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-  const nextMilestone = (stats?.currentStreak || 0) < 3 ? 3 : (stats?.currentStreak || 0) < 7 ? 7 : (stats?.currentStreak || 0) < 14 ? 14 : (stats?.currentStreak || 0) < 30 ? 30 : 60;
+
+  // Consistency Streak Metrics (Strictly preserving existing calculation logic)
+  const currentStreak = Number(stats?.currentStreak) || 0;
+  const longestStreak = Math.max(Number(stats?.longestStreak) || 0, currentStreak);
+
+  // Total unique consistency days where at least 1 habit was completed
+  const totalConsistencyDays = (() => {
+    if (stats?.totalConsistencyDays !== undefined && stats?.totalConsistencyDays !== null) {
+      return Number(stats.totalConsistencyDays);
+    }
+    const uniqueDates = new Set();
+    for (const t of allTracking) {
+      if (t.status === true && t.completion_date) {
+        uniqueDates.add(t.completion_date);
+      }
+    }
+    if ((stats?.completedToday || 0) > 0 && today) {
+      uniqueDates.add(today);
+    }
+    return uniqueDates.size;
+  })();
+
+  const getStreakMessage = (streak) => {
+    if (streak === 0) return 'Complete at least one habit today to ignite your streak.';
+    if (streak === 1) return 'Great start! Complete a habit tomorrow to extend your streak.';
+    if (streak < 5) return 'Momentum is building. Every consecutive day strengthens your habits.';
+    if (streak < 14) return 'Strong consistency! Your daily habits are becoming second nature.';
+    if (streak < 30) return 'Unstoppable discipline. An unbroken chain of dedicated days.';
+    return 'Master level continuity. A truly remarkable consistency streak.';
+  };
 
   return (
     <div className="space-y-6 page-enter">
@@ -859,9 +914,9 @@ export default function Dashboard() {
       )}
 
       {/* ── 2. Two-Column Layout (Harmonious & Perfectly Balanced) ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
         {/* ── LEFT COLUMN ── */}
-        <div className="space-y-6">
+        <div className="flex flex-col gap-6">
           {/* Season Focus Card (Converted from top bar to match Goal Progress Card) */}
           <div className="habiz-panel p-6 sm:p-7 rounded-3xl space-y-5">
             <div className="flex items-center justify-between">
@@ -1052,52 +1107,159 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Consistency Streak Card with glowing amber wave */}
-          <div className="habiz-panel p-5 sm:p-6 rounded-3xl relative overflow-hidden">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <div className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                  <span>{stats?.currentStreak || 1} day</span>
-                  <span className="text-xs sm:text-sm font-normal text-slate-400">Consistency streak</span>
-                </div>
-                <p className="text-xs text-slate-400 mt-0.5">You're on a roll. Keep going.</p>
-              </div>
-              <div>
-                <span className="text-[11px] font-semibold text-amber-300 bg-amber-950/70 border border-amber-500/30 px-3 py-1 rounded-full">
-                  Next milestone: {nextMilestone} days
+          {/* Consistency Streak Card */}
+          <div className="habiz-panel p-5 sm:p-6 rounded-3xl relative overflow-hidden space-y-5 flex-1 flex flex-col justify-between">
+            {/* A. Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-400 tracking-[0.16em] uppercase">
+                  Consistency
                 </span>
               </div>
+
+              {/* Subtle status indicator derived from existing streak data */}
+              {currentStreak > 0 ? (
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-teal-500/10 border border-teal-500/20 text-teal-300 text-[11px] font-semibold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+                  <span>Active Streak</span>
+                </div>
+              ) : (
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.03] border border-white/[0.06] text-slate-400 text-[11px] font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                  <span>Ready to Start</span>
+                </div>
+              )}
             </div>
 
-            {/* Glowing amber wavy spline with milestone dots */}
-            <div className="relative h-14 w-full flex items-center">
-              <svg className="w-full h-full" preserveAspectRatio="none" viewBox="0 0 400 40">
-                <defs>
-                  <linearGradient id="streakGlow" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#d97706" stopOpacity="0.8" />
-                    <stop offset="50%" stopColor="#f59e0b" stopOpacity="1" />
-                    <stop offset="100%" stopColor="#2dd4bf" stopOpacity="0.8" />
-                  </linearGradient>
-                </defs>
-                <path
-                  d="M 10 25 Q 110 5, 210 22 T 390 14"
-                  fill="none"
-                  stroke="url(#streakGlow)"
-                  strokeWidth="3.5"
-                  strokeLinecap="round"
-                />
-                <circle cx="210" cy="22" r="5" fill="#f59e0b" className="filter drop-shadow(0 0 6px #f59e0b)" />
-                <circle cx="390" cy="14" r="5" fill="#2dd4bf" className="filter drop-shadow(0 0 6px #2dd4bf)" />
-              </svg>
+            {/* B. Current Streak — Main Focus */}
+            <div className="space-y-2">
+              <div className="flex items-baseline gap-3">
+                <span className="text-5xl sm:text-6xl font-black tracking-tight text-white leading-none">
+                  {currentStreak}
+                </span>
+                <span className="text-xs sm:text-sm font-bold tracking-wider text-amber-400 uppercase">
+                  {currentStreak === 1 ? 'Day Streak' : 'Day Streak'}
+                </span>
+              </div>
+              <p className="text-xs sm:text-sm text-slate-400 font-normal leading-relaxed">
+                {getStreakMessage(currentStreak)}
+              </p>
+            </div>
+
+            {/* Chain / Continuity Visual Element */}
+            <div className="pt-1 pb-1">
+              <div className="flex items-center justify-between mb-2.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400">
+                  <Link2 size={13} className={currentStreak > 0 ? "text-teal-400" : "text-slate-500"} />
+                  <span>Continuity Chain</span>
+                </div>
+                {currentStreak > 0 ? (
+                  <span className="text-[10px] font-semibold text-teal-300 bg-teal-950/60 border border-teal-500/25 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+                    <span>{currentStreak} {currentStreak === 1 ? 'day unbroken' : 'days unbroken'}</span>
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-medium text-slate-500">
+                    Complete 1 habit to forge link
+                  </span>
+                )}
+              </div>
+
+              {/* Interlinked Chain Track */}
+              <div className="flex items-center w-full">
+                {Array.from({ length: 7 }).map((_, idx) => {
+                  const isLinked = currentStreak > 0 && idx < Math.min(currentStreak, 7);
+                  const isHead = isLinked && idx === Math.min(currentStreak, 7) - 1;
+                  const hasConnector = idx < 6;
+                  const nextIsLinked = currentStreak > 0 && (idx + 1) < Math.min(currentStreak, 7);
+
+                  return (
+                    <div key={idx} className="flex-1 flex items-center">
+                      {/* Chain Ring / Node */}
+                      <div
+                        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center transition-all flex-shrink-0 ${
+                          isHead
+                            ? 'bg-amber-500/20 border-2 border-amber-400 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.3)]'
+                            : isLinked
+                            ? 'bg-teal-500/15 border border-teal-400/50 text-teal-300 shadow-sm'
+                            : 'bg-white/[0.02] border border-white/[0.06] text-slate-600'
+                        }`}
+                        title={isLinked ? `Day ${idx + 1}: Unbroken` : `Day ${idx + 1}: Pending`}
+                      >
+                        <Link2
+                          size={12}
+                          className={`transform -rotate-45 ${
+                            isHead
+                              ? 'text-amber-400 scale-110'
+                              : isLinked
+                              ? 'text-teal-400'
+                              : 'text-slate-600'
+                          }`}
+                        />
+                      </div>
+
+                      {/* Interlocking Bridge / Connector */}
+                      {hasConnector && (
+                        <div className="flex-1 px-1">
+                          <div
+                            className={`h-1 rounded-full transition-all ${
+                              isLinked && nextIsLinked
+                                ? 'bg-gradient-to-r from-teal-400 to-teal-500 shadow-[0_0_6px_rgba(45,212,191,0.4)]'
+                                : isHead && currentStreak > 7
+                                ? 'bg-gradient-to-r from-teal-400 to-amber-400 shadow-[0_0_6px_rgba(245,158,11,0.4)]'
+                                : 'bg-white/[0.06]'
+                            }`}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* C. Supporting Metrics — Two-Column Balanced Arrangement */}
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 pt-3 border-t border-white/[0.06]">
+              {/* 1. Longest Streak */}
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-white/[0.02] border border-white/[0.05] hover:border-white/[0.1] transition-all">
+                <div className="text-[10px] sm:text-[11px] font-bold text-slate-400 tracking-wider uppercase mb-1">
+                  Longest Streak
+                </div>
+                <div className="text-xl sm:text-2xl font-black text-white flex items-baseline gap-1">
+                  <span>{longestStreak}</span>
+                  <span className="text-xs font-semibold text-slate-400">
+                    {longestStreak === 1 ? 'day' : 'days'}
+                  </span>
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  All-time personal best
+                </div>
+              </div>
+
+              {/* 2. Total Consistency Days */}
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-white/[0.02] border border-white/[0.05] hover:border-white/[0.1] transition-all">
+                <div className="text-[10px] sm:text-[11px] font-bold text-slate-400 tracking-wider uppercase mb-1">
+                  Total Consistency Days
+                </div>
+                <div className="text-xl sm:text-2xl font-black text-teal-300 flex items-baseline gap-1">
+                  <span>{totalConsistencyDays}</span>
+                  <span className="text-xs font-semibold text-teal-400/70">
+                    {totalConsistencyDays === 1 ? 'day' : 'days'}
+                  </span>
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  Unique days with ≥ 1 habit
+                </div>
+              </div>
             </div>
           </div>
-
-          {/* Daily Motivation Quote */}
-          <DailyQuoteCard />
         </div>
 
         {/* ── RIGHT COLUMN ── */}
-        <div className="space-y-6">
+        <div className="flex flex-col gap-6">
+          {/* Daily Motivation Quote — top of the column for immediate eye focus */}
+          <DailyQuoteCard />
+
           {/* Goal Progress Card */}
           <div className="habiz-panel p-6 sm:p-7 rounded-3xl space-y-5">
             <div className="flex items-center justify-between">
@@ -1153,64 +1315,17 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Achievements Card */}
-          <div className="habiz-panel p-5 sm:p-6 rounded-3xl space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-white">Achievements</h3>
-              <button
-                onClick={() => navigate('/profile')}
-                className="text-xs font-semibold text-teal-400 hover:text-teal-300 flex items-center gap-1 transition-colors cursor-pointer"
-              >
-                <span>View All</span>
-                <ArrowRight size={13} />
-              </button>
-            </div>
-
-            {/* Achievements Grid matching reference */}
-            <div className="grid grid-cols-3 gap-2.5">
-              {[
-                { name: 'First Step', sub: 'Completed', icon: Star, color: 'text-amber-400', unlocked: true },
-                { name: 'Goal Getter', sub: '2/5', icon: Target, color: 'text-teal-400', unlocked: true },
-                { name: 'Habit Pro', sub: '1/10', icon: Flame, color: 'text-amber-400', unlocked: true },
-                { name: 'Week Warrior', sub: '0/4', icon: Award, color: 'text-slate-400', unlocked: false },
-                { name: 'Monthly Master', sub: '0/2', icon: Trophy, color: 'text-slate-400', unlocked: false },
-                { name: 'More to unlock', sub: '+', icon: Plus, color: 'text-slate-400', unlocked: false },
-              ].map((ach, idx) => {
-                const AchIcon = ach.icon;
-                return (
-                  <div
-                    key={idx}
-                    className={`p-3 rounded-2xl flex flex-col items-center text-center justify-center border transition-all ${
-                      ach.unlocked
-                        ? 'bg-white/[0.04] border-white/[0.08]'
-                        : 'bg-white/[0.015] border-white/[0.04] opacity-60'
-                    }`}
-                  >
-                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center mb-1.5 ${
-                      ach.unlocked ? 'bg-teal-500/15 text-teal-300' : 'bg-white/[0.05] text-slate-500'
-                    }`}>
-                      <AchIcon size={16} className={ach.color} />
-                    </div>
-                    <span className="text-[11px] font-bold text-slate-200 truncate w-full">{ach.name}</span>
-                    <span className="text-[10px] text-slate-500 mt-0.5">{ach.sub}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
           {/* Level Progress Card */}
           <XPLevelBar xp={xp} />
 
           {/* Scenic Motivation Card matching reference */}
           <div
             onClick={() => navigate('/learning')}
-            className="relative overflow-hidden rounded-3xl p-7 sm:p-8 border border-white/[0.06] shadow-xl cursor-pointer group transition-all flex flex-col justify-between"
+            className="relative overflow-hidden rounded-3xl p-7 sm:p-8 border border-white/[0.06] shadow-xl cursor-pointer group transition-all flex-1 flex flex-col justify-between min-h-[280px]"
             style={{
               backgroundImage: 'url(/assets/nature-card.jpg)',
               backgroundSize: 'cover',
               backgroundPosition: 'center',
-              minHeight: '280px',
             }}
           >
             {/* Dark gradient overlay for text readability */}

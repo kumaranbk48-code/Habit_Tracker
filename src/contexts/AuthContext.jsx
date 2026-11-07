@@ -2,8 +2,9 @@ import { createContext, useContext, useState, useEffect } from 'react';
 import supabase from '../lib/supabase';
 
 const getApiBaseUrl = () => {
-  if (import.meta.env.VITE_API_BASE_URL) {
-    return import.meta.env.VITE_API_BASE_URL.replace(/\/$/, '');
+  const url = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL;
+  if (url) {
+    return url.replace(/\/$/, '');
   }
   return '';
 };
@@ -67,12 +68,48 @@ window.fetch = async (...args) => {
   return response;
 };
 
-const AuthContext = createContext({ user: null, session: null, loading: true });
+const AuthContext = createContext({ user: null, session: null, loading: true, signOut: async () => {} });
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  const purgeUserStorage = () => {
+    try {
+      const userKeysToClear = [
+        'habittracker_dismissed_alerts',
+        'has_seen_learning_onboarding',
+        'ht-selected-season'
+      ];
+      for (const k of userKeysToClear) {
+        localStorage.removeItem(k);
+      }
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && (
+          key.includes('sb-') ||
+          key.includes('supabase') ||
+          key.includes('auth') ||
+          key.startsWith('habit_tracker_goals_meta')
+        )) {
+          localStorage.removeItem(key);
+        }
+      }
+    } catch {}
+  };
+
+  const signOut = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.warn('[Auth] Error signing out:', e);
+    } finally {
+      setSession(null);
+      setUser(null);
+      purgeUserStorage();
+    }
+  };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -89,6 +126,7 @@ export function AuthProvider({ children }) {
             supabase.auth.signOut().catch(() => {});
             setSession(null);
             setUser(null);
+            purgeUserStorage();
           } else if (userData?.user) {
             setUser(userData.user);
           }
@@ -106,13 +144,7 @@ export function AuthProvider({ children }) {
       setSession(session);
       setUser(session?.user ?? null);
       if (!session) {
-        // Clear any auth items
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && (key.includes('sb-') || key.includes('supabase') || key.includes('auth'))) {
-            localStorage.removeItem(key);
-          }
-        }
+        purgeUserStorage();
       }
     });
 
@@ -120,7 +152,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, session, loading }}>
+    <AuthContext.Provider value={{ user, session, loading, signOut }}>
       {children}
     </AuthContext.Provider>
   );

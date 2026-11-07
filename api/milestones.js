@@ -44,7 +44,9 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const { goal_id, title } = req.body ?? {};
       if (!goal_id) return res.status(400).json({ error: 'goal_id is required' });
-      if (!title?.trim()) return res.status(400).json({ error: 'title is required' });
+      if (!title?.trim() || title.trim().length > 200) {
+        return res.status(400).json({ error: 'title must be between 1 and 200 characters' });
+      }
 
       // Verify the goal belongs to this user before attaching a milestone
       const { data: goal } = await supabase
@@ -74,7 +76,9 @@ export default async function handler(req, res) {
 
       const updateFields = {};
       if (typeof title === 'string') {
-        if (!title.trim()) return res.status(400).json({ error: 'title cannot be empty' });
+        if (!title.trim() || title.trim().length > 200) {
+          return res.status(400).json({ error: 'title must be between 1 and 200 characters' });
+        }
         updateFields.title = title.trim();
       }
       if (typeof completed === 'boolean') updateFields.completed = completed;

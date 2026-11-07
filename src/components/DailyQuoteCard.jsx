@@ -11,7 +11,7 @@ function getDailyQuoteIndex() {
   return dayOfYear % MOTIVATIONAL_QUOTES.length;
 }
 
-export default function DailyQuoteCard() {
+export default function DailyQuoteCard({ className = '' }) {
   const dailyIdx = useMemo(() => getDailyQuoteIndex(), []);
   const [currentIdx, setCurrentIdx] = useState(dailyIdx);
   const [copied, setCopied] = useState(false);
@@ -40,7 +40,7 @@ export default function DailyQuoteCard() {
   const isTodayQuote = currentIdx === dailyIdx;
 
   return (
-    <div className="habiz-panel h-[260px] p-5 sm:p-6 rounded-3xl relative overflow-hidden flex flex-col justify-between group shadow-xl">
+    <div className={`habiz-panel min-h-[220px] p-5 sm:p-6 rounded-3xl relative overflow-hidden flex flex-col justify-between group shadow-xl ${className}`}>
       {/* Background Glow Overlay */}
       <div
         className="absolute -top-10 -right-10 w-36 h-36 pointer-events-none opacity-20 blur-3xl rounded-full"

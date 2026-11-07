@@ -22,8 +22,10 @@ import pushSendHandler from './api/push-send.js';
 import learningHandler from './api/learning.js';
 import accountHandler from './api/account.js';
 import seasonsHandler from './api/seasons.js';
+import aiHandler from './api/ai.js';
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || process.env.API_PORT || 3001;
 
 // ── Security Headers Middleware ──────────────────────────────────────────────
@@ -48,7 +50,8 @@ app.use((req, res, next) => {
   if (!req.path.startsWith('/api/') || req.path === '/api/health') {
     return next();
   }
-  const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  const forwarded = req.headers['x-forwarded-for'];
+  const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : null) || req.ip || req.socket?.remoteAddress || 'unknown';
   const now = Date.now();
   const record = rateLimitMap.get(ip);
 
@@ -97,10 +100,12 @@ app.all('/api/learning/*',     wrap(learningHandler));
 app.all('/api/account',        wrap(accountHandler));
 app.all('/api/seasons',        wrap(seasonsHandler));
 app.all('/api/seasons/*',      wrap(seasonsHandler));
+app.all('/api/ai',             wrap(aiHandler));
 
-// The AI module is absent and its implementation cannot be established from
-// the project sources. Do not expose a route that would make startup fail or
-// pretend to provide incomplete AI behavior.
+// ── API 404 Catch-All (Ensure JSON 404, never fallback to index.html for API) ──
+app.all('/api/*', (req, res) => {
+  res.status(404).json({ error: 'API endpoint not found' });
+});
 
 app.use(express.static(path.join(__dirname, 'dist')));
 

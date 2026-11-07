@@ -5,6 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>HabiZ — Small habits. Big shifts.</title>
     <meta name="description" content="HabiZ — Track your daily habits, set meaningful goals, and build streaks that last." />
+    <meta name="keywords" content="habit tracker, streak tracker, personal development, routine builder, learning roadmaps, habit streak, productivity" />
+    <meta name="author" content="HabiZ" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="HabiZ — Small habits. Big shifts." />
+    <meta property="og:description" content="Track daily rituals, master learning tracks, and turn consistency into second nature with HabiZ." />
+    <meta property="og:image" content="/habiz-logo-tile.png?v=4" />
+    <meta property="og:site_name" content="HabiZ" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="HabiZ — Small habits. Big shifts." />
+    <meta name="twitter:description" content="Track daily rituals, master learning tracks, and turn consistency into second nature with HabiZ." />
+    <meta name="twitter:image" content="/habiz-logo-tile.png?v=4" />
     
     <!-- PWA & Mobile Meta Tags -->
     <link rel="manifest" href="/manifest.json" />
@@ -49,12 +64,11 @@
       }
     </style>
 
-    <!-- Prevent dark-mode flash: default to dark atmosphere -->
+    <!-- HabiZ signature dark atmosphere: permanently enforce dark mode -->
     <script>
       try {
-        if (localStorage.getItem('ht-theme') !== 'light') {
-          document.documentElement.classList.add('dark');
-        }
+        localStorage.removeItem('ht-theme');
+        document.documentElement.classList.add('dark');
       } catch(e) {}
     </script>
   </head>

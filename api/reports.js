@@ -1,7 +1,7 @@
 import supabase from './db-client.js';
 import { verifyUserToken } from './auth-helper.js';
 import { applyCors } from './cors.js';
-import { getUserTimeZone, getDateInTimeZone } from './date-utils.js';
+import { getUserTimeZone, getDateInTimeZone, addDaysInTimeZone } from './date-utils.js';
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -110,21 +110,22 @@ export default async function handler(req, res) {
     }
 
     const dailyBreakdown = [];
-    const iterDate = new Date(fromDateObj);
-    while (iterDate <= toDateObj) {
-      const dStr = iterDate.toISOString().split('T')[0];
+    for (let i = 0; i < daysCount; i++) {
+      const dStr = addDaysInTimeZone(fromDate, i, timeZone);
+      if (dStr > toDate) break;
       const count = dailyMap[dStr] || 0;
       const rate = activeHabitsCount > 0 ? Math.min(100, Math.round((count / activeHabitsCount) * 100)) : 0;
-      const dayName = iterDate.toLocaleDateString('en-US', { weekday: 'short' });
-      const dayLabel = iterDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const [yr, mo, da] = dStr.split('-').map(Number);
+      const curDateUtc = new Date(Date.UTC(yr, mo - 1, da));
+      const dayName = curDateUtc.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+      const dayLabel = curDateUtc.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
       dailyBreakdown.push({
         date: dStr,
-        name: type === 'monthly' ? `${iterDate.getDate()}` : dayName,
+        name: type === 'monthly' ? `${da}` : dayName,
         label: dayLabel,
         completed: count,
         rate,
       });
-      iterDate.setDate(iterDate.getDate() + 1);
     }
 
     const { data: goals, error: goalsErr } = await supabase

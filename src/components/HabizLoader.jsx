@@ -8,6 +8,7 @@ export default function HabizLoader({
   text = 'Loading...', 
   subtext = 'Small habits. Big shifts.', 
   size = 'md', // 'sm' | 'md' | 'lg' | 'fullscreen'
+  showDots = true,
   className = '' 
 }) {
   const iconSizes = {
@@ -18,7 +19,7 @@ export default function HabizLoader({
   };
 
   const containerPadding = size === 'fullscreen' 
-    ? 'min-h-screen' 
+    ? 'min-h-screen w-full' 
     : size === 'lg' 
     ? 'min-h-[50vh]' 
     : size === 'md' 
@@ -39,15 +40,27 @@ export default function HabizLoader({
         />
       </div>
 
+      {/* Pulsing Dots */}
+      {showDots && (
+        <div className="flex items-center gap-1.5 mt-4">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="w-2 h-2 rounded-full bg-[#2dd4bf] animate-pulse"
+              style={{ animationDelay: `${i * 0.2}s` }}
+            />
+          ))}
+        </div>
+      )}
+
       {text && (
-        <div className="mt-4 flex items-center gap-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#2dd4bf] animate-ping" />
-          <span className="text-xs font-semibold text-slate-200 tracking-wide">{text}</span>
+        <div className="mt-3 flex items-center gap-2">
+          <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 tracking-wide">{text}</span>
         </div>
       )}
 
       {subtext && size !== 'sm' && (
-        <span className="mt-1 text-[11px] font-medium text-[#2dd4bf]/70 tracking-wider uppercase">
+        <span className="mt-1 text-[11px] font-medium text-teal-600 dark:text-[#2dd4bf]/80 tracking-wider uppercase">
           {subtext}
         </span>
       )}

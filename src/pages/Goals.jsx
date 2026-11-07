@@ -13,24 +13,24 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useConfetti } from '../hooks/useConfetti';
 import HabizLoader from '../components/HabizLoader';
 
-const GOALS_META_KEY = 'habit_tracker_goals_meta';
-
-function getLocalGoalsMeta() {
+function getLocalGoalsMeta(userId) {
+  if (!userId) return {};
   try {
-    return JSON.parse(localStorage.getItem(GOALS_META_KEY) || '{}');
+    return JSON.parse(localStorage.getItem(`habit_tracker_goals_meta_${userId}`) || '{}');
   } catch {
     return {};
   }
 }
 
-function saveLocalGoalsMeta(meta) {
+function saveLocalGoalsMeta(meta, userId) {
+  if (!userId) return;
   try {
-    localStorage.setItem(GOALS_META_KEY, JSON.stringify(meta));
+    localStorage.setItem(`habit_tracker_goals_meta_${userId}`, JSON.stringify(meta));
   } catch {}
 }
 
 export default function Goals() {
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const [goals, setGoals] = useState([]);
   const [milestones, setMilestones] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -73,7 +73,7 @@ export default function Goals() {
       const data = await goalsRes.json();
       const milestonesData = milestonesRes.ok ? await milestonesRes.json() : [];
 
-      const localMeta = getLocalGoalsMeta();
+      const localMeta = getLocalGoalsMeta(user?.id);
       const rawGoals = Array.isArray(data) ? data : [];
       const enrichedGoals = rawGoals.map((g) => {
         const meta = localMeta[g.id] || {};
@@ -172,7 +172,7 @@ export default function Goals() {
         const savedData = await res.json().catch(() => ({}));
         const goalId = savedData?.id || editing?.id;
         if (goalId) {
-          const localMeta = getLocalGoalsMeta();
+          const localMeta = getLocalGoalsMeta(user?.id);
           localMeta[goalId] = {
             goal_type: form.goal_type || 'Target',
             target_value: hasQty ? Number(form.target_value) : null,
@@ -182,7 +182,7 @@ export default function Goals() {
             start_date: form.start_date,
             bad_habit: Boolean(form.bad_habit),
           };
-          saveLocalGoalsMeta(localMeta);
+          saveLocalGoalsMeta(localMeta, user?.id);
         }
         setToast({ message: editing ? 'Goal updated!' : 'Goal created! 🎯', type: 'success' });
         setModalOpen(false);
@@ -210,10 +210,10 @@ export default function Goals() {
         body: JSON.stringify({ id }),
       });
       if (res.ok) {
-        const localMeta = getLocalGoalsMeta();
+        const localMeta = getLocalGoalsMeta(user?.id);
         if (localMeta[id]) {
           delete localMeta[id];
-          saveLocalGoalsMeta(localMeta);
+          saveLocalGoalsMeta(localMeta, user?.id);
         }
         setToast({ message: 'Goal deleted', type: 'success' });
         fetchGoals();
@@ -235,10 +235,10 @@ export default function Goals() {
     // Instant optimistic update
     setGoals((prev) => prev.map((g) => g.id === id ? { ...g, current_value: Number(newValue), status: newStatus } : g));
 
-    const localMeta = getLocalGoalsMeta();
+    const localMeta = getLocalGoalsMeta(user?.id);
     if (localMeta[id]) {
       localMeta[id].current_value = Number(newValue);
-      saveLocalGoalsMeta(localMeta);
+      saveLocalGoalsMeta(localMeta, user?.id);
     }
 
     try {
@@ -260,6 +260,15 @@ export default function Goals() {
           setToast({ message: 'Goal Reached! 🎉 Excellent job!', type: 'success' });
         }
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'goals' } }));
+        if (!undo) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'goal', entityId: id }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+            detail: { targetType: 'goal', entityId: id }
+          }));
+        }
       } else {
         // Rollback
         setGoals((prev) => prev.map((g) => g.id === id ? { ...g, current_value: targetGoal.current_value, status: targetGoal.status } : g));
@@ -298,6 +307,15 @@ export default function Goals() {
           setToast({ message: 'Goal reverted to In Progress.', type: 'success' });
         }
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'goals' } }));
+        if (!undo) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'goal', entityId: id }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+            detail: { targetType: 'goal', entityId: id }
+          }));
+        }
       } else {
         // Rollback on server rejection
         setGoals((prev) => prev.map((g) => g.id === id ? { ...g, status: targetGoal.status } : g));
@@ -385,6 +403,15 @@ export default function Goals() {
           setToast({ message: 'Goal completed! 🎉 All milestones done.', type: 'success' });
         }
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'goals' } }));
+        if (!undo) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'goal', entityId: id }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+            detail: { targetType: 'goal', entityId: id }
+          }));
+        }
       } else {
         // Rollback
         setMilestones((prev) => prev.map((m) => m.id === id ? { ...m, completed: !completed } : m));

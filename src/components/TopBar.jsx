@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Calendar as CalendarIcon, Search, Menu, Command } from 'lucide-react';
 import NotificationCenter from './NotificationCenter';
-import ThemeToggle from './ThemeToggle';
 import GlobalSearchModal from './GlobalSearchModal';
 
 export default function TopBar({ onOpenMobileMenu }) {
@@ -75,9 +74,8 @@ export default function TopBar({ onOpenMobileMenu }) {
             </kbd>
           </button>
 
-          {/* Notifications & Theme */}
+          {/* Notifications */}
           <NotificationCenter />
-          <ThemeToggle compact />
 
           {/* User Avatar Circle */}
           <button

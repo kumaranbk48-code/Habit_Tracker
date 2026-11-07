@@ -4,6 +4,20 @@ import './index.css';
 import App from './App.tsx';
 import { handleGoogleRedirect } from './lib/googleAuth';
 
+// ── Global API URL Adapter (Transparently maps /api to VITE_API_URL or VITE_API_BASE_URL when set) ──
+const API_BASE_URL = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+if (API_BASE_URL && typeof window !== 'undefined') {
+  const originalFetch = window.fetch;
+  window.fetch = function (input, init) {
+    if (typeof input === 'string' && input.startsWith('/api/')) {
+      input = `${API_BASE_URL}${input}`;
+    } else if (input instanceof Request && input.url.startsWith('/api/')) {
+      input = new Request(`${API_BASE_URL}${input.url}`, input);
+    }
+    return originalFetch.call(this, input, init);
+  };
+}
+
 handleGoogleRedirect();
 
 createRoot(document.getElementById('root')!).render(
@@ -13,9 +27,11 @@ createRoot(document.getElementById('root')!).render(
 );
 
 // ── Service Worker Registration ─────────────────────────────────────────────
-// In development mode (import.meta.env.DEV), unregister any active service worker
-// and clear stale caches so Vite HMR and page reloads always serve fresh code.
-if ('serviceWorker' in navigator) {
+// Disabled in native Capacitor environments where assets are loaded locally from the APK
+const isCapacitor = typeof window !== 'undefined' && 
+  (window.location.protocol === 'capacitor:' || (window as unknown as { Capacitor?: unknown }).Capacitor !== undefined);
+
+if ('serviceWorker' in navigator && !isCapacitor) {
   if (import.meta.env.DEV) {
     navigator.serviceWorker.getRegistrations().then((registrations) => {
       for (const registration of registrations) {

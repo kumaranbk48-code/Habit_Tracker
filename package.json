@@ -9,11 +9,14 @@
     "dev:server": "node server.js",
     "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:vite\"",
     "build": "tsc -b && vite build",
+    "test": "node --test tests/**/*.test.js",
     "start": "node server.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/local-notifications": "^8.3.1",
     "@supabase/supabase-js": "^2.99.1",
     "@tailwindcss/vite": "^4.2.1",
     "canvas-confetti": "^1.9.3",
@@ -32,6 +35,8 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/cli": "^8.6.0",
     "@eslint/js": "^9.39.1",
     "@types/node": "^24.13.1",
     "@types/react": "^19.2.7",

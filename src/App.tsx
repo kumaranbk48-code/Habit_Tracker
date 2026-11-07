@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
@@ -17,11 +17,16 @@ const CalendarPage = lazy(() => import('./pages/CalendarPage'));
 const Profile = lazy(() => import('./pages/Profile'));
 const LearningHubDashboard = lazy(() => import('./pages/LearningHubDashboard'));
 const LearningJourneyDetail = lazy(() => import('./pages/LearningJourneyDetail'));
+const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
+const TermsOfService = lazy(() => import('./pages/TermsOfService'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 
 import HabizLoader from './components/HabizLoader';
 
 const PageLoader = () => (
-  <HabizLoader size="lg" text="Loading HabiZ..." />
+  <div className="flex flex-col items-center justify-center min-h-screen bg-[#f7f9fa] dark:bg-[#080d12]">
+    <HabizLoader size="fullscreen" text="Loading HabiZ..." />
+  </div>
 );
 
 function App() {
@@ -32,34 +37,26 @@ function App() {
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/login" element={<Login />} />
-              <Route path="/" element={
-                <ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>
-              } />
-              <Route path="/habits" element={
-                <ProtectedRoute><Layout><Habits /></Layout></ProtectedRoute>
-              } />
-              <Route path="/learning" element={
-                <ProtectedRoute><Layout><LearningHubDashboard /></Layout></ProtectedRoute>
-              } />
-              <Route path="/learning/journey/:id" element={
-                <ProtectedRoute><Layout><LearningJourneyDetail /></Layout></ProtectedRoute>
-              } />
-              <Route path="/calendar" element={
-                <ProtectedRoute><Layout><CalendarPage /></Layout></ProtectedRoute>
-              } />
-              <Route path="/goals" element={
-                <ProtectedRoute><Layout><Goals /></Layout></ProtectedRoute>
-              } />
-              <Route path="/reminders" element={
-                <ProtectedRoute><Layout><Reminders /></Layout></ProtectedRoute>
-              } />
-              <Route path="/reports" element={
-                <ProtectedRoute><Layout><Reports /></Layout></ProtectedRoute>
-              } />
-              <Route path="/profile" element={
-                <ProtectedRoute><Layout><Profile /></Layout></ProtectedRoute>
-              } />
-              <Route path="*" element={<Navigate to="/" replace />} />
+
+              {/* Authenticated Application Routes sharing persistent Layout & Scheduler */}
+              <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/habits" element={<Habits />} />
+                <Route path="/learning" element={<LearningHubDashboard />} />
+                <Route path="/learning/journey/:id" element={<LearningJourneyDetail />} />
+                <Route path="/calendar" element={<CalendarPage />} />
+                <Route path="/goals" element={<Goals />} />
+                <Route path="/reminders" element={<Reminders />} />
+                <Route path="/reports" element={<Reports />} />
+                <Route path="/profile" element={<Profile />} />
+              </Route>
+
+              {/* Public Legal & Informational Pages */}
+              <Route path="/privacy" element={<PrivacyPolicy />} />
+              <Route path="/terms" element={<TermsOfService />} />
+              {/* 404 Not Found Catch-All */}
+              <Route path="/404" element={<NotFound />} />
+              <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>
 

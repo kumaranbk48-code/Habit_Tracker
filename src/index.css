@@ -7,10 +7,19 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
 html, body {
   background-color: #080d12;
   color: #f1f5f9;
   min-height: 100%;
+  padding-top: var(--sat);
+  padding-bottom: var(--sab);
 }
 body {
   font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">HabiZ</string>
+    <string name="title_activity_main">HabiZ</string>
+    <string name="package_name">com.habiz.app</string>
+    <string name="custom_url_scheme">com.habiz.app</string>
+</resources>
