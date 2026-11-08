@@ -5,7 +5,7 @@ import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.resolve(__dirname, '../data');
+const DATA_DIR = path.resolve(process.cwd(), 'data');
 const STORAGE_FILE = path.join(DATA_DIR, 'seasons_storage.json');
 
 function ensureDataFile() {

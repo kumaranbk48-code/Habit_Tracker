@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import supabase from '../lib/supabase';
+import { clearUserCache } from '../lib/offlineDb';
 
 const getApiBaseUrl = () => {
   const url = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL;
@@ -75,8 +76,11 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const purgeUserStorage = () => {
+  const purgeUserStorage = (currentUserId) => {
     try {
+      if (currentUserId) {
+        clearUserCache(currentUserId).catch(() => {});
+      }
       const userKeysToClear = [
         'habittracker_dismissed_alerts',
         'has_seen_learning_onboarding',
@@ -100,6 +104,7 @@ export function AuthProvider({ children }) {
   };
 
   const signOut = async () => {
+    const currentId = user?.id;
     try {
       await supabase.auth.signOut();
     } catch (e) {
@@ -107,7 +112,7 @@ export function AuthProvider({ children }) {
     } finally {
       setSession(null);
       setUser(null);
-      purgeUserStorage();
+      purgeUserStorage(currentId);
     }
   };
 
@@ -144,7 +149,7 @@ export function AuthProvider({ children }) {
       setSession(session);
       setUser(session?.user ?? null);
       if (!session) {
-        purgeUserStorage();
+        purgeUserStorage(user?.id);
       }
     });
 

@@ -1,8 +1,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { isOriginAllowed } from '../api/cors.js';
-import { verifyUserToken } from '../api/auth-helper.js';
+import { isOriginAllowed } from '../api/_routes/cors.js';
+import { verifyUserToken } from '../api/_routes/auth-helper.js';
 
 describe('Security & Authentication Controls', () => {
   test('Token Verification: Rejects empty or invalid token types', async () => {

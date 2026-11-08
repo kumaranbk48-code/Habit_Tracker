@@ -4,6 +4,7 @@ import { Menu } from 'lucide-react';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import AlarmTakeoverModal from './AlarmTakeoverModal';
+import OfflineStatusBanner from './OfflineStatusBanner';
 import { useReminderScheduler } from '../hooks/useReminderScheduler';
 
 /**
@@ -65,6 +66,7 @@ export default function Layout({ children } = {}) {
         )}
 
         <main className={`flex-1 px-3 sm:px-6 md:px-8 max-w-7xl w-full mx-auto pb-10 ${!isDashboard ? 'pt-4 sm:pt-6 md:pt-8' : ''}`}>
+          <OfflineStatusBanner />
           {children || <Outlet />}
         </main>
 

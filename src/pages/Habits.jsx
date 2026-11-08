@@ -18,6 +18,7 @@ import CustomSelect from '../components/CustomSelect';
 import SeasonManagerModal from '../components/SeasonManagerModal';
 import SeasonReviewModal from '../components/SeasonReviewModal';
 import HabizLoader from '../components/HabizLoader';
+import { saveCachedData, getCachedData, enqueueOfflineAction } from '../lib/offlineDb';
 
 const PRESET_COLORS = ['#3d7a75', '#6b8e6a', '#c99a52', '#b3574f', '#7570ab', '#b6708f', '#4a95a3', '#6b7785'];
 
@@ -34,7 +35,7 @@ const CATEGORY_BADGES = {
 };
 
 export default function Habits() {
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const navigate = useNavigate();
   const [habits, setHabits] = useState([]);
   const [tracking, setTracking] = useState([]);
@@ -111,16 +112,45 @@ export default function Habits() {
       setTracking(t);
       setActiveSeason(seasonsData?.activeSeason || null);
 
+      if (user?.id) {
+        saveCachedData(user.id, 'habits', h);
+        saveCachedData(user.id, 'tracking', t, today);
+        if (seasonsData) saveCachedData(user.id, 'seasons', seasonsData);
+      }
+
       const activeHabitsCount = h.filter(item => item.status !== 'paused').length;
       const completed = t.filter((r) => r.status === true).length;
       setPerfectDay(activeHabitsCount > 0 && completed >= activeHabitsCount);
     } catch (err) {
-      console.error(err);
-      setFetchError('Network error — check your connection.');
+      console.warn('[Habits] Network error, reading cached habits from IndexedDB:', err);
+      if (user?.id) {
+        try {
+          const [cachedHabits, cachedTracking, cachedSeasons] = await Promise.all([
+            getCachedData(user.id, 'habits'),
+            getCachedData(user.id, 'tracking', today),
+            getCachedData(user.id, 'seasons'),
+          ]);
+          if (cachedHabits) {
+            const h = Array.isArray(cachedHabits) ? cachedHabits : [];
+            const t = Array.isArray(cachedTracking) ? cachedTracking : [];
+            setHabits(h);
+            setTracking(t);
+            setActiveSeason(cachedSeasons?.activeSeason || null);
+            const activeHabitsCount = h.filter(item => item.status !== 'paused').length;
+            const completed = t.filter((r) => r.status === true).length;
+            setPerfectDay(activeHabitsCount > 0 && completed >= activeHabitsCount);
+            setFetchError('');
+            return;
+          }
+        } catch (cacheErr) {
+          console.warn('[Habits] Failed to load offline cache:', cacheErr);
+        }
+      }
+      setFetchError('Offline — viewing cached habits.');
     } finally {
       setLoading(false);
     }
-  }, [session, today]);
+  }, [session, user?.id, today]);
 
   const handleTogglePause = async (habit) => {
     const newStatus = habit.status === 'paused' ? 'active' : 'paused';
@@ -337,7 +367,11 @@ export default function Habits() {
       });
       if (res.ok) {
         const saved = await res.json();
-        setTracking((prev) => prev.map((t) => t.habit_id === habitId ? { ...t, ...saved } : t));
+        setTracking((prev) => {
+          const updated = prev.map((t) => t.habit_id === habitId ? { ...t, ...saved } : t);
+          if (user?.id) saveCachedData(user.id, 'tracking', updated, today);
+          return updated;
+        });
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
         if (newStatus) {
           window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
@@ -354,8 +388,21 @@ export default function Habits() {
         setToast({ message: errJson.error || 'Could not save habit status. Reverted change.', type: 'error' });
       }
     } catch {
-      setTracking(previousTracking);
-      setToast({ message: 'Network connection error — could not save progress.', type: 'error' });
+      // Offline / Network Failure: preserve optimistic tracking and enqueue action
+      if (user?.id) {
+        await saveCachedData(user.id, 'tracking', updatedTracking, today);
+        await enqueueOfflineAction(user.id, 'TRACK_HABIT', { habit_id: habitId, completion_date: today, status: newStatus });
+      }
+      setToast({ message: 'Saved offline. Changes will sync when reconnected.', type: 'info' });
+      if (newStatus) {
+        window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+          detail: { targetType: 'habit', entityId: habitId, date: today }
+        }));
+      } else {
+        window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+          detail: { targetType: 'habit', entityId: habitId, date: today }
+        }));
+      }
     }
   };
 
@@ -400,7 +447,11 @@ export default function Habits() {
       });
       if (res.ok) {
         const saved = await res.json();
-        setTracking((prev) => prev.map((t) => t.habit_id === habitId ? { ...t, ...saved } : t));
+        setTracking((prev) => {
+          const updated = prev.map((t) => t.habit_id === habitId ? { ...t, ...saved } : t);
+          if (user?.id) saveCachedData(user.id, 'tracking', updated, today);
+          return updated;
+        });
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
         if (newStatus) {
           window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
@@ -417,8 +468,28 @@ export default function Habits() {
         setToast({ message: errJson.error || 'Failed to update progress. Reverted.', type: 'error' });
       }
     } catch {
-      setTracking(previousTracking);
-      setToast({ message: 'Network error — check your connection.', type: 'error' });
+      // Offline / Network Failure: preserve optimistic tracking and enqueue action
+      if (user?.id) {
+        await saveCachedData(user.id, 'tracking', updatedTracking, today);
+        await enqueueOfflineAction(user.id, 'TRACK_HABIT', {
+          habit_id: habitId,
+          completion_date: today,
+          action: reset ? 'reset' : 'add',
+          amount: reset ? undefined : amount,
+          quantity_completed: newQty,
+          status: newStatus,
+        });
+      }
+      setToast({ message: 'Saved offline. Changes will sync when reconnected.', type: 'info' });
+      if (newStatus) {
+        window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+          detail: { targetType: 'habit', entityId: habitId, date: today }
+        }));
+      } else {
+        window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+          detail: { targetType: 'habit', entityId: habitId, date: today }
+        }));
+      }
     }
   };
 

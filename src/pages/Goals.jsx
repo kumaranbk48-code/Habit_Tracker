@@ -12,6 +12,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useConfetti } from '../hooks/useConfetti';
 import HabizLoader from '../components/HabizLoader';
+import { saveCachedData, getCachedData, enqueueOfflineAction } from '../lib/offlineDb';
 
 function getLocalGoalsMeta(userId) {
   if (!userId) return {};
@@ -91,13 +92,34 @@ export default function Goals() {
 
       setGoals(enrichedGoals);
       setMilestones(Array.isArray(milestonesData) ? milestonesData : []);
+
+      if (user?.id) {
+        saveCachedData(user.id, 'goals', enrichedGoals);
+        saveCachedData(user.id, 'milestones', milestonesData);
+      }
     } catch (err) {
-      console.error(err);
-      setFetchError('Network error — check your connection.');
+      console.warn('[Goals] Network error, reading cached goals from IndexedDB:', err);
+      if (user?.id) {
+        try {
+          const [cachedGoals, cachedMilestones] = await Promise.all([
+            getCachedData(user.id, 'goals'),
+            getCachedData(user.id, 'milestones'),
+          ]);
+          if (cachedGoals) {
+            setGoals(Array.isArray(cachedGoals) ? cachedGoals : []);
+            setMilestones(Array.isArray(cachedMilestones) ? cachedMilestones : []);
+            setFetchError('');
+            return;
+          }
+        } catch (cacheErr) {
+          console.warn('[Goals] Failed to read cache:', cacheErr);
+        }
+      }
+      setFetchError('Offline — viewing cached goals.');
     } finally {
       setLoading(false);
     }
-  }, [session]);
+  }, [session, user?.id]);
 
   useEffect(() => {
     if (session) fetchGoals();
@@ -260,22 +282,36 @@ export default function Goals() {
           setToast({ message: 'Goal Reached! 🎉 Excellent job!', type: 'success' });
         }
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'goals' } }));
-        if (!undo) {
+        if (isCompleted) {
           window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
             detail: { targetType: 'goal', entityId: id }
           }));
-        } else {
-          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
-            detail: { targetType: 'goal', entityId: id }
-          }));
+        }
+        if (user?.id) {
+          saveCachedData(user.id, 'goals', goals.map((g) => g.id === id ? { ...g, current_value: Number(newValue), status: newStatus } : g));
         }
       } else {
-        // Rollback
+        // Rollback on server rejection
         setGoals((prev) => prev.map((g) => g.id === id ? { ...g, current_value: targetGoal.current_value, status: targetGoal.status } : g));
       }
-    } catch (err) {
-      console.error(err);
-      setGoals((prev) => prev.map((g) => g.id === id ? { ...g, current_value: targetGoal.current_value, status: targetGoal.status } : g));
+    } catch {
+      // Offline / Network Failure: keep optimistic progress and enqueue action
+      const updatedGoals = goals.map((g) => g.id === id ? { ...g, current_value: Number(newValue), status: newStatus } : g);
+      if (user?.id) {
+        await saveCachedData(user.id, 'goals', updatedGoals);
+        await enqueueOfflineAction(user.id, 'UPDATE_GOAL', {
+          id,
+          goal_name: targetGoal?.goal_name,
+          current_value: Number(newValue),
+          status: newStatus,
+        });
+      }
+      setToast({ message: 'Saved offline. Progress will sync when reconnected.', type: 'info' });
+      if (isCompleted) {
+        window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+          detail: { targetType: 'goal', entityId: id }
+        }));
+      }
     }
   };
 
@@ -316,6 +352,9 @@ export default function Goals() {
             detail: { targetType: 'goal', entityId: id }
           }));
         }
+        if (user?.id) {
+          saveCachedData(user.id, 'goals', goals.map((g) => g.id === id ? { ...g, status: newStatus } : g));
+        }
       } else {
         // Rollback on server rejection
         setGoals((prev) => prev.map((g) => g.id === id ? { ...g, status: targetGoal.status } : g));
@@ -323,9 +362,26 @@ export default function Goals() {
         setToast({ message: errData.error || 'Failed to update goal.', type: 'error' });
       }
     } catch {
-      // Rollback on network failure
-      setGoals((prev) => prev.map((g) => g.id === id ? { ...g, status: targetGoal.status } : g));
-      setToast({ message: 'Network error — check your connection.', type: 'error' });
+      // Offline / Network Failure: keep optimistic progress and enqueue action
+      const updatedGoals = goals.map((g) => g.id === id ? { ...g, status: newStatus } : g);
+      if (user?.id) {
+        await saveCachedData(user.id, 'goals', updatedGoals);
+        await enqueueOfflineAction(user.id, 'UPDATE_GOAL', {
+          id,
+          goal_name: targetGoal.goal_name,
+          status: newStatus,
+        });
+      }
+      setToast({ message: 'Saved offline. Changes will sync when reconnected.', type: 'info' });
+      if (!undo) {
+        window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+          detail: { targetType: 'goal', entityId: id }
+        }));
+      } else {
+        window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+          detail: { targetType: 'goal', entityId: id }
+        }));
+      }
     }
   };
 

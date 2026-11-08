@@ -23,8 +23,14 @@ function apiMiddleware(): Plugin {
         if (!req.url?.startsWith('/api/')) return next();
 
         const urlObj = new URL(req.url, 'http://localhost');
-        const apiName = urlObj.pathname.replace(/^\/api\//, '');
-        const apiFile = path.resolve(process.cwd(), 'api', `${apiName}.js`);
+        const apiName = urlObj.pathname.replace(/^\/api\//, '').split('/')[0];
+        let apiFile = path.resolve(process.cwd(), 'api', '_routes', `${apiName}.js`);
+        let modPath = `./api/_routes/${apiName}.js`;
+
+        if (!fs.existsSync(apiFile)) {
+          apiFile = path.resolve(process.cwd(), 'api', `${apiName}.js`);
+          modPath = `./api/${apiName}.js`;
+        }
 
         if (!fs.existsSync(apiFile)) {
           return next();
@@ -73,7 +79,7 @@ function apiMiddleware(): Plugin {
           };
 
           // Dynamically load the module so edits are immediately reflected
-          const mod = await server.ssrLoadModule(`./api/${apiName}.js`);
+          const mod = await server.ssrLoadModule(modPath);
           const handler = mod.default || mod;
           await handler(customReq, customRes);
         } catch (err: unknown) {

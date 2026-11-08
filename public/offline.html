@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>HabiZ — Offline Mode</title>
+    <meta name="theme-color" content="#0a0f14" />
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        min-height: 100vh;
+        background-color: #080d12;
+        color: #f1f5f9;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        text-align: center;
+        background-image: radial-gradient(circle at 50% 20%, rgba(45, 212, 191, 0.08) 0%, transparent 60%);
+      }
+      .card {
+        background: #0f1721;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 24px;
+        padding: 36px 28px;
+        max-width: 420px;
+        width: 100%;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+      }
+      .logo-icon {
+        width: 64px;
+        height: 64px;
+        margin-bottom: 20px;
+        filter: drop-shadow(0 0 20px rgba(45, 212, 191, 0.35));
+      }
+      h1 {
+        font-size: 22px;
+        font-weight: 700;
+        color: #ffffff;
+        margin-bottom: 8px;
+        letter-spacing: -0.02em;
+      }
+      .badge {
+        display: inline-block;
+        background: rgba(45, 212, 191, 0.12);
+        color: #2dd4bf;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        padding: 4px 12px;
+        border-radius: 100px;
+        border: 1px solid rgba(45, 212, 191, 0.25);
+        margin-bottom: 16px;
+      }
+      p {
+        font-size: 14px;
+        line-height: 1.6;
+        color: #94a3b8;
+        margin-bottom: 24px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        padding: 13px 20px;
+        background: #178274;
+        color: #ffffff;
+        font-size: 14px;
+        font-weight: 600;
+        border-radius: 14px;
+        border: none;
+        cursor: pointer;
+        transition: background 0.2s, transform 0.1s;
+        box-shadow: 0 4px 14px rgba(19, 138, 120, 0.35);
+      }
+      .btn:hover {
+        background: #136c60;
+      }
+      .btn:active {
+        transform: scale(0.98);
+      }
+      .hint {
+        margin-top: 18px;
+        font-size: 12px;
+        color: #64748b;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <img src="/habiz-logo.png" alt="HabiZ" class="logo-icon" />
+      <div class="badge">Offline Mode</div>
+      <h1>Connection Lost</h1>
+      <p>
+        HabiZ works offline. You can return to your cached dashboard or habits, and any changes will automatically synchronize when your internet connection is restored.
+      </p>
+      <button class="btn" onclick="retryConnection()">
+        Back to Dashboard
+      </button>
+      <div class="hint">
+        Once reconnected, your streaks and progress will automatically update.
+      </div>
+    </div>
+
+    <script>
+      function retryConnection() {
+        if (navigator.onLine) {
+          window.location.href = '/';
+        } else {
+          fetch('/api/health', { method: 'GET', cache: 'no-store' })
+            .then(function(res) {
+              if (res.ok) {
+                window.location.href = '/';
+              } else {
+                alert('Still offline. Please check your network connection.');
+              }
+            })
+            .catch(function() {
+              window.location.href = '/';
+            });
+        }
+      }
+
+      window.addEventListener('online', function() {
+        window.location.href = '/';
+      });
+    </script>
+  </body>
+</html>
+

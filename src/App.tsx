@@ -4,6 +4,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import PWAInstallBanner from './components/PWAInstallBanner';
+import PWAUpdateNotification from './components/PWAUpdateNotification';
 
 import ErrorBoundary from './components/ErrorBoundary';
 
@@ -60,7 +61,8 @@ function App() {
             </Routes>
           </Suspense>
 
-          {/* PWA install prompt — floats above all content, only appears when installable */}
+          {/* PWA update notification & install prompt */}
+          <PWAUpdateNotification />
           <PWAInstallBanner />
         </BrowserRouter>
       </AuthProvider>

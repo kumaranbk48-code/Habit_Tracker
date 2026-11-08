@@ -1,90 +1,121 @@
 // ─── HabitTracker Service Worker ──────────────────────────────────────────────
-// Handles: offline caching, push notifications, notification click routing
-// Version bump forces browsers to install the updated SW
-const SW_VERSION = 'habittracker-v6';
+// Handles: offline application shell caching, push notifications, local timer reminders,
+// notification click routing, and background sync triggers.
+const SW_VERSION = 'habittracker-pwa-v1';
 const STATIC_CACHE = `${SW_VERSION}-static`;
 
-// Files to pre-cache for offline use
-const PRECACHE_ASSETS = ['/', '/index.html', '/manifest.json'];
+// Core Application Shell assets pre-cached on install
+const PRECACHE_ASSETS = [
+  '/',
+  '/index.html',
+  '/offline.html',
+  '/manifest.json',
+  '/favicon.svg',
+  '/habiz-logo.png',
+  '/habiz-logo-tile.png',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/icon-maskable-512.png',
+];
 
 // ── Install ───────────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(STATIC_CACHE)
-      .then(cache => cache.addAll(PRECACHE_ASSETS))
-      .then(() => self.skipWaiting()) // activate immediately
+      .then((cache) => {
+        return Promise.allSettled(
+          PRECACHE_ASSETS.map((asset) =>
+            fetch(asset, { cache: 'no-cache' })
+              .then((res) => {
+                if (res.ok) return cache.put(asset, res);
+                return null;
+              })
+              .catch(() => null)
+          )
+        );
+      })
+      .then(() => self.skipWaiting())
   );
 });
 
 // ── Activate ──────────────────────────────────────────────────────────────────
 self.addEventListener('activate', (event) => {
-  const isLocalhost = Boolean(
-    self.location.hostname === 'localhost' ||
-    self.location.hostname === '[::1]' ||
-    self.location.hostname.match(/^127(?:\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}$/)
-  );
-
   event.waitUntil(
-    caches.keys().then(keys =>
+    caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter(k => isLocalhost || k !== STATIC_CACHE)
-          .map(k => caches.delete(k))
+          .filter((k) => k !== STATIC_CACHE)
+          .map((k) => caches.delete(k))
       )
-    ).then(() => self.clients.claim()) // take control of all open tabs
+    ).then(() => self.clients.claim())
   );
 });
 
 // ── Fetch Strategy ─────────────────────────────────────────────────────────────
-// Localhost: Bypass caching/intercepting to prevent stale assets in development
-// Navigation: Network-first → fallback to cache
-// Static assets: Cache-first → fallback to network
-// API requests: NEVER cached or intercepted — go straight to network
+// - Navigation requests (HTML): Network-First → Cache Fallback (/index.html) → /offline.html
+// - Static assets (JS, CSS, images, fonts): Cache-First → Network Fallback
+// - Sensitive API requests (/api/*): NEVER cached in Cache API
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Bypass service worker caching/intercepting on localhost to prevent stale asset issues in local development
-  const isLocalhost = Boolean(
-    self.location.hostname === 'localhost' ||
-    self.location.hostname === '[::1]' ||
-    self.location.hostname.match(/^127(?:\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}$/)
-  );
-  if (isLocalhost) return;
-
-  // Don't intercept non-GET, external requests, or authenticated API calls
+  // 1. Only intercept GET requests
   if (request.method !== 'GET') return;
-  if (url.pathname.startsWith('/api/')) return;
-  if (!url.origin.startsWith(self.location.origin)) return;
 
+  // 2. Strict Security: NEVER cache or intercept sensitive API endpoints
+  if (url.pathname.startsWith('/api/')) return;
+
+  const isSameOrigin = url.origin === self.location.origin;
+  const isGoogleFont = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';
+
+  if (!isSameOrigin && !isGoogleFont) return;
+
+  // 3. Navigation requests (Opening pages or switching routes)
   if (request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {
-    // Network-first for navigation requests (HTML pages) so changes show up immediately when online
     event.respondWith(
       fetch(request)
-        .then(response => {
-          if (response.ok) {
+        .then((response) => {
+          if (response && response.ok) {
             const clone = response.clone();
-            caches.open(STATIC_CACHE).then(c => c.put(request, clone));
+            caches.open(STATIC_CACHE).then((cache) => cache.put(request, clone));
           }
           return response;
         })
-        .catch(() => caches.match(request).then(cached => cached || caches.match('/index.html') || caches.match('/')))
+        .catch(async () => {
+          const cached = await caches.match(request);
+          if (cached) return cached;
+          const indexHtml = await caches.match('/index.html');
+          if (indexHtml) return indexHtml;
+          const rootCached = await caches.match('/');
+          if (rootCached) return rootCached;
+          const offlinePage = await caches.match('/offline.html');
+          if (offlinePage) return offlinePage;
+          return new Response('Offline', { status: 503, statusText: 'Offline' });
+        })
     );
-  } else {
-    // Cache-first for other static assets (JS, CSS, images, etc.)
-    event.respondWith(
-      caches.match(request).then(cached => {
-        if (cached) return cached;
-        return fetch(request).then(response => {
-          if (response.ok && response.type === 'basic') {
-            const clone = response.clone();
-            caches.open(STATIC_CACHE).then(c => c.put(request, clone));
-          }
-          return response;
-        });
-      })
-    );
+    return;
   }
+
+  // 4. Static assets (JS bundles, CSS, icons, images, web fonts)
+  event.respondWith(
+    caches.match(request).then((cachedResponse) => {
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+      return fetch(request).then((networkResponse) => {
+        if (networkResponse && networkResponse.ok && (networkResponse.type === 'basic' || networkResponse.type === 'cors')) {
+          const clone = networkResponse.clone();
+          caches.open(STATIC_CACHE).then((cache) => cache.put(request, clone));
+        }
+        return networkResponse;
+      }).catch(async () => {
+        // Return matching asset from cache if available under alternate path
+        const fallback = await caches.match(url.pathname);
+        if (fallback) return fallback;
+        return new Response('', { status: 408, statusText: 'Request Timed Out / Offline' });
+      });
+    })
+  );
 });
 
 // ── Push Notifications ─────────────────────────────────────────────────────────
@@ -238,6 +269,11 @@ self.addEventListener('notificationclick', (event) => {
 const scheduledTimers = new Map();
 
 self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+    return;
+  }
+
   if (event.data?.type === 'SCHEDULE_LOCAL_REMINDERS') {
     const reminders = event.data.reminders || [];
 

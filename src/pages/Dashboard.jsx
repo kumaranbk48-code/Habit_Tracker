@@ -25,6 +25,7 @@ import HabizLoader          from '../components/HabizLoader';
 import { useConfetti } from '../hooks/useConfetti';
 import { calculateXP, checkNewBadges, calculateCategoryStreaks } from '../hooks/useGamification';
 import { calculateOverallHabitStrength, getStrengthBadge } from '../lib/habitStrength';
+import { saveCachedData, getCachedData, enqueueOfflineAction } from '../lib/offlineDb';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const StatCard = ({ label, value, icon: Icon, colorClass, bgClass, children, onClick }) => (
@@ -162,6 +163,17 @@ export default function Dashboard() {
       setActiveSeason(seasonsData?.activeSeason || null);
       setSeasonsList(seasonsData?.seasons || []);
 
+      // Persist to offline IndexedDB for seamless offline opening
+      if (user?.id) {
+        saveCachedData(user.id, 'dashboard', statsData);
+        saveCachedData(user.id, 'heatmap', heatmapData);
+        saveCachedData(user.id, 'habits', habitsData);
+        saveCachedData(user.id, 'tracking', trackingData);
+        saveCachedData(user.id, 'goals', goalsData);
+        saveCachedData(user.id, 'milestones', milestonesData);
+        if (seasonsData) saveCachedData(user.id, 'seasons', seasonsData);
+      }
+
       // Phase 5: Daily/Weekly/Monthly mastery streaks, computed from the same
       // data already fetched above — no extra network calls needed.
       const streaks = calculateCategoryStreaks(
@@ -182,12 +194,40 @@ export default function Dashboard() {
       const streak = statsData.currentStreak ?? 0;
       prevStreak.current = streak;
     } catch (err) {
-      console.error(err);
-      setFetchError('Network error — check your connection.');
+      console.warn('[Dashboard] Network fetch failed, falling back to cached offline data:', err);
+      if (user?.id) {
+        try {
+          const [cachedStats, cachedHeatmap, cachedHabits, cachedTracking, cachedGoals, cachedMilestones, cachedSeasons] = await Promise.all([
+            getCachedData(user.id, 'dashboard'),
+            getCachedData(user.id, 'heatmap'),
+            getCachedData(user.id, 'habits'),
+            getCachedData(user.id, 'tracking'),
+            getCachedData(user.id, 'goals'),
+            getCachedData(user.id, 'milestones'),
+            getCachedData(user.id, 'seasons'),
+          ]);
+
+          if (cachedStats || cachedHabits) {
+            setStats(cachedStats || null);
+            setHeatmap(cachedHeatmap || { data: {}, totalHabits: 0 });
+            setHabitsList(Array.isArray(cachedHabits) ? cachedHabits : []);
+            setAllTracking(Array.isArray(cachedTracking) ? cachedTracking : []);
+            setGoalsList(Array.isArray(cachedGoals) ? cachedGoals : []);
+            setMilestonesList(Array.isArray(cachedMilestones) ? cachedMilestones : []);
+            setActiveSeason(cachedSeasons?.activeSeason || null);
+            setSeasonsList(cachedSeasons?.seasons || []);
+            setFetchError('');
+            return;
+          }
+        } catch (cacheErr) {
+          console.warn('[Dashboard] Error reading offline cache:', cacheErr);
+        }
+      }
+      setFetchError('Offline — viewing cached information.');
     } finally {
       setLoading(false);
     }
-  }, [session, fetchAchievements, saveNewBadges]);
+  }, [session, user?.id, fetchAchievements, saveNewBadges]);
 
   useEffect(() => {
     if (session) fetchAll();
@@ -300,9 +340,11 @@ export default function Dashboard() {
         if (saved && saved.habit_id) {
           setAllTracking(prev => {
             const has = prev.some(t => t.habit_id === saved.habit_id && t.completion_date === saved.completion_date);
-            return has
+            const updated = has
               ? prev.map(t => (t.habit_id === saved.habit_id && t.completion_date === saved.completion_date ? { ...t, ...saved } : t))
               : [...prev, saved];
+            if (user?.id) saveCachedData(user.id, 'tracking', updated);
+            return updated;
           });
         }
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'dashboard' } }));
@@ -316,14 +358,27 @@ export default function Dashboard() {
           }));
         }
       } else {
-        // Rollback on server error
+        // Rollback only on hard server error
         setAllTracking(prevTracking);
         setStats(prevStats);
+        setToast({ message: 'Server rejected update. Reverting change.', type: 'error' });
       }
     } catch {
-      // Rollback on network failure
-      setAllTracking(prevTracking);
-      setStats(prevStats);
+      // Network failure / Offline: Keep optimistic state, save in IndexedDB & queue action
+      if (user?.id) {
+        await saveCachedData(user.id, 'tracking', nextTracking);
+        await enqueueOfflineAction(user.id, 'TRACK_HABIT', body);
+      }
+      setToast({ message: 'Saved offline. Changes will sync when reconnected.', type: 'info' });
+      if (newStatus) {
+        window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+          detail: { targetType: 'habit', entityId: habit.id, date: today }
+        }));
+      } else {
+        window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+          detail: { targetType: 'habit', entityId: habit.id, date: today }
+        }));
+      }
     }
   };
 

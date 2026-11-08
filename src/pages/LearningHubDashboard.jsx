@@ -12,10 +12,11 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import HabizLoader from '../components/HabizLoader';
+import { saveCachedData, getCachedData } from '../lib/offlineDb';
 import { LEARNING_FILTER_CATEGORIES, matchesLearningCategory } from '../constants/learningCategories';
 
 export default function LearningHubDashboard() {
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
@@ -51,6 +52,9 @@ export default function LearningHubDashboard() {
       if (res.ok) {
         const json = await res.json();
         setData(json);
+        if (user?.id) {
+          saveCachedData(user.id, 'learning_hub', json);
+        }
         // Show onboarding only once when user first visits and has no journeys
         try {
           const hasSeen = localStorage.getItem('has_seen_learning_onboarding');
@@ -70,14 +74,26 @@ export default function LearningHubDashboard() {
         return false;
       }
     } catch (err) {
-      console.error(err);
-      setFetchError('Network error');
+      console.warn('[LearningHub] Network error, reading cached journeys from IndexedDB:', err);
+      if (user?.id) {
+        try {
+          const cached = await getCachedData(user.id, 'learning_hub');
+          if (cached) {
+            setData(cached);
+            setFetchError('');
+            return true;
+          }
+        } catch (cacheErr) {
+          console.warn('[LearningHub] Cache error:', cacheErr);
+        }
+      }
+      setFetchError('Offline — viewing cached learning paths');
       return false;
     } finally {
       initialLoadDone.current = true;
       setLoading(false);
     }
-  }, [session]);
+  }, [session, user?.id]);
 
   useEffect(() => {
     if (session) {

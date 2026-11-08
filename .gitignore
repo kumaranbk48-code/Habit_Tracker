@@ -45,3 +45,6 @@ scratch/
 Thumbs.db
 Desktop.ini
 
+# Android binaries
+*.apk
+

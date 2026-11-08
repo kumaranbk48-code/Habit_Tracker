@@ -14,6 +14,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import HabizLoader from '../components/HabizLoader';
+import { saveCachedData, getCachedData } from '../lib/offlineDb';
 import {
   isNative,
   scheduleSingleNativeReminder,
@@ -42,7 +43,7 @@ function format12Hour(time24) {
 }
 
 export default function Reminders() {
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const location = useLocation();
 
   const [reminders, setReminders] = useState([]);
@@ -141,6 +142,10 @@ export default function Reminders() {
       setGoals(g);
       setJourneys(j);
 
+      if (user?.id) {
+        saveCachedData(user.id, 'reminders', r);
+      }
+
       const activeReminders = r
         .filter((rem) => {
           const s = (rem.notification_status || 'active').toLowerCase();
@@ -164,12 +169,24 @@ export default function Reminders() {
       scheduleLocalReminders(activeReminders);
       window.dispatchEvent(new CustomEvent('habittracker-reminders-updated'));
     } catch (err) {
-      console.error(err);
-      setFetchError('Network error — check your connection.');
+      console.warn('[Reminders] Network error, reading cached reminders from IndexedDB:', err);
+      if (user?.id) {
+        try {
+          const cached = await getCachedData(user.id, 'reminders');
+          if (cached && Array.isArray(cached)) {
+            setReminders(cached);
+            setFetchError('');
+            return;
+          }
+        } catch (cacheErr) {
+          console.warn('[Reminders] Cache read error:', cacheErr);
+        }
+      }
+      setFetchError('Offline — viewing cached reminders.');
     } finally {
       setLoading(false);
     }
-  }, [session, scheduleLocalReminders]);
+  }, [session, user?.id, scheduleLocalReminders]);
 
   useEffect(() => {
     fetchData();
