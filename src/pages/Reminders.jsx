@@ -427,6 +427,9 @@ export default function Reminders() {
           type: 'success',
         });
         fetchData();
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setToast({ message: errJson.error || 'Failed to update reminder status.', type: 'error' });
       }
     } catch (err) {
       console.error(err);

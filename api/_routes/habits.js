@@ -16,15 +16,30 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
-      const { data, error } = await supabase
+      const rawLimit = parseInt(req.query?.limit, 10);
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 1000) : 1000;
+      const rawPage = parseInt(req.query?.page, 10);
+      const rawOffset = parseInt(req.query?.offset, 10);
+      const offset = Number.isFinite(rawOffset) && rawOffset >= 0
+        ? rawOffset
+        : (Number.isFinite(rawPage) && rawPage > 0 ? (rawPage - 1) * limit : 0);
+
+      const { data, error, count } = await supabase
         .from('habits')
-        .select('*')
+        .select('*', { count: 'exact' })
         .eq('user_id', user_id)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
 
       if (error) {
         console.error('[/api/habits] GET error:', error);
         return res.status(500).json({ error: 'Failed to retrieve habits' });
+      }
+
+      if (count !== null && count !== undefined) {
+        res.setHeader('X-Total-Count', String(count));
+        res.setHeader('X-Limit', String(limit));
+        res.setHeader('X-Offset', String(offset));
       }
 
       const sanitized = (data ?? []).map(h => ({

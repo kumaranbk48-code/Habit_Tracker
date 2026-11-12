@@ -1,9 +1,18 @@
 // Weekly Email Digest
-// Triggered by cron-job.org (free): GET /api/digest?secret=YOUR_CRON_SECRET
+// Triggered by cron: header X-Cron-Secret: YOUR_CRON_SECRET
 // Uses Resend free tier (3,000 emails/month — more than enough).
+import crypto from 'crypto';
 import { Resend } from 'resend';
 import supabase from './db-client.js';
 import { applyCors } from './cors.js';
+
+function safeCompare(a, b) {
+  if (!a || !b || typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 let resendClient = null;
 function getResend() {
@@ -119,9 +128,10 @@ function buildEmailHtml({ displayName, streak, longestStreak, completionsThisWee
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
 
-  // Secure the endpoint
-  const secret = req.headers['x-cron-secret'] || req.query.secret;
-  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+  // Secure the endpoint (header-only, timing-safe comparison)
+  const providedSecret = req.headers['x-cron-secret'];
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret || !safeCompare(providedSecret, cronSecret)) {
     return res.status(401).json({ error: 'Unauthorized — invalid or missing cron secret' });
   }
 
@@ -204,7 +214,8 @@ export default async function handler(req, res) {
           sent++;
         }
       } catch (err) {
-        errors.push({ userId, error: err.message });
+        console.error(`[/api/digest] Error processing user ${userId}:`, err);
+        errors.push({ userId, error: 'Failed to process digest for user' });
       }
     }
 
@@ -212,6 +223,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ sent, total: userIds.length, errors });
   } catch (err) {
     console.error('[/api/digest] error:', err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'Internal server error generating digest' });
   }
 }

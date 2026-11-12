@@ -1,6 +1,7 @@
 package com.habiz.app.alarm
 
 import android.app.AlarmManager
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -11,6 +12,7 @@ import android.util.Log
 import com.habiz.app.MainActivity
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Calendar
 import java.util.Date
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -32,8 +34,22 @@ object NativeAlarmScheduler {
     private const val KEY_ALARMS_LEGACY = "active_alarms"
     private const val KEY_DISMISSED = "dismissed_alarms"
     private const val KEY_COMPLETED_HABITS = "completed_habits_map"
+    private const val COMPLETED_HABITS_RETENTION_DAYS = 7
+    private val prefsLock = Any()
     private const val KEY_COMPLETED_GOALS = "completed_goals_set"
     private const val KEY_COMPLETED_LEARNING = "completed_learning_set"
+
+    /**
+     * Replicates the exact hashStringToId algorithm from src/lib/nativeNotifications.js
+     * Ensures native alarm IDs and JavaScript alarm IDs match 100% deterministically.
+     */
+    fun hashStringToId(str: String): Int {
+        var hash = 0
+        for (i in 0 until str.length) {
+            hash = ((hash shl 5) - hash) + str[i].code
+        }
+        return (Math.abs(hash.toLong()) % 2000000000L).toInt() + 1
+    }
 
     /**
      * Check if an activity has already been completed.
@@ -75,33 +91,62 @@ object NativeAlarmScheduler {
     }
 
     /**
+     * Prune completed-habit entries older than retentionDays (yyyy-MM-dd suffix)
+     * so KEY_COMPLETED_HABITS does not grow unbounded over time (G-15).
+     */
+    private fun pruneCompletedHabits(entries: Set<String>, retentionDays: Int = COMPLETED_HABITS_RETENTION_DAYS): MutableSet<String> {
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val cutoffCal = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_YEAR, -retentionDays)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val cutoffDateStr = dateFormat.format(cutoffCal.time)
+
+        val pruned = mutableSetOf<String>()
+        for (entry in entries) {
+            val sepIdx = entry.lastIndexOf(':')
+            if (sepIdx <= 0 || sepIdx >= entry.length - 1) continue
+            val entryDate = entry.substring(sepIdx + 1)
+            if (entryDate.length == 10 && entryDate >= cutoffDateStr) {
+                pruned.add(entry)
+            }
+        }
+        return pruned
+    }
+
+    /**
      * Record completion of an entity and immediately cancel any pending snooze alarms for it.
      */
     fun saveCompletedEntity(context: Context, targetType: String, entityId: String, dateStr: String) {
         if (entityId.isEmpty()) return
-        val prefs = getPrefs(context)
-        val editor = prefs.edit()
-        val type = (if (targetType.isEmpty()) "habit" else targetType).lowercase()
+        synchronized(prefsLock) {
+            val prefs = getPrefs(context)
+            val editor = prefs.edit()
+            val type = (if (targetType.isEmpty()) "habit" else targetType).lowercase()
 
-        when (type) {
-            "habit" -> {
-                val habitsSet = prefs.getStringSet(KEY_COMPLETED_HABITS, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-                habitsSet.add("$entityId:$dateStr")
-                editor.putStringSet(KEY_COMPLETED_HABITS, habitsSet)
+            when (type) {
+                "habit" -> {
+                    val habitsSet = pruneCompletedHabits(prefs.getStringSet(KEY_COMPLETED_HABITS, emptySet()) ?: emptySet())
+                    habitsSet.add("$entityId:$dateStr")
+                    editor.putStringSet(KEY_COMPLETED_HABITS, habitsSet)
+                }
+                "goal" -> {
+                    val goalsSet = prefs.getStringSet(KEY_COMPLETED_GOALS, emptySet())?.toMutableSet() ?: mutableSetOf()
+                    goalsSet.add(entityId)
+                    editor.putStringSet(KEY_COMPLETED_GOALS, goalsSet)
+                }
+                "learning_journey", "learning_topic", "learning" -> {
+                    val learnSet = prefs.getStringSet(KEY_COMPLETED_LEARNING, emptySet())?.toMutableSet() ?: mutableSetOf()
+                    learnSet.add(entityId)
+                    editor.putStringSet(KEY_COMPLETED_LEARNING, learnSet)
+                }
             }
-            "goal" -> {
-                val goalsSet = prefs.getStringSet(KEY_COMPLETED_GOALS, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-                goalsSet.add(entityId)
-                editor.putStringSet(KEY_COMPLETED_GOALS, goalsSet)
-            }
-            "learning_journey", "learning_topic", "learning" -> {
-                val learnSet = prefs.getStringSet(KEY_COMPLETED_LEARNING, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-                learnSet.add(entityId)
-                editor.putStringSet(KEY_COMPLETED_LEARNING, learnSet)
-            }
+            editor.apply()
         }
-        editor.apply()
-        Log.i(TAG, "[COMPLETION] Recorded completion for $type entityId='$entityId' date='$dateStr'")
+        Log.i(TAG, "[COMPLETION] Recorded completion for $targetType entityId='$entityId' date='$dateStr'")
 
         // CHECK B: Immediately cancel any active snooze alarms for this entity
         cancelSnoozeForEntity(context, entityId, "")
@@ -112,33 +157,36 @@ object NativeAlarmScheduler {
      */
     fun removeCompletedEntity(context: Context, targetType: String, entityId: String, dateStr: String) {
         if (entityId.isEmpty()) return
-        val prefs = getPrefs(context)
-        val editor = prefs.edit()
-        val type = (if (targetType.isEmpty()) "habit" else targetType).lowercase()
+        synchronized(prefsLock) {
+            val prefs = getPrefs(context)
+            val editor = prefs.edit()
+            val type = (if (targetType.isEmpty()) "habit" else targetType).lowercase()
 
-        when (type) {
-            "habit" -> {
-                val habitsSet = prefs.getStringSet(KEY_COMPLETED_HABITS, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-                habitsSet.remove("$entityId:$dateStr")
-                editor.putStringSet(KEY_COMPLETED_HABITS, habitsSet)
+            when (type) {
+                "habit" -> {
+                    val habitsSet = prefs.getStringSet(KEY_COMPLETED_HABITS, emptySet())?.toMutableSet() ?: mutableSetOf()
+                    habitsSet.remove("$entityId:$dateStr")
+                    editor.putStringSet(KEY_COMPLETED_HABITS, habitsSet)
+                }
+                "goal" -> {
+                    val goalsSet = prefs.getStringSet(KEY_COMPLETED_GOALS, emptySet())?.toMutableSet() ?: mutableSetOf()
+                    goalsSet.remove(entityId)
+                    editor.putStringSet(KEY_COMPLETED_GOALS, goalsSet)
+                }
+                "learning_journey", "learning_topic", "learning" -> {
+                    val learnSet = prefs.getStringSet(KEY_COMPLETED_LEARNING, emptySet())?.toMutableSet() ?: mutableSetOf()
+                    learnSet.remove(entityId)
+                    editor.putStringSet(KEY_COMPLETED_LEARNING, learnSet)
+                }
             }
-            "goal" -> {
-                val goalsSet = prefs.getStringSet(KEY_COMPLETED_GOALS, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-                goalsSet.remove(entityId)
-                editor.putStringSet(KEY_COMPLETED_GOALS, goalsSet)
-            }
-            "learning_journey", "learning_topic", "learning" -> {
-                val learnSet = prefs.getStringSet(KEY_COMPLETED_LEARNING, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-                learnSet.remove(entityId)
-                editor.putStringSet(KEY_COMPLETED_LEARNING, learnSet)
-            }
+            editor.apply()
         }
-        editor.apply()
-        Log.i(TAG, "[COMPLETION] Removed completion (undo) for $type entityId='$entityId' date='$dateStr'")
+        Log.i(TAG, "[COMPLETION] Removed completion (undo) for $targetType entityId='$entityId' date='$dateStr'")
     }
 
     /**
      * Sync completion states from backend/local cache into native storage for offline Check A support.
+     * Replaces today's habit completion set so un-completions sync cleanly (G-05).
      */
     fun syncCompletions(
         context: Context,
@@ -147,23 +195,26 @@ object NativeAlarmScheduler {
         completedLearning: List<String>,
         todayDate: String
     ) {
-        val prefs = getPrefs(context)
-        val editor = prefs.edit()
+        synchronized(prefsLock) {
+            val prefs = getPrefs(context)
+            val editor = prefs.edit()
 
-        // Habits for today
-        val currentHabits = prefs.getStringSet(KEY_COMPLETED_HABITS, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-        for (hId in completedHabits) {
-            currentHabits.add("$hId:$todayDate")
+            // Prune stale dates and replace all entries for todayDate so un-completions are reflected immediately
+            val existingHabits = pruneCompletedHabits(prefs.getStringSet(KEY_COMPLETED_HABITS, emptySet()) ?: emptySet())
+            val updatedHabits = existingHabits.filter { !it.endsWith(":$todayDate") }.toMutableSet()
+            for (hId in completedHabits) {
+                updatedHabits.add("$hId:$todayDate")
+            }
+            editor.putStringSet(KEY_COMPLETED_HABITS, updatedHabits)
+
+            // Goals
+            editor.putStringSet(KEY_COMPLETED_GOALS, completedGoals.toSet())
+
+            // Learning
+            editor.putStringSet(KEY_COMPLETED_LEARNING, completedLearning.toSet())
+
+            editor.apply()
         }
-        editor.putStringSet(KEY_COMPLETED_HABITS, currentHabits)
-
-        // Goals
-        editor.putStringSet(KEY_COMPLETED_GOALS, completedGoals.toSet())
-
-        // Learning
-        editor.putStringSet(KEY_COMPLETED_LEARNING, completedLearning.toSet())
-
-        editor.apply()
         Log.i(
             TAG,
             "[COMPLETION] Synced native completions: ${completedHabits.size} habit(s) on $todayDate, ${completedGoals.size} goal(s), ${completedLearning.size} learning activity(ies)"
@@ -243,6 +294,18 @@ object NativeAlarmScheduler {
     }
 
     /**
+     * Check if full-screen intents are allowed on Android 14+ (API 34+).
+     */
+    fun canUseFullScreenIntent(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.canUseFullScreenIntent()
+        } else {
+            true
+        }
+    }
+
+    /**
      * Schedule a high-priority user-facing alarm using AlarmManager.setAlarmClock().
      */
     fun scheduleAlarm(
@@ -254,7 +317,10 @@ object NativeAlarmScheduler {
         reminderId: String = "",
         habitId: String = "",
         targetType: String = "habit",
-        isSnooze: Boolean = false
+        isSnooze: Boolean = false,
+        timeStr: String = "",
+        daysOfWeek: String = "",
+        isRecurring: Boolean = true
     ): Boolean {
         val now = System.currentTimeMillis()
         if (triggerTimeMillis <= now) {
@@ -285,6 +351,9 @@ object NativeAlarmScheduler {
                 putExtra("habitId", habitId)
                 putExtra("targetType", targetType)
                 putExtra("isSnooze", isSnooze)
+                putExtra("timeStr", timeStr)
+                putExtra("daysOfWeek", daysOfWeek)
+                putExtra("isRecurring", isRecurring)
             }
 
             // 2. Dedicated PendingIntent for each alarm (using id as unique requestCode)
@@ -312,7 +381,7 @@ object NativeAlarmScheduler {
             alarmManager.setAlarmClock(alarmClockInfo, pendingIntent)
 
             // 5. Persist alarm details for tracking, cancellation, and reboot restoration
-            persistAlarm(context, id, reminderId, habitId, targetType, title, body, triggerTimeMillis, isSnooze)
+            persistAlarm(context, id, reminderId, habitId, targetType, title, body, triggerTimeMillis, isSnooze, timeStr, daysOfWeek, isRecurring)
 
             Log.i(
                 TAG,
@@ -323,6 +392,129 @@ object NativeAlarmScheduler {
             Log.e(TAG, "[SCHEDULE_ERROR] Failed to schedule alarm id=$id with setAlarmClock()", e)
             return false
         }
+    }
+
+    /**
+     * Compute and schedule the next occurrence of a recurring reminder natively.
+     * Generates an alarm ID identical to the JavaScript formula (${reminderId}_${year}_${month}_${date}_${timeStr}).
+     * Prevents duplicate alarms and evaluates completion suppression for the newly computed occurrence date.
+     */
+    fun scheduleNextOccurrence(
+        context: Context,
+        reminderId: String,
+        habitId: String,
+        targetType: String,
+        title: String,
+        body: String,
+        lastScheduledTime: Long,
+        timeStr: String = "",
+        daysOfWeek: String = ""
+    ): Boolean {
+        if (reminderId.isEmpty() && habitId.isEmpty()) return false
+
+        var targetHour = -1
+        var targetMinute = -1
+        if (timeStr.isNotEmpty() && timeStr.contains(":")) {
+            val parts = timeStr.split(":")
+            if (parts.size >= 2) {
+                targetHour = parts[0].trim().toIntOrNull() ?: -1
+                targetMinute = parts[1].trim().toIntOrNull() ?: -1
+            }
+        }
+        if (targetHour == -1 || targetMinute == -1) {
+            val prevCal = Calendar.getInstance().apply {
+                timeInMillis = if (lastScheduledTime > 0) lastScheduledTime else System.currentTimeMillis()
+            }
+            targetHour = prevCal.get(Calendar.HOUR_OF_DAY)
+            targetMinute = prevCal.get(Calendar.MINUTE)
+        }
+
+        val allowedDays = if (daysOfWeek.isNotEmpty()) {
+            daysOfWeek.split(",").map { it.trim().lowercase(Locale.ROOT) }.filter { it.isNotEmpty() }
+        } else {
+            emptyList()
+        }
+        val isEveryday = allowedDays.isEmpty() || allowedDays.any { it == "everyday" || it == "daily" || it == "all" }
+
+        val shortDayNames = arrayOf("sun", "mon", "tue", "wed", "thu", "fri", "sat")
+        val now = System.currentTimeMillis()
+        var nextTriggerMillis = 0L
+        var nextDateStr = ""
+        var nextYear = 0
+        var nextMonth = 0
+        var nextDate = 0
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+
+        for (dayOffset in 1..14) {
+            val candidate = Calendar.getInstance().apply {
+                timeInMillis = now
+                add(Calendar.DAY_OF_YEAR, dayOffset)
+                set(Calendar.HOUR_OF_DAY, targetHour)
+                set(Calendar.MINUTE, targetMinute)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+
+            val dayIdx = candidate.get(Calendar.DAY_OF_WEEK) - 1
+            val dayName = if (dayIdx in 0..6) shortDayNames[dayIdx] else ""
+
+            if (!isEveryday && !allowedDays.any { dayName.startsWith(it) || it.startsWith(dayName) }) {
+                continue
+            }
+
+            val candidateMillis = candidate.timeInMillis
+            if (candidateMillis > now) {
+                nextTriggerMillis = candidateMillis
+                nextDateStr = dateFormat.format(Date(candidateMillis))
+                nextYear = candidate.get(Calendar.YEAR)
+                nextMonth = candidate.get(Calendar.MONTH) // 0-indexed, identical to JS Date.getMonth()
+                nextDate = candidate.get(Calendar.DATE) // 1-31, identical to JS Date.getDate()
+                break
+            }
+        }
+
+        if (nextTriggerMillis <= now || nextDateStr.isEmpty()) {
+            Log.w(TAG, "[NEXT_OCCURRENCE] Could not find next recurrence date for reminderId='$reminderId'")
+            return false
+        }
+
+        // Check completion suppression for the new occurrence
+        if (isEntityCompleted(context, targetType, habitId, reminderId, nextDateStr)) {
+            Log.i(TAG, "[NEXT_OCCURRENCE_SKIP] Next occurrence on $nextDateStr for $targetType '$habitId' is already completed.")
+            return false
+        }
+
+        // Exact formula matching JS: `${reminderId}_${scheduleAt.getFullYear()}_${scheduleAt.getMonth()}_${scheduleAt.getDate()}_${timeStr}`
+        val cleanTime = if (timeStr.isNotEmpty()) timeStr else String.format(Locale.US, "%02d:%02d", targetHour, targetMinute)
+        val uniqueKey = "${reminderId}_${nextYear}_${nextMonth}_${nextDate}_${cleanTime}"
+        val nextId = hashStringToId(uniqueKey)
+
+        // Check if an alarm with nextId is already active in recurring alarms to prevent duplicates
+        val activeRecurring = getPersistedRecurringAlarms(context)
+        for (i in 0 until activeRecurring.length()) {
+            val existing = activeRecurring.getJSONObject(i)
+            if (existing.optInt("id") == nextId && existing.optLong("time") > now) {
+                Log.i(TAG, "[NEXT_OCCURRENCE_EXISTS] Alarm id=$nextId ($uniqueKey) is already scheduled. Skipping duplicate.")
+                return true
+            }
+        }
+
+        Log.i(TAG, "[NEXT_OCCURRENCE] Scheduling next occurrence: id=$nextId, key=$uniqueKey, date=$nextDateStr, time=${Date(nextTriggerMillis)}")
+
+        return scheduleAlarm(
+            context = context,
+            id = nextId,
+            triggerTimeMillis = nextTriggerMillis,
+            title = title,
+            body = body,
+            reminderId = reminderId,
+            habitId = habitId,
+            targetType = targetType,
+            isSnooze = false,
+            timeStr = cleanTime,
+            daysOfWeek = daysOfWeek,
+            isRecurring = true
+        )
     }
 
     /**
@@ -414,7 +606,71 @@ object NativeAlarmScheduler {
     }
 
     /**
+     * Atomically replace all recurring alarms without a cancel-then-schedule gap (G-06).
+     * Schedules new alarms first, then cancels obsolete recurring alarms.
+     * Preserves all active snooze alarms.
+     */
+    fun replaceAllAlarms(context: Context, alarmsArray: JSONArray?): Int {
+        synchronized(prefsLock) {
+            val previousRecurring = getPersistedRecurringAlarms(context)
+            val newIds = mutableSetOf<Int>()
+            var scheduledCount = 0
+
+            if (alarmsArray != null) {
+                for (i in 0 until alarmsArray.length()) {
+                    val obj = alarmsArray.getJSONObject(i)
+                    val id = obj.optInt("id", 0)
+                    val at = obj.optLong("at", 0L)
+                    if (id == 0 || at <= 0L) continue
+
+                    val title = obj.optString("title", "🚨 Habit Alarm")
+                    val body = obj.optString("body", "Time for your habit!")
+                    val reminderId = obj.optString("reminderId", "")
+                    val habitId = obj.optString("habitId", "")
+                    val targetType = obj.optString("targetType", "habit")
+                    val isSnooze = obj.optBoolean("isSnooze", false)
+                    val isRecurring = obj.optBoolean("isRecurring", true)
+                    val timeStr = obj.optString("timeStr", "")
+                    val daysOfWeek = obj.optString("daysOfWeek", "")
+
+                    newIds.add(id)
+                    val ok = scheduleAlarm(
+                        context = context,
+                        id = id,
+                        triggerTimeMillis = at,
+                        title = title,
+                        body = body,
+                        reminderId = reminderId,
+                        habitId = habitId,
+                        targetType = targetType,
+                        isSnooze = isSnooze,
+                        timeStr = timeStr,
+                        daysOfWeek = daysOfWeek,
+                        isRecurring = isRecurring
+                    )
+                    if (ok) scheduledCount++
+                }
+            }
+
+            var cancelledStale = 0
+            for (i in 0 until previousRecurring.length()) {
+                val oldItem = previousRecurring.getJSONObject(i)
+                val oldId = oldItem.optInt("id", 0)
+                if (oldId != 0 && !newIds.contains(oldId)) {
+                    if (cancelAlarm(context, oldId)) {
+                        cancelledStale++
+                    }
+                }
+            }
+
+            Log.i(TAG, "[REPLACE_ALL] Atomically scheduled $scheduledCount alarm(s) and cancelled $cancelledStale stale alarm(s).")
+            return scheduledCount
+        }
+    }
+
+    /**
      * Reschedule all upcoming alarms (both recurring and snooze) upon device reboot or package upgrade.
+     * Rolls forward any passed recurring alarms to their next occurrence and preserves them in storage.
      */
     fun rescheduleAllUpcomingAlarms(context: Context): Int {
         val recurringAlarms = getPersistedRecurringAlarms(context)
@@ -422,9 +678,7 @@ object NativeAlarmScheduler {
         val now = System.currentTimeMillis()
         var restoredRecurringCount = 0
         var restoredSnoozeCount = 0
-
-        val validRecurring = JSONArray()
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
 
         for (i in 0 until recurringAlarms.length()) {
             val item = recurringAlarms.getJSONObject(i)
@@ -433,6 +687,9 @@ object NativeAlarmScheduler {
             val reminderId = item.optString("reminderId", "")
             val habitId = item.optString("habitId", "")
             val targetType = item.optString("targetType", "habit")
+            val timeStr = item.optString("timeStr", "")
+            val daysOfWeek = item.optString("daysOfWeek", "")
+            val isRecurring = item.optBoolean("isRecurring", false)
 
             if (time > now && id != 0) {
                 val occurrenceDate = dateFormat.format(Date(time))
@@ -450,17 +707,39 @@ object NativeAlarmScheduler {
                     reminderId = reminderId,
                     habitId = habitId,
                     targetType = targetType,
-                    isSnooze = false
+                    isSnooze = false,
+                    timeStr = timeStr,
+                    daysOfWeek = daysOfWeek,
+                    isRecurring = isRecurring
                 )
                 if (ok) {
                     restoredRecurringCount++
-                    validRecurring.put(item)
+                }
+            } else if (time <= now && id != 0) {
+                // Remove expired occurrence from storage
+                removePersistedAlarmId(context, id)
+
+                // If reminder was recurring, schedule next occurrence natively (scheduleAlarm will persist it into storage)
+                if (isRecurring) {
+                    val ok = scheduleNextOccurrence(
+                        context = context,
+                        reminderId = reminderId,
+                        habitId = habitId,
+                        targetType = targetType,
+                        title = item.optString("title", "🚨 Habit Alarm"),
+                        body = item.optString("body", "Time for your habit!"),
+                        lastScheduledTime = time,
+                        timeStr = timeStr,
+                        daysOfWeek = daysOfWeek
+                    )
+                    if (ok) {
+                        restoredRecurringCount++
+                    }
                 }
             }
         }
-        getPrefs(context).edit().putString(KEY_RECURRING_ALARMS, validRecurring.toString()).apply()
 
-        val validSnooze = JSONArray()
+        // Restore active snooze alarms
         for (i in 0 until snoozeAlarms.length()) {
             val item = snoozeAlarms.getJSONObject(i)
             val time = item.optLong("time", 0L)
@@ -489,11 +768,11 @@ object NativeAlarmScheduler {
                 )
                 if (ok) {
                     restoredSnoozeCount++
-                    validSnooze.put(item)
                 }
+            } else if (time <= now && id != 0) {
+                removePersistedAlarmId(context, id)
             }
         }
-        getPrefs(context).edit().putString(KEY_SNOOZE_ALARMS, validSnooze.toString()).apply()
 
         Log.i(
             TAG,
@@ -604,73 +883,83 @@ object NativeAlarmScheduler {
         title: String,
         body: String,
         triggerTimeMillis: Long,
-        isSnooze: Boolean = false
+        isSnooze: Boolean = false,
+        timeStr: String = "",
+        daysOfWeek: String = "",
+        isRecurring: Boolean = true
     ) {
-        val targetKey = if (isSnooze) KEY_SNOOZE_ALARMS else KEY_RECURRING_ALARMS
-        val currentList = if (isSnooze) getPersistedSnoozeAlarms(context) else getPersistedRecurringAlarms(context)
-        val updated = JSONArray()
+        synchronized(prefsLock) {
+            val targetKey = if (isSnooze) KEY_SNOOZE_ALARMS else KEY_RECURRING_ALARMS
+            val currentList = if (isSnooze) getPersistedSnoozeAlarms(context) else getPersistedRecurringAlarms(context)
+            val updated = JSONArray()
 
-        // Remove any existing entry for this id
-        for (i in 0 until currentList.length()) {
-            val item = currentList.getJSONObject(i)
-            if (item.getInt("id") != id) {
-                updated.put(item)
+            // Remove any existing entry for this id
+            for (i in 0 until currentList.length()) {
+                val item = currentList.getJSONObject(i)
+                if (item.getInt("id") != id) {
+                    updated.put(item)
+                }
             }
-        }
 
-        val newObj = JSONObject().apply {
-            put("id", id)
-            put("reminderId", reminderId)
-            put("habitId", habitId)
-            put("targetType", targetType)
-            put("title", title)
-            put("body", body)
-            put("time", triggerTimeMillis)
-            put("isSnooze", isSnooze)
-        }
-        updated.put(newObj)
-
-        getPrefs(context).edit().putString(targetKey, updated.toString()).apply()
-
-        // Also clean up from the opposite partition if it existed
-        val otherKey = if (isSnooze) KEY_RECURRING_ALARMS else KEY_SNOOZE_ALARMS
-        val otherList = if (isSnooze) getPersistedRecurringAlarms(context) else getPersistedSnoozeAlarms(context)
-        val cleanedOther = JSONArray()
-        var otherModified = false
-        for (i in 0 until otherList.length()) {
-            val item = otherList.getJSONObject(i)
-            if (item.getInt("id") == id) {
-                otherModified = true
-            } else {
-                cleanedOther.put(item)
+            val newObj = JSONObject().apply {
+                put("id", id)
+                put("reminderId", reminderId)
+                put("habitId", habitId)
+                put("targetType", targetType)
+                put("title", title)
+                put("body", body)
+                put("time", triggerTimeMillis)
+                put("isSnooze", isSnooze)
+                put("timeStr", timeStr)
+                put("daysOfWeek", daysOfWeek)
+                put("isRecurring", isRecurring)
             }
-        }
-        if (otherModified) {
-            getPrefs(context).edit().putString(otherKey, cleanedOther.toString()).apply()
+            updated.put(newObj)
+
+            getPrefs(context).edit().putString(targetKey, updated.toString()).apply()
+
+            // Also clean up from the opposite partition if it existed
+            val otherKey = if (isSnooze) KEY_RECURRING_ALARMS else KEY_SNOOZE_ALARMS
+            val otherList = if (isSnooze) getPersistedRecurringAlarms(context) else getPersistedSnoozeAlarms(context)
+            val cleanedOther = JSONArray()
+            var otherModified = false
+            for (i in 0 until otherList.length()) {
+                val item = otherList.getJSONObject(i)
+                if (item.getInt("id") == id) {
+                    otherModified = true
+                } else {
+                    cleanedOther.put(item)
+                }
+            }
+            if (otherModified) {
+                getPrefs(context).edit().putString(otherKey, cleanedOther.toString()).apply()
+            }
         }
     }
 
     fun removePersistedAlarmId(context: Context, id: Int) {
-        // Remove from recurring partition
-        val recurring = getPersistedRecurringAlarms(context)
-        val updatedRecurring = JSONArray()
-        for (i in 0 until recurring.length()) {
-            val item = recurring.getJSONObject(i)
-            if (item.getInt("id") != id) {
-                updatedRecurring.put(item)
+        synchronized(prefsLock) {
+            // Remove from recurring partition
+            val recurring = getPersistedRecurringAlarms(context)
+            val updatedRecurring = JSONArray()
+            for (i in 0 until recurring.length()) {
+                val item = recurring.getJSONObject(i)
+                if (item.getInt("id") != id) {
+                    updatedRecurring.put(item)
+                }
             }
-        }
-        getPrefs(context).edit().putString(KEY_RECURRING_ALARMS, updatedRecurring.toString()).apply()
+            getPrefs(context).edit().putString(KEY_RECURRING_ALARMS, updatedRecurring.toString()).apply()
 
-        // Remove from snooze partition
-        val snoozes = getPersistedSnoozeAlarms(context)
-        val updatedSnoozes = JSONArray()
-        for (i in 0 until snoozes.length()) {
-            val item = snoozes.getJSONObject(i)
-            if (item.getInt("id") != id) {
-                updatedSnoozes.put(item)
+            // Remove from snooze partition
+            val snoozes = getPersistedSnoozeAlarms(context)
+            val updatedSnoozes = JSONArray()
+            for (i in 0 until snoozes.length()) {
+                val item = snoozes.getJSONObject(i)
+                if (item.getInt("id") != id) {
+                    updatedSnoozes.put(item)
+                }
             }
+            getPrefs(context).edit().putString(KEY_SNOOZE_ALARMS, updatedSnoozes.toString()).apply()
         }
-        getPrefs(context).edit().putString(KEY_SNOOZE_ALARMS, updatedSnoozes.toString()).apply()
     }
 }

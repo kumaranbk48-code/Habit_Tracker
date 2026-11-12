@@ -35,6 +35,7 @@ export function applyCors(req, res) {
 
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-cron-secret, x-timezone');
+  res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count, X-Limit, X-Offset');
   res.setHeader('Access-Control-Max-Age', '86400');
 
   if (req.method === 'OPTIONS') {

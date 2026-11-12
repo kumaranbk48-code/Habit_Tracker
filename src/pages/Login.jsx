@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import supabase from '../lib/supabase';
 import { signInWithGoogle } from '../lib/googleAuth';
 import { useAuth } from '../contexts/AuthContext';
-import { Mail, Lock, UserPlus, LogIn, Eye, EyeOff, Sparkles } from 'lucide-react';
+import { Mail, Lock, UserPlus, LogIn, Eye, EyeOff, Sparkles, KeyRound } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -11,9 +12,12 @@ const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 export default function Login() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [isRecovery, setIsRecovery] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
   const [info, setInfo] = useState('');
@@ -23,10 +27,42 @@ export default function Login() {
   const { user, loading: authLoading } = useAuth();
 
   useEffect(() => {
-    if (!authLoading && user) {
+    // Check if URL contains recovery indicators or auth error descriptions
+    const params = new URLSearchParams(window.location.search);
+    const hash = window.location.hash ? new URLSearchParams(window.location.hash.substring(1)) : null;
+
+    const errorDesc = params.get('error_description') || hash?.get('error_description');
+    if (errorDesc) {
+      setError(errorDesc.replace(/\+/g, ' '));
+    }
+
+    if (params.get('mode') === 'recovery' || hash?.get('type') === 'recovery') {
+      setIsRecovery(true);
+      setIsForgotPassword(false);
+    }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecovery(true);
+        setIsForgotPassword(false);
+      }
+    });
+
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const hash = window.location.hash ? new URLSearchParams(window.location.hash.substring(1)) : null;
+    const inRecovery = isRecovery || params.get('mode') === 'recovery' || hash?.get('type') === 'recovery';
+
+    // Do not redirect to dashboard if the user is in the middle of password recovery
+    if (!authLoading && user && !inRecovery) {
       navigate('/', { replace: true });
     }
-  }, [user, authLoading, navigate]);
+  }, [user, authLoading, navigate, isRecovery]);
 
   const validateInputs = () => {
     const cleanEmail = email.trim();
@@ -41,8 +77,8 @@ export default function Login() {
     if (!cleanPassword) {
       return 'Password is required.';
     }
-    if (isSignUp && cleanPassword.length < 6) {
-      return 'Password must be at least 6 characters long.';
+    if (isSignUp && cleanPassword.length < 8) {
+      return 'Password must be at least 8 characters long.';
     }
     return null;
   };
@@ -62,6 +98,43 @@ export default function Login() {
     setInfo('');
     setEmailError('');
 
+    const cleanEmail = email.trim();
+    const cleanPassword = password;
+
+    if (isRecovery) {
+      if (!cleanPassword) {
+        setError('Please enter a new password.');
+        return;
+      }
+      if (cleanPassword.length < 8) {
+        setError('Password must be at least 8 characters long.');
+        return;
+      }
+      if (cleanPassword !== confirmPassword) {
+        setError('Passwords do not match.');
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const { error: updateErr } = await supabase.auth.updateUser({ password: cleanPassword });
+        if (updateErr) {
+          setError(updateErr.message);
+        } else {
+          setInfo('Password updated successfully! Redirecting...');
+          setTimeout(() => {
+            setIsRecovery(false);
+            navigate('/', { replace: true });
+          }, 1500);
+        }
+      } catch (err) {
+        setError(err?.message || 'Failed to update password.');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     if (isForgotPassword) {
       if (!cleanEmail) {
         setError('Please enter your email address.');
@@ -73,8 +146,11 @@ export default function Login() {
       }
       setLoading(true);
       try {
+        const redirectTo = Capacitor.isNativePlatform()
+          ? 'https://habit-tracker-phi-six-20.vercel.app/login?mode=recovery'
+          : `${window.location.origin}/login?mode=recovery`;
         const { error: resetErr } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-          redirectTo: `${window.location.origin}/login?mode=recovery`
+          redirectTo
         });
         if (resetErr) {
           setError(resetErr.message);
@@ -96,8 +172,6 @@ export default function Login() {
     }
 
     setLoading(true);
-    const cleanEmail = email.trim();
-    const cleanPassword = password;
 
     if (isSignUp) {
       const { data, error } = await supabase.auth.signUp({ email: cleanEmail, password: cleanPassword });
@@ -134,11 +208,11 @@ export default function Login() {
   const switchMode = () => {
     setIsSignUp(!isSignUp);
     setIsForgotPassword(false);
+    setIsRecovery(false);
     setError('');
     setInfo('');
-    // Fix: clear password when switching between sign-in and sign-up modes
-    // to avoid confusing state where stale password stays in the field
     setPassword('');
+    setConfirmPassword('');
   };
 
   // Show nothing while auth state is being determined to prevent flash
@@ -227,7 +301,7 @@ export default function Login() {
             </div>
 
             {/* Framer Motion Segmented Auth Switcher Tabs */}
-            {!isForgotPassword && (
+            {!isForgotPassword && !isRecovery && (
               <div className="flex bg-white/[0.04] p-1 rounded-2xl border border-white/[0.06] mb-6 relative select-none">
                 <button
                   type="button"
@@ -270,10 +344,18 @@ export default function Login() {
             )}
 
             <h2 className="text-2xl font-black text-white mb-1">
-              {isForgotPassword ? 'Reset password' : isSignUp ? 'Create account' : 'Welcome back'}
+              {isRecovery
+                ? 'Set new password'
+                : isForgotPassword
+                ? 'Reset password'
+                : isSignUp
+                ? 'Create account'
+                : 'Welcome back'}
             </h2>
             <p className="text-slate-400 text-sm mb-6">
-              {isForgotPassword
+              {isRecovery
+                ? 'Enter your new password below to regain access to your account.'
+                : isForgotPassword
                 ? 'Enter your account email to receive a password recovery link.'
                 : isSignUp
                 ? 'Start your journey with HabiZ today.'
@@ -281,7 +363,7 @@ export default function Login() {
             </p>
 
             {/* Google Button */}
-            {!isForgotPassword && (
+            {!isForgotPassword && !isRecovery && (
               <>
                 <motion.button
                   whileHover={{ scale: 1.01 }}
@@ -314,35 +396,40 @@ export default function Login() {
 
             {/* Email/Password Form */}
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Email</label>
-                <div className="relative">
-                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                  <input
-                    type="email"
-                    value={email}
-                    onBlur={handleEmailBlur}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      if (emailError) setEmailError('');
-                      if (error) setError('');
-                    }}
-                    className={`w-full pl-10 pr-4 py-3 border ${
-                      emailError ? 'border-red-400 focus:ring-red-500' : 'border-gray-200 dark:border-[#2a343d] focus:ring-[#3d7a75] focus:border-[#3d7a75]'
-                    } rounded-xl focus:ring-2 outline-none text-sm transition-colors bg-gray-50 dark:bg-[#14181c] focus:bg-white dark:focus:bg-[#1a2129] text-gray-900 dark:text-white`}
-                    placeholder="you@example.com"
-                  />
+              {!isRecovery && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Email</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <input
+                      type="email"
+                      value={email}
+                      onBlur={handleEmailBlur}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        if (emailError) setEmailError('');
+                        if (error) setError('');
+                      }}
+                      className={`w-full pl-10 pr-4 py-3 border ${
+                        emailError ? 'border-red-400 focus:ring-red-500' : 'border-gray-200 dark:border-[#2a343d] focus:ring-[#3d7a75] focus:border-[#3d7a75]'
+                      } rounded-xl focus:ring-2 outline-none text-sm transition-colors bg-gray-50 dark:bg-[#14181c] focus:bg-white dark:focus:bg-[#1a2129] text-gray-900 dark:text-white`}
+                      placeholder="you@example.com"
+                    />
+                  </div>
+                  {emailError && (
+                    <p className="text-xs text-red-500 font-medium mt-1">{emailError}</p>
+                  )}
                 </div>
-                {emailError && (
-                  <p className="text-xs text-red-500 font-medium mt-1">{emailError}</p>
-                )}
-              </div>
+              )}
 
+              {/* Password field for Recovery or Normal sign-in/sign-up */}
               {!isForgotPassword && (
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Password</label>
-                    {!isSignUp && (
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {isRecovery ? 'New Password' : 'Password'}
+                    </label>
+                    {!isSignUp && !isRecovery && (
                       <button
                         type="button"
                         onClick={() => { setIsForgotPassword(true); setError(''); setInfo(''); }}
@@ -361,7 +448,7 @@ export default function Login() {
                       onChange={(e) => setPassword(e.target.value)}
                       className="w-full pl-10 pr-10 py-3 border border-gray-200 dark:border-[#2a343d] rounded-xl focus:ring-2 focus:ring-[#3d7a75] focus:border-[#3d7a75] outline-none text-sm transition-colors bg-gray-50 dark:bg-[#14181c] focus:bg-white dark:focus:bg-[#1a2129] text-gray-900 dark:text-white"
                       placeholder="••••••••"
-                      minLength={isSignUp ? 6 : undefined}
+                      minLength={isSignUp ? 8 : isRecovery ? 8 : undefined}
                     />
                     <button
                       type="button"
@@ -372,10 +459,38 @@ export default function Login() {
                       {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
-                  {/* Fix: show password hint for sign-up so user knows minimum length */}
-                  {isSignUp && (
-                    <p className="text-xs text-gray-400 mt-1">Minimum 6 characters</p>
+                  {(isSignUp || isRecovery) && (
+                    <p className="text-xs text-gray-400 mt-1">Minimum 8 characters</p>
                   )}
+                </div>
+              )}
+
+              {/* Confirm password in Recovery Mode */}
+              {isRecovery && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    Confirm New Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <input
+                      type={showConfirmPass ? 'text' : 'password'}
+                      required
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full pl-10 pr-10 py-3 border border-gray-200 dark:border-[#2a343d] rounded-xl focus:ring-2 focus:ring-[#3d7a75] focus:border-[#3d7a75] outline-none text-sm transition-colors bg-gray-50 dark:bg-[#14181c] focus:bg-white dark:focus:bg-[#1a2129] text-gray-900 dark:text-white"
+                      placeholder="••••••••"
+                      minLength={8}
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => setShowConfirmPass(!showConfirmPass)}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showConfirmPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -415,6 +530,8 @@ export default function Login() {
               >
                 {loading ? (
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : isRecovery ? (
+                  <><KeyRound size={16} /> Update Password</>
                 ) : isForgotPassword ? (
                   <><Mail size={16} /> Send Reset Link</>
                 ) : isSignUp ? (
@@ -425,7 +542,22 @@ export default function Login() {
               </motion.button>
             </form>
 
-            {isForgotPassword ? (
+            {isRecovery ? (
+              <p className="text-center text-sm text-slate-400 mt-5">
+                Back to{' '}
+                <button
+                  onClick={() => {
+                    setIsRecovery(false);
+                    setError('');
+                    setInfo('');
+                    navigate('/login', { replace: true });
+                  }}
+                  className="text-teal-400 font-bold hover:underline cursor-pointer"
+                >
+                  Sign In
+                </button>
+              </p>
+            ) : isForgotPassword ? (
               <p className="text-center text-sm text-slate-400 mt-5">
                 Remembered your password?{' '}
                 <button

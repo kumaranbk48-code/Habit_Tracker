@@ -3,6 +3,8 @@ import { verifyUserToken } from './auth-helper.js';
 import { applyCors } from './cors.js';
 
 const columnCache = new Map();
+const idempotencyCache = new Map();
+const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 async function hasColumn(table, column) {
   const cacheKey = `${table}.${column}`;
@@ -85,22 +87,35 @@ export default async function handler(req, res) {
       }
 
       const targetType = req.query?.target_type;
+      const rawLimit = parseInt(req.query?.limit, 10);
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 1000) : 1000;
+      const rawPage = parseInt(req.query?.page, 10);
+      const rawOffset = parseInt(req.query?.offset, 10);
+      const offset = Number.isFinite(rawOffset) && rawOffset >= 0
+        ? rawOffset
+        : (Number.isFinite(rawPage) && rawPage > 0 ? (rawPage - 1) * limit : 0);
 
       // Attempt polymorphic select with joined relations
       try {
         let query = supabase
           .from('reminders')
-          .select(REMINDER_SELECT)
+          .select(REMINDER_SELECT, { count: 'exact' })
           .eq('user_id', user_id)
-          .order('reminder_time', { ascending: true });
+          .order('reminder_time', { ascending: true })
+          .range(offset, offset + limit - 1);
 
         if (targetType && ['habit', 'goal', 'learning_journey', 'learning_topic'].includes(targetType)) {
           query = query.eq('target_type', targetType);
         }
 
-        const { data, error } = await query;
+        const { data, error, count } = await query;
 
         if (!error && data) {
+          if (count !== null && count !== undefined) {
+            res.setHeader('X-Total-Count', String(count));
+            res.setHeader('X-Limit', String(limit));
+            res.setHeader('X-Offset', String(offset));
+          }
           const mapped = data.map((r) => ({
             ...r,
             reminder_mode: r.reminder_mode === 'alarm' ? 'scheduled' : (r.reminder_mode || 'scheduled'),
@@ -247,6 +262,16 @@ export default async function handler(req, res) {
         });
       }
 
+      // Read X-Client-Idempotency-Key for offline replay deduplication (E14)
+      const idempotencyKey = req.headers['x-client-idempotency-key'];
+      if (idempotencyKey && typeof idempotencyKey === 'string') {
+        const cacheKey = `${user_id}:${idempotencyKey}`;
+        const cached = idempotencyCache.get(cacheKey);
+        if (cached && (Date.now() - cached.timestamp) < IDEMPOTENCY_TTL_MS) {
+          return res.status(200).json(cached.response);
+        }
+      }
+
       const {
         target_type = 'habit',
         habit_id,
@@ -349,10 +374,22 @@ export default async function handler(req, res) {
 
       if (error) {
         console.error('[/api/reminders] POST error:', error);
-        return res.status(500).json({ error: error.message || 'Failed to create reminder' });
+        return res.status(500).json({ error: 'Failed to create reminder' });
       }
 
-      return res.status(201).json({ ...rawPayload, ...data });
+      const responseObj = { ...rawPayload, ...data };
+      if (idempotencyKey && typeof idempotencyKey === 'string') {
+        const cacheKey = `${user_id}:${idempotencyKey}`;
+        idempotencyCache.set(cacheKey, { response: responseObj, timestamp: Date.now() });
+        if (idempotencyCache.size > 1000) {
+          const cutoff = Date.now() - IDEMPOTENCY_TTL_MS;
+          for (const [k, v] of idempotencyCache.entries()) {
+            if (v.timestamp < cutoff) idempotencyCache.delete(k);
+          }
+        }
+      }
+
+      return res.status(201).json(responseObj);
     }
 
     // ── PUT: Update existing reminder ─────────────────────────────────────────
@@ -473,7 +510,7 @@ export default async function handler(req, res) {
 
       if (error) {
         console.error('[/api/reminders] PUT error:', error);
-        return res.status(500).json({ error: error.message || 'Failed to update reminder' });
+        return res.status(500).json({ error: 'Failed to update reminder' });
       }
 
       return res.status(200).json({ ...rawUpdatePayload, ...data });

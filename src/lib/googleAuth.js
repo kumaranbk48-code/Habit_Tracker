@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import supabase from './supabase';
 
 /**
@@ -6,6 +7,13 @@ import supabase from './supabase';
  * which routed auth through designarena.ai and leaked credentials.
  */
 export async function signInWithGoogle() {
+  if (Capacitor.isNativePlatform()) {
+    const err = new Error(
+      'Google sign-in is unavailable inside the Android app WebView (requires system-browser OAuth + deep-link redirect setup). Please sign in with your email and password.'
+    );
+    return { data: null, error: err };
+  }
+
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {

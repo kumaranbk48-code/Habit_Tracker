@@ -6,29 +6,29 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 export default function OfflineStatusBanner() {
   const { isOnline, isChecking, checkNow } = useNetworkStatus();
-  const { isSyncing, totalQueued, failedCount, triggerSync } = useSyncManager();
+  const { isSyncing, pendingCount, totalQueued, failedCount, stuckCount, triggerSync, retryStuck } = useSyncManager();
   const [showSyncedSuccess, setShowSyncedSuccess] = useState(false);
   const [prevSyncing, setPrevSyncing] = useState(false);
 
-  // Trigger sync automatically when transitioning to online
+  // Trigger sync automatically when transitioning to online with pending items
   useEffect(() => {
-    if (isOnline && totalQueued > 0 && !isSyncing) {
+    if (isOnline && pendingCount > 0 && !isSyncing) {
       triggerSync();
     }
-  }, [isOnline, totalQueued, isSyncing, triggerSync]);
+  }, [isOnline, pendingCount, isSyncing, triggerSync]);
 
   // Track completion transition to display temporary success check
   useEffect(() => {
-    if (prevSyncing && !isSyncing && failedCount === 0 && totalQueued === 0) {
+    if (prevSyncing && !isSyncing && failedCount === 0 && stuckCount === 0 && totalQueued === 0) {
       setShowSyncedSuccess(true);
       const timer = setTimeout(() => setShowSyncedSuccess(false), 3500);
       return () => clearTimeout(timer);
     }
     setPrevSyncing(isSyncing);
-  }, [isSyncing, prevSyncing, failedCount, totalQueued]);
+  }, [isSyncing, prevSyncing, failedCount, stuckCount, totalQueued]);
 
-  // If online, not syncing, not failed, and not showing success, stay hidden
-  if (isOnline && !isSyncing && failedCount === 0 && !showSyncedSuccess) {
+  // If online, not syncing, no failed/stuck items, and not showing success, stay hidden
+  if (isOnline && !isSyncing && failedCount === 0 && stuckCount === 0 && !showSyncedSuccess) {
     return null;
   }
 
@@ -73,6 +73,22 @@ export default function OfflineStatusBanner() {
                 Uploading {totalQueued} offline update{totalQueued > 1 ? 's' : ''}.
               </span>
             </div>
+          </div>
+        ) : stuckCount > 0 ? (
+          <div className="bg-[#241c12] border border-amber-500/40 text-amber-200 rounded-xl px-3.5 py-2 flex items-center justify-between gap-2 shadow-sm text-xs">
+            <div className="flex items-center gap-2">
+              <CloudOff size={14} className="text-amber-400 flex-shrink-0" />
+              <span className="font-semibold text-amber-300">Sync Stuck:</span>
+              <span className="text-slate-300">
+                {stuckCount} update{stuckCount > 1 ? 's' : ''} paused after repeated server/network failures.
+              </span>
+            </div>
+            <button
+              onClick={retryStuck}
+              className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/30 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer"
+            >
+              Retry Stuck
+            </button>
           </div>
         ) : failedCount > 0 ? (
           <div className="bg-[#241416] border border-rose-500/30 text-rose-200 rounded-xl px-3.5 py-2 flex items-center justify-between gap-2 shadow-sm text-xs">

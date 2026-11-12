@@ -18,6 +18,17 @@ if (API_BASE_URL && typeof window !== 'undefined') {
   };
 }
 
+// ── Global Error & Promise Rejection Handlers (E9) ──────────────────────────
+if (typeof window !== 'undefined') {
+  window.addEventListener('unhandledrejection', (event) => {
+    console.error('[Global] Unhandled promise rejection:', event.reason);
+  });
+
+  window.addEventListener('error', (event) => {
+    console.error('[Global] Uncaught error:', event.error || event.message);
+  });
+}
+
 handleGoogleRedirect();
 
 createRoot(document.getElementById('root')!).render(

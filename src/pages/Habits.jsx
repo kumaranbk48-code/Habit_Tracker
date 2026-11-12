@@ -183,6 +183,9 @@ export default function Habits() {
             detail: { targetType: 'habit', entityId: habitId, date: today }
           }));
         }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setToast({ message: errJson.error || 'Failed to update habit status.', type: 'error' });
       }
     } catch {
       setToast({ message: 'Failed to update habit status.', type: 'error' });
@@ -200,6 +203,9 @@ export default function Habits() {
         const reviewJson = await res.json();
         setSeasonReviewData(reviewJson);
         setSeasonReviewOpen(true);
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setToast({ message: errJson.error || 'Failed to load season review.', type: 'error' });
       }
     } catch (err) {
       console.warn('Failed to load season review:', err);
@@ -220,6 +226,9 @@ export default function Habits() {
       if (res.ok) {
         setSeasonReviewOpen(false);
         fetchData();
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setToast({ message: errJson.error || 'Failed to delete season.', type: 'error' });
       }
     } catch (err) {
       console.warn('Failed to delete season from review:', err);
@@ -562,6 +571,9 @@ export default function Habits() {
           actionLabel: 'Undo',
           onAction: () => handleUndoHabit(habit, previousState),
         });
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setToast({ message: errJson.error || 'Failed to auto-complete habit from timer.', type: 'error' });
       }
     } catch (err) {
       console.warn('[Habits] Timer auto-complete error:', err);

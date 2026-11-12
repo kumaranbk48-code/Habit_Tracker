@@ -160,7 +160,7 @@ class AlarmActivity : AppCompatActivity() {
             val cur = alarmQueue.removeAt(0)
             Log.i(TAG, "[ACTIVITY] Mark Done tapped for alarm id=${cur.id}")
 
-            val todayDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+            val todayDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
             // 1. Immediately record native completion & cancel any active snooze
             NativeAlarmScheduler.saveCompletedEntity(this, cur.targetType, cur.habitId, todayDate)

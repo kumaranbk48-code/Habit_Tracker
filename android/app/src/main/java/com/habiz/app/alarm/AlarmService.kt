@@ -244,7 +244,7 @@ class AlarmService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(displayTitle)
             .setContentText(body)
@@ -255,10 +255,16 @@ class AlarmService : Service() {
             .setOngoing(true)
             .setAutoCancel(false)
             .setContentIntent(fullScreenPendingIntent)
-            .setFullScreenIntent(fullScreenPendingIntent, true)
             .addAction(0, "+10 min", snoozePendingIntent)
             .addAction(0, "✓ Mark Done", dismissPendingIntent)
-            .build()
+
+        if (NativeAlarmScheduler.canUseFullScreenIntent(this)) {
+            builder.setFullScreenIntent(fullScreenPendingIntent, true)
+        } else {
+            Log.w(TAG, "[SERVICE] USE_FULL_SCREEN_INTENT permission denied on Android 14+; posting notification without full-screen takeover.")
+        }
+
+        return builder.build()
     }
 
     private fun startAlarmAudio() {

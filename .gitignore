@@ -40,11 +40,15 @@ dist-ssr
 
 # Local Scratch & Runtime Cache
 scratch/
+data/seasons_storage.json
 
 # OS Files
 Thumbs.db
 Desktop.ini
 
-# Android binaries
+# Android binaries & signing credentials
 *.apk
+*.jks
+*.keystore
+android/keystore.properties
 

@@ -323,7 +323,7 @@ export default async function handler(req, res) {
       const { error: jErr } = await supabase.from('learning_journeys').insert(journey);
       if (jErr) {
         console.error('[/api/learning] create_journey insert error:', jErr);
-        return res.status(500).json({ error: 'Failed to create learning journey in database', details: jErr.message });
+        return res.status(500).json({ error: 'Failed to create learning journey in database' });
       }
 
       // Insert phases if present
@@ -331,7 +331,7 @@ export default async function handler(req, res) {
         const { error: pErr } = await supabase.from('learning_phases').insert(createdPhases);
         if (pErr) {
           console.error('[/api/learning] create phases error:', pErr);
-          return res.status(500).json({ error: 'Failed to save journey phases', details: pErr.message });
+          return res.status(500).json({ error: 'Failed to save journey phases' });
         }
       }
 
@@ -340,7 +340,7 @@ export default async function handler(req, res) {
         const { error: tErr } = await supabase.from('learning_topics').insert(createdTopics);
         if (tErr) {
           console.error('[/api/learning] create topics error:', tErr);
-          return res.status(500).json({ error: 'Failed to save journey topics', details: tErr.message });
+          return res.status(500).json({ error: 'Failed to save journey topics' });
         }
       }
 
@@ -349,7 +349,7 @@ export default async function handler(req, res) {
         const { error: tkErr } = await supabase.from('learning_tasks').insert(createdTasks);
         if (tkErr) {
           console.error('[/api/learning] create tasks error:', tkErr);
-          return res.status(500).json({ error: 'Failed to save journey tasks', details: tkErr.message });
+          return res.status(500).json({ error: 'Failed to save journey tasks' });
         }
       }
 
@@ -509,6 +509,30 @@ export default async function handler(req, res) {
     if (req.method === 'POST' && action === 'connect_habit') {
       const { journey_id, habit_id } = req.body || {};
       if (!journey_id || !habit_id) return res.status(400).json({ error: 'journey_id and habit_id are required' });
+
+      // Verify journey belongs to user
+      const { data: journey, error: jErr } = await supabase
+        .from('learning_journeys')
+        .select('id')
+        .eq('id', journey_id)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (jErr || !journey) {
+        return res.status(404).json({ error: 'Learning journey not found' });
+      }
+
+      // Verify habit belongs to user
+      const { data: habit, error: hErr } = await supabase
+        .from('habits')
+        .select('id')
+        .eq('id', habit_id)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (hErr || !habit) {
+        return res.status(404).json({ error: 'Habit not found' });
+      }
 
       const { data, error } = await supabase
         .from('journey_habit_connections')

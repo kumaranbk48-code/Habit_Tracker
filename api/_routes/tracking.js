@@ -16,14 +16,31 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const { habit_id, date } = req.query;
-      let query = supabase.from('habit_tracking').select('*').eq('user_id', user_id);
+      const rawLimit = parseInt(req.query?.limit, 10);
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 1000) : 1000;
+      const rawPage = parseInt(req.query?.page, 10);
+      const rawOffset = parseInt(req.query?.offset, 10);
+      const offset = Number.isFinite(rawOffset) && rawOffset >= 0
+        ? rawOffset
+        : (Number.isFinite(rawPage) && rawPage > 0 ? (rawPage - 1) * limit : 0);
+
+      let query = supabase.from('habit_tracking').select('*', { count: 'exact' }).eq('user_id', user_id);
       if (habit_id) query = query.eq('habit_id', habit_id);
       if (date) query = query.eq('completion_date', date);
-      const { data, error } = await query.order('completion_date', { ascending: false });
+      const { data, error, count } = await query
+        .order('completion_date', { ascending: false })
+        .order('id', { ascending: true })
+        .range(offset, offset + limit - 1);
 
       if (error) {
         console.error('[/api/tracking] GET error:', error);
         return res.status(500).json({ error: 'Failed to retrieve tracking data' });
+      }
+
+      if (count !== null && count !== undefined) {
+        res.setHeader('X-Total-Count', String(count));
+        res.setHeader('X-Limit', String(limit));
+        res.setHeader('X-Offset', String(offset));
       }
 
       return res.status(200).json(data ?? []);

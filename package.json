@@ -9,6 +9,7 @@
     "dev:server": "node server.js",
     "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:vite\"",
     "build": "tsc -b && vite build",
+    "build:android": "node scripts/check-android-env.js && npm run build && npx cap sync android",
     "test": "node --test tests/**/*.test.js",
     "start": "node server.js",
     "lint": "eslint .",
@@ -37,6 +38,7 @@
   "devDependencies": {
     "@capacitor/android": "^8.6.0",
     "@capacitor/cli": "^8.6.0",
+    "@electric-sql/pglite": "^0.5.15",
     "@eslint/js": "^9.39.1",
     "@types/node": "^24.13.1",
     "@types/react": "^19.2.7",

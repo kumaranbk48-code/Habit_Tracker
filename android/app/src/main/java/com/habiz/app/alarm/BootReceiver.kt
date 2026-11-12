@@ -18,9 +18,14 @@ class BootReceiver : BroadcastReceiver() {
         val action = intent.action ?: return
         Log.i(TAG, "[BOOT] BootReceiver invoked with action=$action")
 
-        if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+        if (
+            action == Intent.ACTION_BOOT_COMPLETED ||
+            action == Intent.ACTION_MY_PACKAGE_REPLACED ||
+            action == Intent.ACTION_TIME_CHANGED ||
+            action == Intent.ACTION_TIMEZONE_CHANGED
+        ) {
             val restoredCount = NativeAlarmScheduler.rescheduleAllUpcomingAlarms(context)
-            Log.i(TAG, "[BOOT] Restored $restoredCount upcoming alarm(s) after reboot")
+            Log.i(TAG, "[BOOT] Restored $restoredCount upcoming alarm(s) for action=$action")
         }
     }
 }

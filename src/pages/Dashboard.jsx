@@ -25,6 +25,7 @@ import HabizLoader          from '../components/HabizLoader';
 import { useConfetti } from '../hooks/useConfetti';
 import { calculateXP, checkNewBadges, calculateCategoryStreaks } from '../hooks/useGamification';
 import { calculateOverallHabitStrength, getStrengthBadge } from '../lib/habitStrength';
+import { fetchAllPaginated } from '../lib/fetchAllPages';
 import { saveCachedData, getCachedData, enqueueOfflineAction } from '../lib/offlineDb';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -126,14 +127,15 @@ export default function Dashboard() {
     if (!session) return;
     setFetchError('');
     try {
+      const authHeaders = { headers: { Authorization: `Bearer ${session.access_token}` } };
       const [statsRes, heatmapRes, habitsRes, trackingRes, goalsRes, milestonesRes, seasonsRes, earned] = await Promise.all([
-        fetch('/api/dashboard',  { headers: { Authorization: `Bearer ${session.access_token}` } }),
-        fetch('/api/heatmap',    { headers: { Authorization: `Bearer ${session.access_token}` } }),
-        fetch('/api/habits',     { headers: { Authorization: `Bearer ${session.access_token}` } }),
-        fetch('/api/tracking',   { headers: { Authorization: `Bearer ${session.access_token}` } }),
-        fetch('/api/goals',      { headers: { Authorization: `Bearer ${session.access_token}` } }),
-        fetch('/api/milestones', { headers: { Authorization: `Bearer ${session.access_token}` } }),
-        fetch('/api/seasons',    { headers: { Authorization: `Bearer ${session.access_token}` } }).catch(() => null),
+        fetch('/api/dashboard', authHeaders),
+        fetch('/api/heatmap', authHeaders),
+        fetchAllPaginated('/api/habits', authHeaders),
+        fetchAllPaginated('/api/tracking', authHeaders),
+        fetchAllPaginated('/api/goals', authHeaders),
+        fetch('/api/milestones', authHeaders),
+        fetch('/api/seasons', authHeaders).catch(() => null),
         fetchAchievements(),
       ]);
 
@@ -148,9 +150,9 @@ export default function Dashboard() {
       // Fix: these four are supplementary (power the calendar, the clickable
       // stat cards, and the goals list) — if any fails, default to an empty
       // array rather than blocking the whole dashboard from loading.
-      const habitsData     = habitsRes.ok     ? await habitsRes.json()     : [];
-      const trackingData   = trackingRes.ok   ? await trackingRes.json()   : [];
-      const goalsData      = goalsRes.ok      ? await goalsRes.json()      : [];
+      const habitsData     = habitsRes.ok     ? habitsRes.data           : [];
+      const trackingData   = trackingRes.ok   ? trackingRes.data         : [];
+      const goalsData      = goalsRes.ok      ? goalsRes.data            : [];
       const milestonesData = milestonesRes.ok ? await milestonesRes.json() : [];
       const seasonsData    = (seasonsRes && seasonsRes.ok) ? await seasonsRes.json() : null;
 
@@ -459,6 +461,9 @@ export default function Dashboard() {
           actionLabel: 'Undo',
           onAction: () => handleUndoHabit(habit, previousState),
         });
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setToast({ message: errJson.error || 'Failed to auto-complete habit from timer.', type: 'error' });
       }
     } catch (err) {
       console.warn('[Dashboard] Timer auto-complete error:', err);
@@ -536,6 +541,9 @@ export default function Dashboard() {
             detail: { targetType: 'habit', entityId: saved.habit_id, date: saved.completion_date }
           }));
         }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setToast({ message: errJson.error || 'Failed to resume habit.', type: 'error' });
       }
     } catch {
       setToast({ message: 'Failed to resume habit.', type: 'error' });
@@ -580,6 +588,9 @@ export default function Dashboard() {
         const reviewJson = await res.json();
         setSeasonReviewData(reviewJson);
         setSeasonReviewOpen(true);
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setToast({ message: errJson.error || 'Failed to load season review.', type: 'error' });
       }
     } catch (err) {
       console.warn('Failed to load season review:', err);
@@ -622,6 +633,9 @@ export default function Dashboard() {
       if (res.ok) {
         setSeasonReviewOpen(false);
         fetchAll();
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setToast({ message: errJson.error || 'Failed to delete season.', type: 'error' });
       }
     } catch (err) {
       console.warn('Failed to delete season from review:', err);

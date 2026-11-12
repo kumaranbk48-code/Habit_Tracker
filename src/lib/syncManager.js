@@ -10,12 +10,34 @@ import {
   updateActionStatus,
   deleteAction,
   getQueueStats,
+  resetStuckActions,
 } from './offlineDb';
 import { getOnlineStatus, verifyServerReachability } from './networkStatus';
+import refreshSessionOnce from './refreshSessionOnce';
+
+export const MAX_RETRY_ATTEMPTS = 5;
 
 let isSyncRunning = false;
 let lastSyncTimestamp = null;
 const syncListeners = new Set();
+
+async function markRetryOrStuck(action, errorMessage, userId) {
+  const nextRetries = (action.retries || 0) + 1;
+  if (nextRetries >= MAX_RETRY_ATTEMPTS) {
+    console.error(`[SyncManager] Action ${action.id} reached max retries (${MAX_RETRY_ATTEMPTS}); marking as stuck.`);
+    await updateActionStatus(action.id, 'stuck', `${errorMessage} (max ${MAX_RETRY_ATTEMPTS} retries reached)`);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('habittracker-sync-stuck', {
+          detail: { actionId: action.id, userId, retries: nextRetries, error: errorMessage },
+        })
+      );
+    }
+    return 'stuck';
+  }
+  await updateActionStatus(action.id, 'pending', errorMessage);
+  return 'pending';
+}
 
 /**
  * Executes a single queued action against the backend API.
@@ -111,6 +133,7 @@ export async function syncOfflineQueue(userId, accessToken) {
 
   let syncedCount = 0;
   let errorCount = 0;
+  let currentToken = accessToken;
 
   try {
     const pendingActions = await getPendingActions(userId);
@@ -126,7 +149,30 @@ export async function syncOfflineQueue(userId, accessToken) {
       await updateActionStatus(action.id, 'syncing');
 
       try {
-        const response = await processAction(action, accessToken);
+        let response = await processAction(action, currentToken);
+
+        // 401 Unauthorized: token expired -> attempt session refresh and retry once
+        if (response.status === 401) {
+          console.warn('[SyncManager] Received 401. Attempting session refresh...');
+          const { session: refreshedSession, error: refreshError } = await refreshSessionOnce();
+          if (refreshedSession?.access_token) {
+            currentToken = refreshedSession.access_token;
+            response = await processAction(action, currentToken);
+
+            // If retry after refresh still returns 401, keep pending (never mark failed)
+            if (response.status === 401) {
+              console.warn('[SyncManager] Action still 401 after token refresh. Keeping pending.');
+              await updateActionStatus(action.id, 'pending', 'Auth unauthorized after refresh');
+              errorCount++;
+              break;
+            }
+          } else {
+            console.warn('[SyncManager] Session refresh failed:', refreshError);
+            await updateActionStatus(action.id, 'pending', 'Session expired, waiting for login');
+            errorCount++;
+            break;
+          }
+        }
 
         if (response.ok) {
           // 2xx Success: server accepted the transaction
@@ -156,24 +202,31 @@ export async function syncOfflineQueue(userId, accessToken) {
               );
             }
           }
+        } else if (response.status === 429 || response.status === 408) {
+          // 429 Rate limited or 408 Request Timeout: retry with cap before marking stuck
+          console.warn(`[SyncManager] Transient rate limit or timeout (${response.status}). Retrying later.`);
+          await markRetryOrStuck(action, `HTTP ${response.status}`, userId);
+          errorCount++;
+          break; // Stop further requests to avoid hammering or waiting
         } else if (response.status >= 400 && response.status < 500) {
-          // 4xx Client/Validation Error: server permanently rejected the request
+          // 4xx Client/Validation Error (e.g. 400, 404, 409, 422): permanent failure
           const errData = await response.json().catch(() => ({}));
           const errMsg = errData.error || `Server rejected with ${response.status}`;
           console.warn(`[SyncManager] Action ${action.id} failed validation:`, errMsg);
           await updateActionStatus(action.id, 'failed', errMsg);
           errorCount++;
         } else {
-          // 5xx Server Error or temporary error: keep pending to retry later
+          // 5xx Server Error or temporary error: retry with cap before marking stuck
           console.warn(`[SyncManager] Server error ${response.status}. Retrying later.`);
-          await updateActionStatus(action.id, 'pending', `HTTP ${response.status}`);
+          await markRetryOrStuck(action, `HTTP ${response.status}`, userId);
           errorCount++;
           break; // Stop further requests if server is unhealthy
         }
       } catch (networkErr) {
-        // Network dropped mid-sync: revert to pending and pause
+        // Network dropped mid-sync: retry with cap before marking stuck
         console.warn('[SyncManager] Network dropped during action sync:', networkErr);
-        await updateActionStatus(action.id, 'pending', 'Network disconnected');
+        await markRetryOrStuck(action, 'Network disconnected', userId);
+        errorCount++;
         break;
       }
     }
@@ -187,6 +240,14 @@ export async function syncOfflineQueue(userId, accessToken) {
   return { success: errorCount === 0, syncedCount, errorCount };
 }
 
+export async function retryStuckSyncQueue(userId, accessToken) {
+  if (!userId || !accessToken) {
+    return { success: false, syncedCount: 0, errorCount: 0 };
+  }
+  await resetStuckActions(userId);
+  return await syncOfflineQueue(userId, accessToken);
+}
+
 async function notifySyncListeners(userId) {
   const stats = await getQueueStats(userId);
   const detail = {
@@ -194,6 +255,7 @@ async function notifySyncListeners(userId) {
     pendingCount: stats.pending,
     syncingCount: stats.syncing,
     failedCount: stats.failed,
+    stuckCount: stats.stuck || 0,
     totalQueued: stats.total,
     lastSyncTimestamp,
   };
@@ -256,4 +318,3 @@ if (typeof window !== 'undefined') {
     });
   }
 }
-

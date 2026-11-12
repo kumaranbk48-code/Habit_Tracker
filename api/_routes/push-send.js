@@ -2,6 +2,10 @@ import crypto from 'crypto';
 import webPush from 'web-push';
 import supabase from './db-client.js';
 import { applyCors } from './cors.js';
+import { fetchAllSupabaseRows } from './paginate-query.js';
+
+const REMINDER_PAGE_SIZE = 500;
+const USER_SUB_CHUNK_SIZE = 100;
 
 function safeCompare(a, b) {
   if (!a || !b || typeof a !== 'string' || typeof b !== 'string') return false;
@@ -26,9 +30,9 @@ if (process.env.VAPID_EMAIL && process.env.VITE_VAPID_PUBLIC_KEY && process.env.
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
 
-  // Strict cron secret verification (CWE-306 fix: reject if unset or mismatched)
+  // Strict cron secret verification (header-only, timing-safe comparison)
   const cronSecret = process.env.CRON_SECRET;
-  const providedSecret = req.headers['x-cron-secret'] || req.query.secret;
+  const providedSecret = req.headers['x-cron-secret'];
 
   if (!cronSecret || !safeCompare(providedSecret, cronSecret)) {
     return res.status(401).json({ error: 'Unauthorized — invalid or missing cron secret' });
@@ -37,28 +41,51 @@ export default async function handler(req, res) {
   try {
     const now = new Date();
 
-    // Query all active reminders with their joined entities
-    const { data: reminders, error: remErr } = await supabase
-      .from('reminders')
-      .select(`
-        *,
-        habits(id, habit_name),
-        goals(id, goal_name, target_date, status),
-        learning_journeys:journey_id(id, title, target_date, status),
-        learning_topics:topic_id(id, title, target_date, status)
-      `)
-      .eq('notification_status', 'Active');
+    // Page through active reminders instead of a fixed .limit(1000)
+    const { data: reminders, error: remErr } = await fetchAllSupabaseRows(
+      () =>
+        supabase
+          .from('reminders')
+          .select(`
+            *,
+            habits(id, habit_name),
+            goals(id, goal_name, target_date, status),
+            learning_journeys:journey_id(id, title, target_date, status),
+            learning_topics:topic_id(id, title, target_date, status)
+          `)
+          .eq('notification_status', 'Active')
+          .order('id', { ascending: true }),
+      REMINDER_PAGE_SIZE
+    );
 
-    if (remErr || !reminders?.length) {
+    if (remErr) {
+      console.error('[/api/push-send] reminders error:', remErr);
+      return res.status(500).json({ error: 'Failed to retrieve active reminders' });
+    }
+    if (!reminders?.length) {
       return res.status(200).json({ sent: 0, message: 'No active reminders found' });
     }
 
-    // Query all push subscriptions
-    const { data: subs, error: subErr } = await supabase
-      .from('push_subscriptions')
-      .select('*');
+    // Scope push subscriptions only to users who have active reminders, chunked by 100 IDs
+    const activeUserIds = [...new Set(reminders.map((r) => r.user_id).filter(Boolean))];
+    const subs = [];
+    for (let i = 0; i < activeUserIds.length; i += USER_SUB_CHUNK_SIZE) {
+      const userIdChunk = activeUserIds.slice(i, i + USER_SUB_CHUNK_SIZE);
+      const { data: chunkSubs, error: subErr } = await supabase
+        .from('push_subscriptions')
+        .select('*')
+        .in('user_id', userIdChunk);
 
-    if (subErr || !subs?.length) {
+      if (subErr) {
+        console.error('[/api/push-send] push_subscriptions error:', subErr);
+        return res.status(500).json({ error: 'Failed to retrieve push subscriptions' });
+      }
+      if (chunkSubs?.length) {
+        subs.push(...chunkSubs);
+      }
+    }
+
+    if (!subs.length) {
       return res.status(200).json({ sent: 0, message: 'No push subscriptions registered' });
     }
 
@@ -130,7 +157,7 @@ export default async function handler(req, res) {
       const type = reminder.target_type || 'habit';
       let title = '🔔 HabiZ Reminder';
       let body = reminder.custom_text || 'You have an active reminder.';
-      let url = '/dashboard';
+      let url = '/';
 
       if (type === 'habit') {
         const habitName = reminder.habits?.habit_name || 'Habit';

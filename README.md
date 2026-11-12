@@ -141,6 +141,9 @@ VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
+# Production Backend URL (Required for Android/Capacitor builds)
+VITE_API_URL=https://your-production-app.vercel.app
+
 # Server Port (optional, defaults to 3001)
 PORT=3001
 ```
@@ -165,6 +168,11 @@ npm run dev
 * **Row Level Security (RLS):** All data queries are protected at the database engine level via PostgreSQL RLS policies tied to `auth.uid()`.
 * **Token Verification:** Every API endpoint validates the user's JWT bearer token before executing database reads or writes.
 * **Data Isolation:** User habits, streaks, and milestone records can only be accessed or modified by their owner.
+* **Automated Cron Endpoints:** Scheduled jobs (`/api/digest` and `/api/push-send`) require the `x-cron-secret` HTTP request header matching `CRON_SECRET`. Query string secrets such as `?secret=` are not accepted.
+  ```bash
+  curl -X POST https://your-production-app.vercel.app/api/push-send \
+    -H "x-cron-secret: $CRON_SECRET"
+  ```
 
 ---
 

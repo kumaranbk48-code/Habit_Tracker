@@ -50,6 +50,9 @@ export default function SeasonManagerModal({
       if (res.ok) {
         const json = await res.json();
         setSeasonsList(json.seasons || []);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setErrorMsg(err.error || 'Failed to fetch seasons');
       }
     } catch (err) {
       console.warn('Failed to fetch seasons:', err);
@@ -217,6 +220,9 @@ export default function SeasonManagerModal({
 
       if (res.ok) {
         if (onSeasonUpdated) onSeasonUpdated();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setErrorMsg(err.error || 'Failed to toggle habit status');
       }
     } catch (err) {
       console.warn('Failed to toggle habit status:', err);

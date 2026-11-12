@@ -375,6 +375,9 @@ export default function LearningJourneyDetail() {
             }
           }
         });
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setToast({ message: errJson.error || 'Failed to update habit progress.', type: 'error' });
       }
     } catch (err) {
       console.error('[Learning] Confirm habit error:', err);

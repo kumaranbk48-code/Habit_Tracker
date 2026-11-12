@@ -2,6 +2,7 @@ import supabase from './db-client.js';
 import { verifyUserToken } from './auth-helper.js';
 import { applyCors } from './cors.js';
 import { getUserTimeZone, getDateInTimeZone, getDateDaysAgoInTimeZone } from './date-utils.js';
+import { fetchAllSupabaseRows } from './paginate-query.js';
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -17,8 +18,10 @@ export default async function handler(req, res) {
     const timeZone = getUserTimeZone(req, user);
     const today = getDateInTimeZone(new Date(), timeZone);
 
-    const { data: habits } = await supabase
-      .from('habits').select('id').eq('user_id', user_id);
+    const { data: habits, error: habitsErr } = await fetchAllSupabaseRows(() =>
+      supabase.from('habits').select('id').eq('user_id', user_id).order('id', { ascending: true })
+    );
+    if (habitsErr) throw habitsErr;
     const totalHabits = habits?.length || 0;
     const habitIds    = habits?.map(h => h.id) || [];
 
@@ -27,12 +30,20 @@ export default async function handler(req, res) {
 
     if (habitIds.length > 0) {
       const [todayRes, allRes] = await Promise.all([
-        supabase.from('habit_tracking').select('id')
-          .eq('user_id', user_id).eq('completion_date', today).eq('status', true).in('habit_id', habitIds),
-        supabase.from('habit_tracking').select('completion_date, habit_id')
-          .eq('user_id', user_id).eq('status', true).in('habit_id', habitIds)
-          .order('completion_date', { ascending: false }),
+        fetchAllSupabaseRows(() =>
+          supabase.from('habit_tracking').select('id')
+            .eq('user_id', user_id).eq('completion_date', today).eq('status', true).in('habit_id', habitIds)
+            .order('id', { ascending: true })
+        ),
+        fetchAllSupabaseRows(() =>
+          supabase.from('habit_tracking').select('completion_date, habit_id')
+            .eq('user_id', user_id).eq('status', true).in('habit_id', habitIds)
+            .order('completion_date', { ascending: false })
+            .order('id', { ascending: true })
+        ),
       ]);
+      if (todayRes.error) throw todayRes.error;
+      if (allRes.error) throw allRes.error;
       completedToday = todayRes.data?.length || 0;
       allTracking    = allRes.data || [];
     }
@@ -78,20 +89,27 @@ export default async function handler(req, res) {
     }
 
     // ── Goals ─────────────────────────────────────────────────────────────
-    const { data: goals } = await supabase
-      .from('goals').select('status').eq('user_id', user_id);
+    const { data: goals, error: goalsErr } = await fetchAllSupabaseRows(() =>
+      supabase.from('goals').select('status').eq('user_id', user_id).order('id', { ascending: true })
+    );
+    if (goalsErr) throw goalsErr;
     const totalGoals     = goals?.length || 0;
     const completedGoals = goals?.filter(g => g.status === 'Completed').length || 0;
 
-    // ── Weekly chart data (single query) ─────────────────────────────────
+    // ── Weekly chart data (paginated) ───────────────────────────────────
     const fromDate = getDateDaysAgoInTimeZone(6, timeZone);
     let weeklyMap  = {};
     if (habitIds.length > 0) {
-      const { data: weekData } = await supabase
-        .from('habit_tracking').select('completion_date')
-        .eq('user_id', user_id).eq('status', true)
-        .in('habit_id', habitIds)
-        .gte('completion_date', fromDate).lte('completion_date', today);
+      const { data: weekData, error: weekErr } = await fetchAllSupabaseRows(() =>
+        supabase
+          .from('habit_tracking').select('completion_date')
+          .eq('user_id', user_id).eq('status', true)
+          .in('habit_id', habitIds)
+          .gte('completion_date', fromDate).lte('completion_date', today)
+          .order('completion_date', { ascending: true })
+          .order('id', { ascending: true })
+      );
+      if (weekErr) throw weekErr;
       for (const row of weekData || []) {
         weeklyMap[row.completion_date] = (weeklyMap[row.completion_date] || 0) + 1;
       }

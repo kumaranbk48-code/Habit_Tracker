@@ -43,15 +43,30 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
-      const { data, error } = await supabase
+      const rawLimit = parseInt(req.query?.limit, 10);
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 1000) : 1000;
+      const rawPage = parseInt(req.query?.page, 10);
+      const rawOffset = parseInt(req.query?.offset, 10);
+      const offset = Number.isFinite(rawOffset) && rawOffset >= 0
+        ? rawOffset
+        : (Number.isFinite(rawPage) && rawPage > 0 ? (rawPage - 1) * limit : 0);
+
+      const { data, error, count } = await supabase
         .from('goals')
-        .select('*')
+        .select('*', { count: 'exact' })
         .eq('user_id', user_id)
-        .order('target_date', { ascending: true });
+        .order('target_date', { ascending: true })
+        .range(offset, offset + limit - 1);
 
       if (error) {
         console.error('[/api/goals] GET error:', error);
         return res.status(500).json({ error: 'Failed to retrieve goals from database' });
+      }
+
+      if (count !== null && count !== undefined) {
+        res.setHeader('X-Total-Count', String(count));
+        res.setHeader('X-Limit', String(limit));
+        res.setHeader('X-Offset', String(offset));
       }
 
       return res.status(200).json(data ?? []);
@@ -196,7 +211,7 @@ export default async function handler(req, res) {
 
       if (error) {
         console.error('[/api/goals] PUT error:', error);
-        return res.status(500).json({ error: error.message || 'Failed to update goal in database' });
+        return res.status(500).json({ error: 'Failed to update goal in database' });
       }
 
       if (!data) return res.status(404).json({ error: 'Goal not found or access denied' });

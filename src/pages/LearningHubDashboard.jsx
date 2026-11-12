@@ -120,6 +120,9 @@ export default function LearningHubDashboard() {
         navigate(`/learning/journey/${result.journey.id}`);
       }
       fetchDashboardData(true);
+    } else {
+      const err = await res.json().catch(() => ({}));
+      setFetchError(err.error || 'Failed to create journey');
     }
   };
 

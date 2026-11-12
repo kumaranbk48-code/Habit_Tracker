@@ -302,12 +302,52 @@ export async function deleteAction(id) {
 }
 
 /**
+ * Resets all 'stuck' queue actions back to 'pending' (retries = 0) so the user can retry manually.
+ */
+export async function resetStuckActions(userId) {
+  if (!userId) return 0;
+  const db = await openOfflineDb();
+  if (!db) return 0;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORES.SYNC_QUEUE, 'readwrite');
+      const store = tx.objectStore(STORES.SYNC_QUEUE);
+      const index = store.index('userId');
+      const req = index.getAll(String(userId));
+      let resetCount = 0;
+
+      req.onsuccess = () => {
+        const items = req.result || [];
+        const now = new Date().toISOString();
+        for (const item of items) {
+          if (item.status === 'stuck') {
+            item.status = 'pending';
+            item.retries = 0;
+            item.updatedAt = now;
+            store.put(item);
+            resetCount++;
+          }
+        }
+        tx.oncomplete = () => {
+          if (resetCount > 0) dispatchQueueEvent();
+          resolve(resetCount);
+        };
+      };
+      req.onerror = () => resolve(0);
+    } catch {
+      resolve(0);
+    }
+  });
+}
+
+/**
  * Returns queue counts for active user.
  */
 export async function getQueueStats(userId) {
-  if (!userId) return { pending: 0, syncing: 0, failed: 0 };
+  if (!userId) return { pending: 0, syncing: 0, failed: 0, stuck: 0, total: 0 };
   const db = await openOfflineDb();
-  if (!db) return { pending: 0, syncing: 0, failed: 0 };
+  if (!db) return { pending: 0, syncing: 0, failed: 0, stuck: 0, total: 0 };
 
   return new Promise((resolve) => {
     try {
@@ -321,16 +361,18 @@ export async function getQueueStats(userId) {
         let pending = 0;
         let syncing = 0;
         let failed = 0;
+        let stuck = 0;
         for (const item of items) {
           if (item.status === 'pending') pending++;
           else if (item.status === 'syncing') syncing++;
           else if (item.status === 'failed') failed++;
+          else if (item.status === 'stuck') stuck++;
         }
-        resolve({ pending, syncing, failed, total: pending + syncing + failed });
+        resolve({ pending, syncing, failed, stuck, total: pending + syncing + failed + stuck });
       };
-      req.onerror = () => resolve({ pending: 0, syncing: 0, failed: 0, total: 0 });
+      req.onerror = () => resolve({ pending: 0, syncing: 0, failed: 0, stuck: 0, total: 0 });
     } catch {
-      resolve({ pending: 0, syncing: 0, failed: 0, total: 0 });
+      resolve({ pending: 0, syncing: 0, failed: 0, stuck: 0, total: 0 });
     }
   });
 }
@@ -339,16 +381,16 @@ export async function getQueueStats(userId) {
  * Purges ALL cached data and queue records for a specific user upon logout.
  * Ensures zero data bleeding across user accounts on shared devices.
  */
-export async function clearUserCache(userId) {
+export async function clearUserCache(userId, { preserveQueue = false } = {}) {
   if (!userId) return;
   const db = await openOfflineDb();
   if (!db) return;
 
   return new Promise((resolve) => {
     try {
-      const tx = db.transaction([STORES.CACHED_DATA, STORES.SYNC_QUEUE], 'readwrite');
+      const stores = preserveQueue ? [STORES.CACHED_DATA] : [STORES.CACHED_DATA, STORES.SYNC_QUEUE];
+      const tx = db.transaction(stores, 'readwrite');
       const cacheStore = tx.objectStore(STORES.CACHED_DATA);
-      const queueStore = tx.objectStore(STORES.SYNC_QUEUE);
 
       const cacheIndex = cacheStore.index('userId');
       const cacheReq = cacheIndex.openCursor(IDBKeyRange.only(String(userId)));
@@ -360,15 +402,18 @@ export async function clearUserCache(userId) {
         }
       };
 
-      const queueIndex = queueStore.index('userId');
-      const queueReq = queueIndex.openCursor(IDBKeyRange.only(String(userId)));
-      queueReq.onsuccess = (e) => {
-        const cursor = e.target.result;
-        if (cursor) {
-          queueStore.delete(cursor.primaryKey);
-          cursor.continue();
-        }
-      };
+      if (!preserveQueue) {
+        const queueStore = tx.objectStore(STORES.SYNC_QUEUE);
+        const queueIndex = queueStore.index('userId');
+        const queueReq = queueIndex.openCursor(IDBKeyRange.only(String(userId)));
+        queueReq.onsuccess = (e) => {
+          const cursor = e.target.result;
+          if (cursor) {
+            queueStore.delete(cursor.primaryKey);
+            cursor.continue();
+          }
+        };
+      }
 
       tx.oncomplete = () => {
         dispatchQueueEvent();

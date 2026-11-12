@@ -52,6 +52,33 @@ export default async function handler(req, res) {
         supabase.from('season_habits').select('*').eq('user_id', user_id)
       ]);
 
+      // Inspect query errors to avoid silent data loss in GDPR export (F-12)
+      const exportErrors = [];
+      if (habitsRes.error) exportErrors.push({ section: 'habits', message: habitsRes.error.message });
+      if (trackingRes.error) exportErrors.push({ section: 'habitTracking', message: trackingRes.error.message });
+      if (goalsRes.error) exportErrors.push({ section: 'goals', message: goalsRes.error.message });
+      if (milestonesRes.error) exportErrors.push({ section: 'goalMilestones', message: milestonesRes.error.message });
+      if (remindersRes.error) exportErrors.push({ section: 'reminders', message: remindersRes.error.message });
+      if (achievementsRes.error) exportErrors.push({ section: 'achievements', message: achievementsRes.error.message });
+      if (journeysRes.error) exportErrors.push({ section: 'learningJourneys', message: journeysRes.error.message });
+      if (phasesRes.error) exportErrors.push({ section: 'learningPhases', message: phasesRes.error.message });
+      if (topicsRes.error) exportErrors.push({ section: 'learningTopics', message: topicsRes.error.message });
+      if (tasksRes.error) exportErrors.push({ section: 'learningTasks', message: tasksRes.error.message });
+      if (resourcesRes.error) exportErrors.push({ section: 'learningResources', message: resourcesRes.error.message });
+      if (notesRes.error) exportErrors.push({ section: 'learningNotes', message: notesRes.error.message });
+      if (logsRes.error) exportErrors.push({ section: 'learningPracticeLogs', message: logsRes.error.message });
+      if (profileRes.error) exportErrors.push({ section: 'profile', message: profileRes.error.message });
+      if (seasonsRes.error) exportErrors.push({ section: 'seasons', message: seasonsRes.error.message });
+      if (seasonHabitsRes.error) exportErrors.push({ section: 'seasonHabits', message: seasonHabitsRes.error.message });
+
+      if (exportErrors.length > 0) {
+        console.error('[/api/account] Export encountered section query errors:', exportErrors);
+        return res.status(500).json({
+          error: 'Failed to generate complete data export',
+          failedSections: exportErrors
+        });
+      }
+
       const exportPayload = {
         app: 'HabiZ',
         version: '1.0.0',
@@ -87,36 +114,57 @@ export default async function handler(req, res) {
 
     // ── DELETE: Permanent Account & Data Deletion ────────────────────────────
     if (req.method === 'DELETE') {
-      // 1. Delete all learning sub-tables and journeys
-      await Promise.allSettled([
-        supabase.from('learning_practice_logs').delete().eq('user_id', user_id),
-        supabase.from('learning_notes').delete().eq('user_id', user_id),
-        supabase.from('learning_resources').delete().eq('user_id', user_id),
-        supabase.from('learning_tasks').delete().eq('user_id', user_id),
-        supabase.from('reminder_events').delete().eq('user_id', user_id)
-      ]);
-      await supabase.from('learning_topics').delete().eq('user_id', user_id);
-      await supabase.from('learning_phases').delete().eq('user_id', user_id);
-      await supabase.from('learning_journeys').delete().eq('user_id', user_id);
+      // Enforce recent authentication (within 15 minutes) before destructive deletion using ONLY user.last_sign_in_at
+      const lastSignIn = user.last_sign_in_at ? new Date(user.last_sign_in_at).getTime() : 0;
+      const MAX_AUTH_AGE_MS = 15 * 60 * 1000; // 15 minutes
 
-      // 2. Delete tracking, reminders, milestones, goals, habits, achievements, seasons, subscriptions
-      await Promise.allSettled([
-        supabase.from('habit_tracking').delete().eq('user_id', user_id),
-        supabase.from('reminders').delete().eq('user_id', user_id),
-        supabase.from('goal_milestones').delete().eq('user_id', user_id),
-        supabase.from('push_subscriptions').delete().eq('user_id', user_id),
-        supabase.from('user_achievements').delete().eq('user_id', user_id),
-        supabase.from('season_habits').delete().eq('user_id', user_id)
-      ]);
-      await supabase.from('seasons').delete().eq('user_id', user_id);
-      await supabase.from('goals').delete().eq('user_id', user_id);
-      await supabase.from('habits').delete().eq('user_id', user_id);
-      await supabase.from('profiles').delete().eq('id', user_id);
+      if (!lastSignIn || (Date.now() - lastSignIn) > MAX_AUTH_AGE_MS) {
+        return res.status(403).json({
+          error: 'Recent authentication required. Please sign in again before deleting your account.'
+        });
+      }
 
-      // 3. Delete user authentication identity via Admin API
+      // 1. Delete user data across all tables in order, verifying each result
+      const tablesToDelete = [
+        { table: 'learning_practice_logs', col: 'user_id' },
+        { table: 'learning_notes', col: 'user_id' },
+        { table: 'learning_resources', col: 'user_id' },
+        { table: 'learning_tasks', col: 'user_id' },
+        { table: 'learning_topics', col: 'user_id' },
+        { table: 'learning_phases', col: 'user_id' },
+        { table: 'learning_journeys', col: 'user_id' },
+        { table: 'reminder_events', col: 'user_id' },
+        { table: 'reminders', col: 'user_id' },
+        { table: 'habit_tracking', col: 'user_id' },
+        { table: 'season_habits', col: 'user_id' },
+        { table: 'seasons', col: 'user_id' },
+        { table: 'goal_milestones', col: 'user_id' },
+        { table: 'goals', col: 'user_id' },
+        { table: 'habits', col: 'user_id' },
+        { table: 'push_subscriptions', col: 'user_id' },
+        { table: 'user_achievements', col: 'user_id' },
+        { table: 'profiles', col: 'id' }
+      ];
+
+      for (const { table, col } of tablesToDelete) {
+        const { error: tableDelErr } = await supabase.from(table).delete().eq(col, user_id);
+        if (tableDelErr) {
+          console.error(`[/api/account] Error deleting from ${table}:`, tableDelErr.message);
+          return res.status(500).json({
+            error: `Failed to delete account data from ${table}. Deletion aborted.`,
+            details: tableDelErr.message
+          });
+        }
+      }
+
+      // 2. Delete user authentication identity via Admin API
       const { error: deleteUserErr } = await supabase.auth.admin.deleteUser(user_id);
       if (deleteUserErr) {
-        console.warn('[/api/account] Warning during auth.admin.deleteUser:', deleteUserErr.message);
+        console.error('[/api/account] Error during auth.admin.deleteUser:', deleteUserErr.message);
+        return res.status(500).json({
+          error: 'Failed to delete user authentication record. Account deletion was not completed.',
+          details: deleteUserErr.message
+        });
       }
 
       return res.status(200).json({

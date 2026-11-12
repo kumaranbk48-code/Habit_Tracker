@@ -151,6 +151,23 @@ export async function checkExactAlarmPermission() {
 }
 
 /**
+ * Check if full-screen intents are allowed on Android 14+ (API 34+)
+ */
+export async function checkFullScreenIntentPermission() {
+  if (!isNative) return true;
+  try {
+    const res = await NativeAlarmScheduler.canUseFullScreenIntent().catch(() => null);
+    if (res?.full_screen_intent) {
+      return res.full_screen_intent === 'granted';
+    }
+    return true;
+  } catch (err) {
+    console.warn('[NativeNotifications] checkFullScreenIntentPermission error:', err);
+    return true;
+  }
+}
+
+/**
  * Direct user to the Android settings screen to configure exact alarms
  */
 export async function requestExactAlarmPermission() {
@@ -269,6 +286,7 @@ export function buildNotificationsForReminder(reminder, targetName = '', options
               isExactNotification: true,
               isExactMandatory: false,
               foreground: true,
+              isRecurring: false,
               extra: {
                 reminderId,
                 habitId: reminder.habit_id,
@@ -334,6 +352,9 @@ export function buildNotificationsForReminder(reminder, targetName = '', options
           isExactNotification: true,
           isExactMandatory: false,
           foreground: true,
+          isRecurring: true,
+          timeStr,
+          daysOfWeek: Array.isArray(daysList) ? daysList.join(',') : '',
           extra: {
             reminderId,
             habitId: reminder.habit_id,
@@ -534,6 +555,9 @@ export async function syncNativeReminders(
             habitId: String(reminder.habit_id || ''),
             targetType: reminder.target_type || 'habit',
             isSnooze: false,
+            isRecurring: Boolean(n.isRecurring),
+            timeStr: n.timeStr || n.extra?.timeStr || '',
+            daysOfWeek: n.daysOfWeek || n.extra?.daysOfWeek || '',
           });
         }
       } else {
@@ -541,6 +565,14 @@ export async function syncNativeReminders(
       }
     }
 
+    // Sort alarms chronologically by trigger time before applying the 50-alarm cap
+    const getAlarmAt = (item) => {
+      const raw = item?.at ?? item?.schedule?.at;
+      if (raw instanceof Date) return raw.getTime();
+      const num = Number(raw);
+      return Number.isFinite(num) ? num : Number.MAX_SAFE_INTEGER;
+    };
+    nativeAlarms.sort((a, b) => getAlarmAt(a) - getAlarmAt(b));
     const boundedAlarms = nativeAlarms.slice(0, 50);
     const fingerprint = boundedAlarms.map((a) => `${a.id}:${a.at}`).sort().join('|');
     const hasChanged = force || fingerprint !== lastSyncedFingerprint;
@@ -549,13 +581,10 @@ export async function syncNativeReminders(
 
     if (hasChanged) {
       lastSyncedFingerprint = fingerprint;
-      // Cancel and reschedule recurring native alarms with AlarmManager.setAlarmClock()
-      // Native scheduler preserves all active snooze alarms in a separate partition
-      await NativeAlarmScheduler.cancelAll().catch(() => {});
-      if (boundedAlarms.length > 0) {
-        await NativeAlarmScheduler.schedule({ alarms: boundedAlarms });
-        console.log(`[NativeSync] Synced ${boundedAlarms.length} high-priority recurring alarm(s) with AlarmManager.setAlarmClock() (reason: '${reason}').`);
-      }
+      // Atomically replace recurring native alarms (schedules new alarms before cancelling stale ones)
+      // Native scheduler preserves all active snooze alarms in a separate partition (G-06)
+      await NativeAlarmScheduler.replaceAll({ alarms: boundedAlarms });
+      console.log(`[NativeSync] Atomically synced ${boundedAlarms.length} high-priority recurring alarm(s) with AlarmManager.setAlarmClock() (reason: '${reason}').`);
     } else {
       console.log(`[NativeSync] Skipping schedule sync: all ${boundedAlarms.length} native alarms already match schedule (reason: '${reason}').`);
     }

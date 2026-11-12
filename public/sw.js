@@ -1,8 +1,41 @@
 // ─── HabitTracker Service Worker ──────────────────────────────────────────────
 // Handles: offline application shell caching, push notifications, local timer reminders,
 // notification click routing, and background sync triggers.
-const SW_VERSION = 'habittracker-pwa-v1';
+const SW_VERSION = 'habittracker-pwa-v2';
 const STATIC_CACHE = `${SW_VERSION}-static`;
+
+/**
+ * Verifies response Content-Type matches the requested asset type (G-07 / E10).
+ * Prevents caching stale HTML fallback pages under .js/.css/image URLs.
+ */
+function isMatchingContentType(request, response) {
+  if (!response || !response.ok) return false;
+  const ct = (response.headers?.get('content-type') || '').toLowerCase();
+  const urlStr = typeof request === 'string' ? request : request.url;
+  const dest = typeof request === 'string' ? '' : (request.destination || '');
+  const mode = typeof request === 'string' ? '' : (request.mode || '');
+  const pathname = new URL(urlStr, self.location.origin).pathname.toLowerCase();
+
+  if (mode === 'navigate' || pathname === '/' || pathname.endsWith('.html')) {
+    return ct.includes('text/html');
+  }
+  if (dest === 'script' || pathname.endsWith('.js') || pathname.endsWith('.mjs')) {
+    return ct.includes('javascript') || ct.includes('ecmascript');
+  }
+  if (dest === 'style' || pathname.endsWith('.css')) {
+    return ct.includes('text/css');
+  }
+  if (dest === 'image' || /\.(png|jpe?g|webp|svg|ico|gif)$/i.test(pathname)) {
+    return ct.startsWith('image/');
+  }
+  if (dest === 'font' || /\.(woff2?|ttf|otf|eot)$/i.test(pathname)) {
+    return ct.includes('font') || ct.includes('application/octet-stream');
+  }
+  if (pathname.endsWith('.json') || pathname.endsWith('manifest.json')) {
+    return ct.includes('application/json') || ct.includes('application/manifest+json');
+  }
+  return !ct.includes('text/html');
+}
 
 // Core Application Shell assets pre-cached on install
 const PRECACHE_ASSETS = [
@@ -27,7 +60,7 @@ self.addEventListener('install', (event) => {
           PRECACHE_ASSETS.map((asset) =>
             fetch(asset, { cache: 'no-cache' })
               .then((res) => {
-                if (res.ok) return cache.put(asset, res);
+                if (res.ok && isMatchingContentType(asset, res)) return cache.put(asset, res);
                 return null;
               })
               .catch(() => null)
@@ -75,7 +108,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          if (response && response.ok) {
+          if (response && response.ok && isMatchingContentType(request, response)) {
             const clone = response.clone();
             caches.open(STATIC_CACHE).then((cache) => cache.put(request, clone));
           }
@@ -103,7 +136,12 @@ self.addEventListener('fetch', (event) => {
         return cachedResponse;
       }
       return fetch(request).then((networkResponse) => {
-        if (networkResponse && networkResponse.ok && (networkResponse.type === 'basic' || networkResponse.type === 'cors')) {
+        if (
+          networkResponse &&
+          networkResponse.ok &&
+          (networkResponse.type === 'basic' || networkResponse.type === 'cors') &&
+          isMatchingContentType(request, networkResponse)
+        ) {
           const clone = networkResponse.clone();
           caches.open(STATIC_CACHE).then((cache) => cache.put(request, clone));
         }
@@ -336,7 +374,7 @@ self.addEventListener('message', (event) => {
 
         let title = '🔔 Reminder';
         let body = reminder.custom_text || 'Time for your scheduled reminder!';
-        let targetUrl = '/dashboard';
+        let targetUrl = '/';
 
         if (targetType === 'habit') {
           const habitName = reminder.habit_name || 'Habit';

@@ -1,0 +1,42 @@
+name: HabiZ CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://example.invalid
+      SUPABASE_SERVICE_ROLE_KEY: dummy-ci-service-role-key
+      CRON_SECRET: dummy-ci-cron-secret
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run TypeScript & Vite production build
+        run: npm run build
+
+      - name: Run automated test suite
+        run: node --test tests/*.test.js
+
+      - name: Verify fresh-database SQL migrations
+        run: node tests/migration-check.mjs
+

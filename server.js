@@ -25,7 +25,8 @@ import seasonsHandler from './api/_routes/seasons.js';
 import aiHandler from './api/_routes/ai.js';
 
 const app = express();
-app.set('trust proxy', 1);
+const trustProxyHops = parseInt(process.env.TRUST_PROXY_HOPS || '0', 10);
+app.set('trust proxy', trustProxyHops > 0 ? trustProxyHops : false);
 const PORT = process.env.PORT || process.env.API_PORT || 3001;
 
 // ── Security Headers Middleware ──────────────────────────────────────────────
@@ -50,8 +51,7 @@ app.use((req, res, next) => {
   if (!req.path.startsWith('/api/') || req.path === '/api/health') {
     return next();
   }
-  const forwarded = req.headers['x-forwarded-for'];
-  const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : null) || req.ip || req.socket?.remoteAddress || 'unknown';
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
   const now = Date.now();
   const record = rateLimitMap.get(ip);
 
@@ -79,7 +79,13 @@ setInterval(() => {
 }, 5 * 60 * 1000).unref();
 
 function wrap(handler) {
-  return (req, res) => handler(req, res);
+  return (req, res, next) => {
+    try {
+      Promise.resolve(handler(req, res, next)).catch(next);
+    } catch (err) {
+      next(err);
+    }
+  };
 }
 
 app.all('/api/health',         (req, res) => res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() }));
@@ -109,16 +115,26 @@ app.all('/api/*', (req, res) => {
 
 app.use(express.static(path.join(__dirname, 'dist')));
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+// ── SPA Fallback (GET/HEAD) & Non-GET Non-API Catch-All ───────────────────────
+app.all('*', (req, res) => {
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  } else {
+    res.status(404).json({ error: 'Endpoint not found' });
+  }
 });
 
-// JSON body limit error handler
+// ── Global Error Handler ──────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
   if (err?.type === 'entity.too.large') {
     return res.status(413).json({ error: 'Payload too large — maximum body size is 100kb' });
   }
-  next(err);
+  if (err?.type === 'entity.parse.failed' || (err instanceof SyntaxError && err.status === 400 && 'body' in err)) {
+    return res.status(400).json({ error: 'Malformed JSON payload' });
+  }
+  console.error('[Server Error]', err?.message || err);
+  const status = typeof err.status === 'number' && err.status >= 400 && err.status < 600 ? err.status : 500;
+  res.status(status).json({ error: status === 500 ? 'Internal server error' : (err.message || 'Error processing request') });
 });
 
 const server = app.listen(PORT, () => {

@@ -2,13 +2,7 @@ import supabase from './db-client.js';
 import { verifyUserToken } from './auth-helper.js';
 import { applyCors } from './cors.js';
 import { getUserTimeZone, getDateInTimeZone } from './date-utils.js';
-import {
-  getLocalSeasons,
-  getLocalSeason,
-  saveLocalSeason,
-  updateLocalSeason,
-  deleteLocalSeason,
-} from './seasons-storage.js';
+import { fetchAllSupabaseRows } from './paginate-query.js';
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -24,41 +18,22 @@ export default async function handler(req, res) {
     const timeZone = getUserTimeZone(req, user);
     const today = getDateInTimeZone(new Date(), timeZone);
 
-    // ── Helper: Fetch seasons merging Supabase & local storage ───────────────
+    // ── Helper: Fetch seasons from Supabase ───────────────────────────────────
     async function fetchRawSeasons() {
-      let supabaseSeasons = [];
-      let supabaseHasTable = false;
-      try {
-        const { data, error } = await supabase
-          .from('seasons')
-          .select('*')
-          .eq('user_id', user_id)
-          .order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('seasons')
+        .select('*')
+        .eq('user_id', user_id)
+        .order('created_at', { ascending: false });
 
-        if (!error && data) {
-          supabaseSeasons = data;
-          supabaseHasTable = true;
-        }
-      } catch (err) {
-        console.warn('[/api/seasons] Supabase seasons query skipped:', err?.message);
+      if (error) {
+        console.error('[/api/seasons] Supabase seasons query error:', error.message);
+        return { seasons: [], error };
       }
 
-      const localSeasons = getLocalSeasons(user_id);
-
-      // Merge seasons avoiding duplicates by id
-      const seenIds = new Set(supabaseSeasons.map(s => s.id));
-      const combined = [...supabaseSeasons];
-      for (const ls of localSeasons) {
-        if (!seenIds.has(ls.id)) {
-          combined.push(ls);
-          seenIds.add(ls.id);
-        }
-      }
-
-      // Sort newest created first
-      combined.sort((a, b) => new Date(b.created_at || b.start_date) - new Date(a.created_at || a.start_date));
-
-      return { seasons: combined, supabaseHasTable };
+      const seasons = data || [];
+      seasons.sort((a, b) => new Date(b.created_at || b.start_date) - new Date(a.created_at || a.start_date));
+      return { seasons, error: null };
     }
 
     // ── GET: List seasons, get active season, or get season review ─────────────
@@ -67,22 +42,14 @@ export default async function handler(req, res) {
 
       // 1. Season Review Handler
       if (action === 'review' && id) {
-        let season = null;
-        try {
-          const { data } = await supabase
-            .from('seasons')
-            .select('*')
-            .eq('id', id)
-            .eq('user_id', user_id)
-            .single();
-          season = data || null;
-        } catch {}
+        const { data: season, error: sErr } = await supabase
+          .from('seasons')
+          .select('*')
+          .eq('id', id)
+          .eq('user_id', user_id)
+          .maybeSingle();
 
-        if (!season) {
-          season = getLocalSeason(user_id, id);
-        }
-
-        if (!season) {
+        if (sErr || !season) {
           return res.status(404).json({ error: 'Season not found' });
         }
 
@@ -94,7 +61,9 @@ export default async function handler(req, res) {
             .select('habit_id, habits(*)')
             .eq('season_id', season.id)
             .eq('user_id', user_id);
-          seasonHabits = shRes.data?.map(r => r.habits).filter(Boolean) || [];
+          seasonHabits = (shRes.data || [])
+            .map(r => r.habits)
+            .filter(h => h && (!h.user_id || h.user_id === user_id));
         } catch {}
 
         if (seasonHabits.length === 0) {
@@ -126,14 +95,18 @@ export default async function handler(req, res) {
         let trackingLogs = [];
         if (habitIds.length > 0) {
           try {
-            const { data: tData } = await supabase
-              .from('habit_tracking')
-              .select('*')
-              .eq('user_id', user_id)
-              .in('habit_id', habitIds)
-              .gte('completion_date', startDate)
-              .lte('completion_date', effectiveEnd)
-              .eq('status', true);
+            const { data: tData } = await fetchAllSupabaseRows(() =>
+              supabase
+                .from('habit_tracking')
+                .select('*')
+                .eq('user_id', user_id)
+                .in('habit_id', habitIds)
+                .gte('completion_date', startDate)
+                .lte('completion_date', effectiveEnd)
+                .eq('status', true)
+                .order('completion_date', { ascending: true })
+                .order('id', { ascending: true })
+            );
             trackingLogs = tData || [];
           } catch {}
         }
@@ -202,22 +175,22 @@ export default async function handler(req, res) {
       }
 
       // 2. Normal List / Active Season Query
-      const { seasons: seasonsData, supabaseHasTable } = await fetchRawSeasons();
+      const { seasons: seasonsData, error: fetchErr } = await fetchRawSeasons();
+      if (fetchErr) {
+        return res.status(500).json({ error: 'Failed to fetch seasons' });
+      }
 
       // Check for seasons whose end_date has naturally expired: auto-mark as 'ended'
       for (const s of seasonsData) {
         if (s.status === 'active' && today > s.end_date) {
           s.status = 'ended';
-          updateLocalSeason(user_id, s.id, { status: 'ended' });
-          if (supabaseHasTable) {
-            supabase
-              .from('seasons')
-              .update({ status: 'ended', updated_at: new Date().toISOString() })
-              .eq('id', s.id)
-              .eq('user_id', user_id)
-              .then(() => {})
-              .catch(() => {});
-          }
+          supabase
+            .from('seasons')
+            .update({ status: 'ended', updated_at: new Date().toISOString() })
+            .eq('id', s.id)
+            .eq('user_id', user_id)
+            .then(() => {})
+            .catch(() => {});
         }
       }
 
@@ -284,59 +257,43 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Start date cannot be after end date' });
       }
 
-      const activeIds = Array.isArray(active_habit_ids) ? active_habit_ids : [];
-
-      let createdSeason = null;
-
-      // 1. Try Supabase insert first
-      try {
-        const { data, error } = await supabase
-          .from('seasons')
-          .insert({
-            user_id,
-            name: name.trim(),
-            description: description?.trim() || null,
-            start_date,
-            end_date,
-            status: 'active',
-          })
-          .select()
-          .single();
-
-        if (!error && data) {
-          createdSeason = data;
-        } else if (error) {
-          console.warn('[/api/seasons] Supabase insert error, falling back to local store:', error.message);
+      const rawActiveIds = Array.isArray(active_habit_ids)
+        ? [...new Set(active_habit_ids.filter(hId => typeof hId === 'string' && hId.trim().length > 0))]
+        : [];
+      let activeIds = [];
+      if (rawActiveIds.length > 0) {
+        const { data: ownedHabits, error: ownedErr } = await supabase
+          .from('habits')
+          .select('id')
+          .eq('user_id', user_id)
+          .in('id', rawActiveIds);
+        if (ownedErr) {
+          console.error('[/api/seasons] Failed to verify habit ownership:', ownedErr.message);
+          return res.status(500).json({ error: 'Failed to verify habit ownership' });
         }
-      } catch (err) {
-        console.warn('[/api/seasons] Supabase insert exception, falling back:', err?.message);
+        const ownedSet = new Set((ownedHabits || []).map(h => h.id));
+        activeIds = rawActiveIds.filter(hId => ownedSet.has(hId));
       }
 
-      // 2. If Supabase table missing or errored, save to local persistent store
-      if (!createdSeason) {
-        createdSeason = saveLocalSeason(user_id, {
+      const { data: createdSeason, error: insertError } = await supabase
+        .from('seasons')
+        .insert({
+          user_id,
           name: name.trim(),
           description: description?.trim() || null,
           start_date,
           end_date,
           status: 'active',
-          active_habit_ids: activeIds,
-        });
-      } else {
-        // Also persist copy locally to guarantee 100% data durability
-        saveLocalSeason(user_id, {
-          id: createdSeason.id,
-          name: createdSeason.name,
-          description: createdSeason.description,
-          start_date: createdSeason.start_date,
-          end_date: createdSeason.end_date,
-          status: createdSeason.status,
-          active_habit_ids: activeIds,
-          created_at: createdSeason.created_at,
-        });
+        })
+        .select()
+        .single();
+
+      if (insertError || !createdSeason) {
+        console.error('[/api/seasons] Supabase insert error:', insertError?.message);
+        return res.status(500).json({ error: 'Failed to create season' });
       }
 
-      // 3. Best-effort insert into season_habits table if table exists
+      // Best-effort insert into season_habits table if table exists
       if (activeIds.length > 0) {
         const seasonHabitsRows = activeIds.map(hId => ({
           user_id,
@@ -348,7 +305,7 @@ export default async function handler(req, res) {
         } catch {}
       }
 
-      // 4. Best-effort update habits status & season_id
+      // Best-effort update habits status & season_id
       if (activeIds.length > 0) {
         try {
           const { data: allUserHabits } = await supabase
@@ -361,7 +318,6 @@ export default async function handler(req, res) {
             .map(h => h.id)
             .filter(hId => !activeSet.has(hId));
 
-          // Try updating status on habits (silently ignore if column doesn't exist)
           await supabase
             .from('habits')
             .update({ status: 'active', season_id: createdSeason.id })
@@ -403,21 +359,18 @@ export default async function handler(req, res) {
 
       // Action 2: End Season (Move from Current/Active to Past/Ended)
       if (action === 'end_season' && id) {
-        // Update local store
-        const updatedLocal = updateLocalSeason(user_id, id, { status: 'ended' });
+        const { data: supabaseSeason, error: endErr } = await supabase
+          .from('seasons')
+          .update({ status: 'ended', updated_at: new Date().toISOString() })
+          .eq('id', id)
+          .eq('user_id', user_id)
+          .select()
+          .single();
 
-        // Update Supabase if table exists
-        let supabaseSeason = null;
-        try {
-          const { data } = await supabase
-            .from('seasons')
-            .update({ status: 'ended', updated_at: new Date().toISOString() })
-            .eq('id', id)
-            .eq('user_id', user_id)
-            .select()
-            .single();
-          supabaseSeason = data;
-        } catch {}
+        if (endErr || !supabaseSeason) {
+          console.error('[/api/seasons] End season error:', endErr?.message);
+          return res.status(500).json({ error: 'Failed to end season' });
+        }
 
         // Resume habits
         try {
@@ -428,14 +381,42 @@ export default async function handler(req, res) {
             .eq('season_id', id);
         } catch {}
 
-        return res.status(200).json({ season: supabaseSeason || updatedLocal || { id, status: 'ended' } });
+        return res.status(200).json({ season: supabaseSeason });
       }
 
       // Action 3: Update Active Habits for Season
       if (action === 'update_habits' && id) {
-        const activeIds = Array.isArray(active_habit_ids) ? active_habit_ids : [];
+        const { data: ownedSeason, error: seasonCheckErr } = await supabase
+          .from('seasons')
+          .select('id')
+          .eq('id', id)
+          .eq('user_id', user_id)
+          .maybeSingle();
+        if (seasonCheckErr) {
+          console.error('[/api/seasons] Failed to verify season ownership:', seasonCheckErr.message);
+          return res.status(500).json({ error: 'Failed to update season habits' });
+        }
+        if (!ownedSeason) {
+          return res.status(404).json({ error: 'Season not found' });
+        }
 
-        updateLocalSeason(user_id, id, { active_habit_ids: activeIds });
+        const rawActiveIds = Array.isArray(active_habit_ids)
+          ? [...new Set(active_habit_ids.filter(hId => typeof hId === 'string' && hId.trim().length > 0))]
+          : [];
+        let activeIds = [];
+        if (rawActiveIds.length > 0) {
+          const { data: ownedHabits, error: ownedErr } = await supabase
+            .from('habits')
+            .select('id')
+            .eq('user_id', user_id)
+            .in('id', rawActiveIds);
+          if (ownedErr) {
+            console.error('[/api/seasons] Failed to verify habit ownership:', ownedErr.message);
+            return res.status(500).json({ error: 'Failed to verify habit ownership' });
+          }
+          const ownedSet = new Set((ownedHabits || []).map(h => h.id));
+          activeIds = rawActiveIds.filter(hId => ownedSet.has(hId));
+        }
 
         try {
           await supabase.from('season_habits').delete().eq('season_id', id).eq('user_id', user_id);
@@ -471,7 +452,10 @@ export default async function handler(req, res) {
                 .in('id', unchosenIds);
             }
           }
-        } catch {}
+        } catch (err) {
+          console.error('[/api/seasons] Error updating season habits:', err);
+          return res.status(500).json({ error: 'Failed to update season habits' });
+        }
 
         return res.status(200).json({ ok: true, activeHabitIds: activeIds });
       }
@@ -486,40 +470,38 @@ export default async function handler(req, res) {
           updated_at: new Date().toISOString(),
         };
 
-        const localUpdated = updateLocalSeason(user_id, id, updateObj);
+        const { data: supabaseUpdated, error: editErr } = await supabase
+          .from('seasons')
+          .update(updateObj)
+          .eq('id', id)
+          .eq('user_id', user_id)
+          .select()
+          .single();
 
-        let supabaseUpdated = null;
-        try {
-          const { data } = await supabase
-            .from('seasons')
-            .update(updateObj)
-            .eq('id', id)
-            .eq('user_id', user_id)
-            .select()
-            .single();
-          supabaseUpdated = data;
-        } catch {}
+        if (editErr || !supabaseUpdated) {
+          console.error('[/api/seasons] Edit season error:', editErr?.message);
+          return res.status(500).json({ error: 'Failed to edit season' });
+        }
 
-        return res.status(200).json({ season: supabaseUpdated || localUpdated || { id, ...updateObj } });
+        return res.status(200).json({ season: supabaseUpdated });
       }
 
       // Action 5: Reactivate an ended/archived season
       if (action === 'reactivate' && id) {
-        const localReactivated = updateLocalSeason(user_id, id, { status: 'active' });
+        const { data: supabaseReactivated, error: reactivateErr } = await supabase
+          .from('seasons')
+          .update({ status: 'active', updated_at: new Date().toISOString() })
+          .eq('id', id)
+          .eq('user_id', user_id)
+          .select()
+          .single();
 
-        let supabaseReactivated = null;
-        try {
-          const { data } = await supabase
-            .from('seasons')
-            .update({ status: 'active', updated_at: new Date().toISOString() })
-            .eq('id', id)
-            .eq('user_id', user_id)
-            .select()
-            .single();
-          supabaseReactivated = data;
-        } catch {}
+        if (reactivateErr || !supabaseReactivated) {
+          console.error('[/api/seasons] Reactivate season error:', reactivateErr?.message);
+          return res.status(500).json({ error: 'Failed to reactivate season' });
+        }
 
-        return res.status(200).json({ season: supabaseReactivated || localReactivated || { id, status: 'active' } });
+        return res.status(200).json({ season: supabaseReactivated });
       }
 
       return res.status(400).json({ error: 'Invalid PUT action' });
@@ -530,10 +512,6 @@ export default async function handler(req, res) {
       const { id } = req.body || {};
       if (!id) return res.status(400).json({ error: 'Season ID is required' });
 
-      // Delete from local store
-      deleteLocalSeason(user_id, id);
-
-      // Best effort delete from Supabase
       try {
         await supabase
           .from('season_habits')
@@ -547,12 +525,20 @@ export default async function handler(req, res) {
           .eq('season_id', id)
           .eq('user_id', user_id);
 
-        await supabase
+        const { error: delErr } = await supabase
           .from('seasons')
           .delete()
           .eq('id', id)
           .eq('user_id', user_id);
-      } catch {}
+
+        if (delErr) {
+          console.error('[/api/seasons] Delete season error:', delErr.message);
+          return res.status(500).json({ error: 'Failed to delete season' });
+        }
+      } catch (err) {
+        console.error('[/api/seasons] Delete error:', err);
+        return res.status(500).json({ error: 'Failed to delete season' });
+      }
 
       return res.status(200).json({ ok: true, message: 'Season deleted successfully' });
     }
@@ -560,6 +546,6 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (err) {
     console.error('[/api/seasons] unexpected error:', err);
-    return res.status(500).json({ error: err?.message || 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }

@@ -2,6 +2,7 @@ import supabase from './db-client.js';
 import { verifyUserToken } from './auth-helper.js';
 import { applyCors } from './cors.js';
 import { getUserTimeZone, getDateInTimeZone, addDaysInTimeZone } from './date-utils.js';
+import { fetchAllSupabaseRows } from './paginate-query.js';
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -55,21 +56,25 @@ export default async function handler(req, res) {
       toDate = temp;
     }
 
-    const { data: habits, error: habitsErr } = await supabase
-      .from('habits').select('*').eq('user_id', user_id);
+    const { data: habits, error: habitsErr } = await fetchAllSupabaseRows(() =>
+      supabase.from('habits').select('*').eq('user_id', user_id).order('id', { ascending: true })
+    );
     if (habitsErr) throw habitsErr;
     const habitIds = habits?.map(h => h.id) || [];
 
     let tracking = [];
     if (habitIds.length > 0) {
-      const { data, error } = await supabase
-        .from('habit_tracking').select('*')
-        .eq('user_id', user_id)
-        .eq('status', true)
-        .in('habit_id', habitIds)
-        .gte('completion_date', fromDate)
-        .lte('completion_date', toDate)
-        .order('completion_date', { ascending: true });
+      const { data, error } = await fetchAllSupabaseRows(() =>
+        supabase
+          .from('habit_tracking').select('*')
+          .eq('user_id', user_id)
+          .eq('status', true)
+          .in('habit_id', habitIds)
+          .gte('completion_date', fromDate)
+          .lte('completion_date', toDate)
+          .order('completion_date', { ascending: true })
+          .order('id', { ascending: true })
+      );
       if (error) throw error;
       tracking = data || [];
     }
@@ -128,8 +133,9 @@ export default async function handler(req, res) {
       });
     }
 
-    const { data: goals, error: goalsErr } = await supabase
-      .from('goals').select('*').eq('user_id', user_id);
+    const { data: goals, error: goalsErr } = await fetchAllSupabaseRows(() =>
+      supabase.from('goals').select('*').eq('user_id', user_id).order('id', { ascending: true })
+    );
     if (goalsErr) throw goalsErr;
 
     const totalPossible = activeHabitsCount * daysCount;
@@ -152,6 +158,6 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error('[/api/reports] unexpected error:', err);
-    return res.status(500).json({ error: err?.message || 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error generating report' });
   }
 }

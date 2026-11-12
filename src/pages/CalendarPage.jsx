@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { calculateMonthlyAnalytics, isHabitScheduledOnDate, getHabitStartDateStr } from '../lib/calendarLogic';
+import { fetchAllPaginated } from '../lib/fetchAllPages';
 import HabizLoader from '../components/HabizLoader';
 
 export default function CalendarPage() {
@@ -30,20 +31,21 @@ export default function CalendarPage() {
     if (!session) return;
     setFetchError('');
     try {
+      const authHeaders = { headers: { Authorization: `Bearer ${session.access_token}` } };
       const [habitsRes, trackingRes, dashRes] = await Promise.all([
-        fetch('/api/habits',   { headers: { Authorization: `Bearer ${session.access_token}` } }),
-        fetch('/api/tracking', { headers: { Authorization: `Bearer ${session.access_token}` } }),
-        fetch('/api/dashboard',{ headers: { Authorization: `Bearer ${session.access_token}` } }),
+        fetchAllPaginated('/api/habits', authHeaders),
+        fetchAllPaginated('/api/tracking', authHeaders),
+        fetch('/api/dashboard', authHeaders),
       ]);
 
       if (!habitsRes.ok || !trackingRes.ok) {
-        const e = await (!habitsRes.ok ? habitsRes : trackingRes).json().catch(() => ({}));
-        setFetchError(e.error || 'Failed to load calendar data.');
+        const errData = !habitsRes.ok ? habitsRes.errorData : trackingRes.errorData;
+        setFetchError(errData?.error || 'Failed to load calendar data.');
         return;
       }
 
-      const h = await habitsRes.json();
-      const t = await trackingRes.json();
+      const h = habitsRes.data;
+      const t = trackingRes.data;
       const d = dashRes.ok ? await dashRes.json() : null;
 
       setHabits(Array.isArray(h) ? h : []);

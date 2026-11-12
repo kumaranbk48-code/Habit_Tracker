@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import supabase from '../lib/supabase';
-import { clearUserCache } from '../lib/offlineDb';
+import { clearUserCache, getQueueStats } from '../lib/offlineDb';
+import refreshSessionOnce from '../lib/refreshSessionOnce';
 
 const getApiBaseUrl = () => {
   const url = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL;
@@ -10,9 +11,21 @@ const getApiBaseUrl = () => {
   return '';
 };
 
+function isDefinitiveAuthFailure(error) {
+  if (!error) return false;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
+  if (error.name === 'AuthRetryableFetchError' || error.status === 0) return false;
+  const status = error.status || error.code;
+  if (status === 400 || status === 401 || status === 'invalid_grant') return true;
+  const msg = (error.message || '').toLowerCase();
+  if (msg.includes('invalid') || msg.includes('expired') || msg.includes('revoked') || msg.includes('not found')) {
+    return true;
+  }
+  return false;
+}
+
 // Global fetch interceptor to handle expired/invalid tokens from the backend.
-// If the backend returns a 401 response indicating the token has expired or is unauthorized,
-// we sign the user out client-side to trigger onAuthStateChange and redirect them to the login page.
+// On 401, attempts session refresh first instead of immediately wiping active state.
 const originalFetch = window.fetch;
 window.fetch = async (...args) => {
   let [resource, config] = args;
@@ -59,8 +72,15 @@ window.fetch = async (...args) => {
         }
       }
       if (hasAuth && url.includes('/api/')) {
-        console.warn('[Auth] Backend returned 401 for', url, '— signing out...');
-        supabase.auth.signOut().catch(() => {});
+        console.warn('[Auth] Backend returned 401 for', url, '— attempting shared token refresh...');
+        refreshSessionOnce().then(({ session: newSession, error }) => {
+          if (!newSession && isDefinitiveAuthFailure(error)) {
+            console.warn('[Auth] Definitive token refresh failure after 401 — signing out...');
+            supabase.auth.signOut().catch(() => {});
+          } else if (error) {
+            console.warn('[Auth] Transient refresh error — retaining session offline:', error.message);
+          }
+        }).catch(() => {});
       }
     } catch (e) {
       // Ignore parsing errors
@@ -76,10 +96,10 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const purgeUserStorage = (currentUserId) => {
+  const purgeUserStorage = (currentUserId, { preserveQueue = true } = {}) => {
     try {
       if (currentUserId) {
-        clearUserCache(currentUserId).catch(() => {});
+        clearUserCache(currentUserId, { preserveQueue }).catch(() => {});
       }
       const userKeysToClear = [
         'habittracker_dismissed_alerts',
@@ -105,6 +125,22 @@ export function AuthProvider({ children }) {
 
   const signOut = async () => {
     const currentId = user?.id;
+    if (currentId) {
+      try {
+        const stats = await getQueueStats(currentId);
+        if (stats?.pending > 0) {
+          const confirmed = typeof window !== 'undefined' && window.confirm
+            ? window.confirm('You have unsynced offline changes that will be lost. Sign out anyway?')
+            : true;
+          if (!confirmed) {
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('[Auth] Error checking queue stats before sign-out:', err);
+      }
+    }
+
     try {
       await supabase.auth.signOut();
     } catch (e) {
@@ -112,26 +148,24 @@ export function AuthProvider({ children }) {
     } finally {
       setSession(null);
       setUser(null);
-      purgeUserStorage(currentId);
+      purgeUserStorage(currentId, { preserveQueue: false });
     }
   };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        // Set session immediately so UI remains responsive and resilient to network blips
         setSession(session);
         setUser(session.user);
         setLoading(false);
 
-        // Optional background verification without aggressively wiping on network errors
         supabase.auth.getUser(session.access_token).then(({ data: userData, error }) => {
           if (error && error.status === 401 && error.message?.toLowerCase().includes('invalid')) {
             console.warn('[Auth] Session definitively invalid. Clearing session...');
             supabase.auth.signOut().catch(() => {});
             setSession(null);
             setUser(null);
-            purgeUserStorage();
+            purgeUserStorage(session.user?.id, { preserveQueue: true });
           } else if (userData?.user) {
             setUser(userData.user);
           }
@@ -149,7 +183,8 @@ export function AuthProvider({ children }) {
       setSession(session);
       setUser(session?.user ?? null);
       if (!session) {
-        purgeUserStorage(user?.id);
+        // Session expired/lost: preserve pending offline queue items
+        purgeUserStorage(user?.id, { preserveQueue: true });
       }
     });
 

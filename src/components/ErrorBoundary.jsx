@@ -50,8 +50,8 @@ export default class ErrorBoundary extends React.Component {
               </p>
             </div>
 
-            {/* Error Message Snippet */}
-            {this.state.error?.message && (
+            {/* Error Message Snippet (DEV only to prevent information disclosure in production) */}
+            {import.meta.env.DEV && this.state.error?.message && (
               <div className="text-left bg-black/40 border border-white/[0.06] rounded-xl p-3 text-[11px] font-mono text-red-300/90 break-words max-h-24 overflow-y-auto">
                 {this.state.error.message}
               </div>

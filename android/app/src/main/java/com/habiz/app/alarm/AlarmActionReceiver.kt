@@ -57,7 +57,7 @@ class AlarmActionReceiver : BroadcastReceiver() {
         when (action) {
             ACTION_SNOOZE -> {
                 val snoozeTime = System.currentTimeMillis() + 10 * 60 * 1000L // 10 minutes
-                val snoozeId = ((System.currentTimeMillis() / 1000) % 2000000000).toInt()
+                val snoozeId = NativeAlarmScheduler.hashStringToId("snooze_${reminderId.ifEmpty { habitId }}_${id}_$snoozeTime")
 
                 NativeAlarmScheduler.scheduleAlarm(
                     context = context,
@@ -81,7 +81,7 @@ class AlarmActionReceiver : BroadcastReceiver() {
             }
 
             ACTION_DISMISS -> {
-                val todayDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                val todayDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
                 // CHECK B: Save completion and cancel any active snooze for this entity
                 NativeAlarmScheduler.saveCompletedEntity(context, targetType, habitId, todayDate)
                 NativeAlarmScheduler.cancelSnoozeForEntity(context, habitId, reminderId)

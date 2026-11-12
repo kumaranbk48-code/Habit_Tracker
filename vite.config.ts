@@ -37,20 +37,69 @@ function apiMiddleware(): Plugin {
         }
 
         try {
-          // Parse request body if method is POST/PUT/DELETE
-          let body = {};
+          // Parse request body if method is POST/PUT/DELETE (100kb cap + strict JSON errors)
+          const MAX_BODY_BYTES = 100 * 1024;
+          let body: unknown = {};
           if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method || '')) {
-            body = await new Promise((resolve) => {
-              let raw = '';
-              req.on('data', (chunk: Buffer | string) => { raw += chunk; });
+            const contentLength = Number(req.headers['content-length'] || 0);
+            if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+              res.statusCode = 413;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: 'Payload too large — maximum body size is 100kb' }));
+              return;
+            }
+
+            const bodyResult = await new Promise<{ body?: unknown; status?: number; error?: string }>((resolve) => {
+              let settled = false;
+              const chunks: Buffer[] = [];
+              let totalBytes = 0;
+
+              const settle = (result: { body?: unknown; status?: number; error?: string }) => {
+                if (!settled) {
+                  settled = true;
+                  resolve(result);
+                }
+              };
+
+              req.on('data', (chunk: Buffer | string) => {
+                if (settled) return;
+                const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8');
+                totalBytes += buf.length;
+                if (totalBytes > MAX_BODY_BYTES) {
+                  chunks.length = 0;
+                  req.resume();
+                  settle({ status: 413, error: 'Payload too large — maximum body size is 100kb' });
+                  return;
+                }
+                chunks.push(buf);
+              });
+
               req.on('end', () => {
+                if (settled) return;
+                const raw = Buffer.concat(chunks).toString('utf8').trim();
+                if (!raw) {
+                  settle({ body: {} });
+                  return;
+                }
                 try {
-                  resolve(raw ? JSON.parse(raw) : {});
+                  settle({ body: JSON.parse(raw) });
                 } catch {
-                  resolve({});
+                  settle({ status: 400, error: 'Invalid JSON request body' });
                 }
               });
+
+              req.on('error', () => {
+                settle({ status: 400, error: 'Invalid request body stream' });
+              });
             });
+
+            if (bodyResult.status) {
+              res.statusCode = bodyResult.status;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: bodyResult.error }));
+              return;
+            }
+            body = bodyResult.body ?? {};
           }
 
           // Prepare query object
@@ -121,9 +170,6 @@ export default defineConfig(async ({ mode }) => {
               }
               if (id.includes('recharts')) {
                 return 'vendor-charts';
-              }
-              if (id.includes('jspdf') || id.includes('html2canvas')) {
-                return 'vendor-pdf';
               }
               if (id.includes('framer-motion') || id.includes('canvas-confetti')) {
                 return 'vendor-animation';

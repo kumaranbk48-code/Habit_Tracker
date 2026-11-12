@@ -2,6 +2,7 @@ import supabase from './db-client.js';
 import { verifyUserToken } from './auth-helper.js';
 import { applyCors } from './cors.js';
 import { getUserTimeZone, getDateInTimeZone, getDateDaysAgoInTimeZone } from './date-utils.js';
+import { fetchAllSupabaseRows } from './paginate-query.js';
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -17,8 +18,9 @@ export default async function handler(req, res) {
     const today = getDateInTimeZone(new Date(), timeZone);
     const fromDate = getDateDaysAgoInTimeZone(365, timeZone);
 
-    const { data: habits, error: hErr } = await supabase
-      .from('habits').select('id').eq('user_id', user.id);
+    const { data: habits, error: hErr } = await fetchAllSupabaseRows(() =>
+      supabase.from('habits').select('id').eq('user_id', user.id).order('id', { ascending: true })
+    );
 
     if (hErr) {
       console.error('[/api/heatmap] habits error:', hErr);
@@ -32,14 +34,18 @@ export default async function handler(req, res) {
       return res.status(200).json({ data: {}, totalHabits: 0 });
     }
 
-    const { data: tracking, error: tErr } = await supabase
-      .from('habit_tracking')
-      .select('completion_date, status')
-      .eq('user_id', user.id)
-      .eq('status', true)
-      .in('habit_id', habitIds)
-      .gte('completion_date', fromDate)
-      .lte('completion_date', today);
+    const { data: tracking, error: tErr } = await fetchAllSupabaseRows(() =>
+      supabase
+        .from('habit_tracking')
+        .select('completion_date, status')
+        .eq('user_id', user.id)
+        .eq('status', true)
+        .in('habit_id', habitIds)
+        .gte('completion_date', fromDate)
+        .lte('completion_date', today)
+        .order('completion_date', { ascending: true })
+        .order('id', { ascending: true })
+    );
 
     if (tErr) {
       console.error('[/api/heatmap] tracking error:', tErr);

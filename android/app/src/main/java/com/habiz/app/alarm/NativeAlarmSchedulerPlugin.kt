@@ -90,6 +90,9 @@ class NativeAlarmSchedulerPlugin : Plugin() {
                     val habitId = call.getString("habitId") ?: ""
                     val targetType = call.getString("targetType") ?: "habit"
                     val isSnooze = call.getBoolean("isSnooze") ?: false
+                    val isRecurring = call.getBoolean("isRecurring") ?: true
+                    val timeStr = call.getString("timeStr") ?: ""
+                    val daysOfWeek = call.getString("daysOfWeek") ?: ""
 
                     val ok = NativeAlarmScheduler.scheduleAlarm(
                         context,
@@ -100,7 +103,10 @@ class NativeAlarmSchedulerPlugin : Plugin() {
                         reminderId,
                         habitId,
                         targetType,
-                        isSnooze
+                        isSnooze,
+                        timeStr,
+                        daysOfWeek,
+                        isRecurring
                     )
                     val ret = JSObject()
                     ret.put("scheduledCount", if (ok) 1 else 0)
@@ -125,6 +131,9 @@ class NativeAlarmSchedulerPlugin : Plugin() {
                 val habitId = item.optString("habitId", "")
                 val targetType = item.optString("targetType", "habit")
                 val isSnooze = item.optBoolean("isSnooze", false)
+                val isRecurring = item.optBoolean("isRecurring", true)
+                val timeStr = item.optString("timeStr", "")
+                val daysOfWeek = item.optString("daysOfWeek", "")
 
                 if (at > 0) {
                     val ok = NativeAlarmScheduler.scheduleAlarm(
@@ -136,7 +145,10 @@ class NativeAlarmSchedulerPlugin : Plugin() {
                         reminderId,
                         habitId,
                         targetType,
-                        isSnooze
+                        isSnooze,
+                        timeStr,
+                        daysOfWeek,
+                        isRecurring
                     )
                     if (ok) scheduledCount++
                 }
@@ -190,6 +202,21 @@ class NativeAlarmSchedulerPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun replaceAll(call: PluginCall) {
+        try {
+            val alarmsArray = call.getArray("alarms")
+            val scheduledCount = NativeAlarmScheduler.replaceAllAlarms(context, alarmsArray)
+            Log.i(TAG, "[PLUGIN] replaceAll() call completed: atomically scheduled $scheduledCount alarm(s)")
+            val ret = JSObject()
+            ret.put("scheduledCount", scheduledCount)
+            call.resolve(ret)
+        } catch (e: Exception) {
+            Log.e(TAG, "[PLUGIN_ERROR] Error in replaceAll()", e)
+            call.reject("Failed to replace alarms atomically: ${e.message}", e)
+        }
+    }
+
+    @PluginMethod
     fun cancelAll(call: PluginCall) {
         try {
             val count = NativeAlarmScheduler.cancelAllAlarms(context)
@@ -208,6 +235,14 @@ class NativeAlarmSchedulerPlugin : Plugin() {
         val granted = NativeAlarmScheduler.canScheduleExactAlarms(context)
         val ret = JSObject()
         ret.put("exact_alarm", if (granted) "granted" else "denied")
+        call.resolve(ret)
+    }
+
+    @PluginMethod
+    fun canUseFullScreenIntent(call: PluginCall) {
+        val granted = NativeAlarmScheduler.canUseFullScreenIntent(context)
+        val ret = JSObject()
+        ret.put("full_screen_intent", if (granted) "granted" else "denied")
         call.resolve(ret)
     }
 

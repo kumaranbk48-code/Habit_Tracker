@@ -82,62 +82,7 @@ CREATE TABLE IF NOT EXISTS goal_milestones (
 );
 CREATE INDEX IF NOT EXISTS idx_goal_milestones_user_goal ON goal_milestones(user_id, goal_id);
 
--- Reminders Table
--- Reminders Table (Polymorphic: Habits, Goals, Learning Roadmaps)
-CREATE TABLE IF NOT EXISTS reminders (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL,
-  target_type TEXT NOT NULL DEFAULT 'habit',
-  habit_id UUID REFERENCES habits(id) ON DELETE CASCADE,
-  goal_id UUID REFERENCES goals(id) ON DELETE CASCADE,
-  journey_id UUID REFERENCES learning_journeys(id) ON DELETE CASCADE,
-  topic_id UUID REFERENCES learning_topics(id) ON DELETE CASCADE,
-  reminder_mode TEXT NOT NULL DEFAULT 'scheduled',
-  days_before_deadline INTEGER DEFAULT 0,
-  reminder_time TEXT NOT NULL,
-  notification_status TEXT DEFAULT 'Active',
-  alerts TEXT[],
-  custom_text TEXT,
-  routine_window TEXT DEFAULT 'Morning',
-  days_of_week TEXT[],
-  created_at TIMESTAMPTZ DEFAULT now(),
-  CONSTRAINT check_reminder_time_format CHECK (reminder_time ~ '^([01]?[0-9]|2[0-3]):[0-5][0-9]$'),
-  CONSTRAINT check_reminder_target_type CHECK (target_type IN ('habit', 'goal', 'learning_journey', 'learning_topic')),
-  CONSTRAINT check_reminder_mode CHECK (reminder_mode IN ('scheduled', 'deadline_proximity', 'smart_nudge')),
-  CONSTRAINT check_reminder_target CHECK (
-    (target_type = 'habit' AND habit_id IS NOT NULL) OR
-    (target_type = 'goal' AND goal_id IS NOT NULL) OR
-    (target_type = 'learning_journey' AND journey_id IS NOT NULL) OR
-    (target_type = 'learning_topic' AND topic_id IS NOT NULL)
-  )
-);
-CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id);
-CREATE INDEX IF NOT EXISTS idx_reminders_target ON reminders(user_id, target_type);
-CREATE INDEX IF NOT EXISTS idx_reminders_goal ON reminders(goal_id);
-CREATE INDEX IF NOT EXISTS idx_reminders_journey ON reminders(journey_id);
-CREATE INDEX IF NOT EXISTS idx_reminders_topic ON reminders(topic_id);
-
--- User Achievements Table
-CREATE TABLE IF NOT EXISTS user_achievements (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL,
-  badge_id TEXT NOT NULL,
-  earned_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE(user_id, badge_id)
-);
-CREATE INDEX IF NOT EXISTS idx_user_achievements_user ON user_achievements(user_id);
-
--- Push Subscriptions Table
-CREATE TABLE IF NOT EXISTS push_subscriptions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL,
-  endpoint TEXT NOT NULL UNIQUE,
-  subscription JSONB NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
-
--- 3. LEARNING HUB TABLES
+-- 3. LEARNING HUB TABLES (Created before reminders so foreign keys resolve cleanly)
 CREATE TABLE IF NOT EXISTS learning_journeys (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL,
@@ -244,8 +189,83 @@ CREATE TABLE IF NOT EXISTS journey_habit_connections (
 );
 CREATE INDEX IF NOT EXISTS idx_journey_habit_user ON journey_habit_connections(user_id);
 
+CREATE TABLE IF NOT EXISTS learning_practice_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL,
+  journey_id UUID REFERENCES learning_journeys(id) ON DELETE CASCADE,
+  topic_id UUID REFERENCES learning_topics(id) ON DELETE CASCADE,
+  duration_minutes INTEGER DEFAULT 0,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_learning_practice_logs_user ON learning_practice_logs(user_id);
+
+-- 4. REMINDERS & NOTIFICATION TABLES
+CREATE TABLE IF NOT EXISTS reminders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL,
+  target_type TEXT NOT NULL DEFAULT 'habit',
+  habit_id UUID REFERENCES habits(id) ON DELETE CASCADE,
+  goal_id UUID REFERENCES goals(id) ON DELETE CASCADE,
+  journey_id UUID REFERENCES learning_journeys(id) ON DELETE CASCADE,
+  topic_id UUID REFERENCES learning_topics(id) ON DELETE CASCADE,
+  reminder_mode TEXT NOT NULL DEFAULT 'scheduled',
+  days_before_deadline INTEGER DEFAULT 0,
+  reminder_time TEXT NOT NULL,
+  notification_status TEXT DEFAULT 'Active',
+  alerts TEXT[],
+  custom_text TEXT,
+  routine_window TEXT DEFAULT 'Morning',
+  days_of_week TEXT[],
+  created_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT check_reminder_time_format CHECK (reminder_time ~ '^([01]?[0-9]|2[0-3]):[0-5][0-9]$'),
+  CONSTRAINT check_reminder_target_type CHECK (target_type IN ('habit', 'goal', 'learning_journey', 'learning_topic')),
+  CONSTRAINT check_reminder_mode CHECK (reminder_mode IN ('scheduled', 'deadline_proximity', 'smart_nudge')),
+  CONSTRAINT check_reminder_target CHECK (
+    (target_type = 'habit' AND habit_id IS NOT NULL) OR
+    (target_type = 'goal' AND goal_id IS NOT NULL) OR
+    (target_type = 'learning_journey' AND journey_id IS NOT NULL) OR
+    (target_type = 'learning_topic' AND topic_id IS NOT NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id);
+CREATE INDEX IF NOT EXISTS idx_reminders_target ON reminders(user_id, target_type);
+CREATE INDEX IF NOT EXISTS idx_reminders_goal ON reminders(goal_id);
+CREATE INDEX IF NOT EXISTS idx_reminders_journey ON reminders(journey_id);
+CREATE INDEX IF NOT EXISTS idx_reminders_topic ON reminders(topic_id);
+
+-- User Achievements Table
+CREATE TABLE IF NOT EXISTS user_achievements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL,
+  badge_id TEXT NOT NULL,
+  earned_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, badge_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_achievements_user ON user_achievements(user_id);
+
+-- Push Subscriptions Table
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL,
+  endpoint TEXT NOT NULL UNIQUE,
+  subscription JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
+
+-- Profiles Table
+CREATE TABLE IF NOT EXISTS profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  user_id UUID,
+  full_name TEXT,
+  avatar_url TEXT,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_profiles_id ON profiles(id);
+
 -- ==============================================================================
--- 4. ENABLE ROW LEVEL SECURITY (RLS) ON ALL USER TABLES
+-- 5. ENABLE ROW LEVEL SECURITY (RLS) ON ALL USER TABLES
 -- ==============================================================================
 ALTER TABLE habits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE habit_tracking ENABLE ROW LEVEL SECURITY;
@@ -262,9 +282,11 @@ ALTER TABLE learning_resources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE learning_notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE learning_activities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE journey_habit_connections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE learning_practice_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
 -- ==============================================================================
--- 5. CREATE STRICT TENANT ISOLATION POLICIES (Users access only their own data)
+-- 6. CREATE STRICT TENANT ISOLATION POLICIES (Users access only their own data)
 -- ==============================================================================
 
 -- Macro helper: Drop existing policies before creating to ensure idempotency
@@ -275,7 +297,8 @@ DECLARE
     'habits', 'habit_tracking', 'goals', 'goal_milestones', 'reminders',
     'user_achievements', 'push_subscriptions', 'learning_journeys',
     'learning_phases', 'learning_topics', 'learning_tasks', 'learning_resources',
-    'learning_notes', 'learning_activities', 'journey_habit_connections'
+    'learning_notes', 'learning_activities', 'journey_habit_connections',
+    'learning_practice_logs'
   ];
 BEGIN
   FOREACH t IN ARRAY tables LOOP
@@ -288,3 +311,10 @@ BEGIN
     ', t, t);
   END LOOP;
 END $$;
+
+-- Policy for profiles (id = auth.uid())
+DROP POLICY IF EXISTS "profiles_user_isolation_policy" ON profiles;
+CREATE POLICY "profiles_user_isolation_policy" ON profiles
+  FOR ALL
+  USING (auth.uid() = id)
+  WITH CHECK (auth.uid() = id);

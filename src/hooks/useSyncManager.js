@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { subscribeSyncStatus, syncOfflineQueue } from '../lib/syncManager';
+import { subscribeSyncStatus, syncOfflineQueue, retryStuckSyncQueue } from '../lib/syncManager';
 import { getQueueStats } from '../lib/offlineDb';
 
 /**
@@ -13,6 +13,7 @@ export function useSyncManager() {
     pendingCount: 0,
     syncingCount: 0,
     failedCount: 0,
+    stuckCount: 0,
     totalQueued: 0,
     lastSyncTimestamp: null,
   });
@@ -27,6 +28,7 @@ export function useSyncManager() {
         pendingCount: stats.pending,
         syncingCount: stats.syncing,
         failedCount: stats.failed,
+        stuckCount: stats.stuck || 0,
         totalQueued: stats.total,
       }));
     });
@@ -42,6 +44,7 @@ export function useSyncManager() {
           pendingCount: stats.pending,
           syncingCount: stats.syncing,
           failedCount: stats.failed,
+          stuckCount: stats.stuck || 0,
           totalQueued: stats.total,
         }));
       });
@@ -60,9 +63,15 @@ export function useSyncManager() {
     return await syncOfflineQueue(user.id, session.access_token);
   }, [user?.id, session?.access_token]);
 
+  const retryStuck = useCallback(async () => {
+    if (!user?.id || !session?.access_token) return;
+    return await retryStuckSyncQueue(user.id, session.access_token);
+  }, [user?.id, session?.access_token]);
+
   return {
     ...syncState,
     triggerSync,
+    retryStuck,
   };
 }
 
