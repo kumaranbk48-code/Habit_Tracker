@@ -24,7 +24,9 @@ export default async function handler(req, res) {
   let db = 'unreachable';
   const supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
 
-  if (supaUrl && !supaUrl.includes('.invalid')) {
+  const hasKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+  if (supaUrl && hasKey && !supaUrl.includes('.invalid') && !supaUrl.includes('unconfigured')) {
     try {
       const ping = supabase.from('habits').select('id').limit(1);
       const timeout = new Promise((_, reject) =>
@@ -35,6 +37,8 @@ export default async function handler(req, res) {
     } catch {
       db = 'unreachable';
     }
+  } else if (!hasKey) {
+    db = 'missing_service_key';
   } else {
     db = 'skipped';
   }
