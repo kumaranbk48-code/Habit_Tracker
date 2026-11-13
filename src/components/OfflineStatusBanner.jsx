@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { WifiOff, RefreshCw, CheckCircle2, AlertTriangle, CloudOff } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useSyncManager } from '../hooks/useSyncManager';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -9,13 +10,20 @@ export default function OfflineStatusBanner() {
   const { isSyncing, pendingCount, totalQueued, failedCount, stuckCount, triggerSync, retryStuck } = useSyncManager();
   const [showSyncedSuccess, setShowSyncedSuccess] = useState(false);
   const [prevSyncing, setPrevSyncing] = useState(false);
+  const [offlineToast, setOfflineToast] = useState(null);
+  const toastTimeoutRef = useRef(null);
 
-  // Trigger sync automatically when transitioning to online with pending items
-  useEffect(() => {
-    if (isOnline && pendingCount > 0 && !isSyncing) {
-      triggerSync();
+  const isNative = Capacitor.isNativePlatform();
+
+  const handleSyncClick = () => {
+    if (!isOnline) {
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      setOfflineToast('Cannot sync while offline. Please connect to the internet.');
+      toastTimeoutRef.current = setTimeout(() => setOfflineToast(null), 3000);
+      return;
     }
-  }, [isOnline, pendingCount, isSyncing, triggerSync]);
+    triggerSync();
+  };
 
   // Track completion transition to display temporary success check
   useEffect(() => {
@@ -45,24 +53,33 @@ export default function OfflineStatusBanner() {
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
               <WifiOff size={14} className="text-amber-400 flex-shrink-0" />
-              <span className="font-semibold text-amber-300">Offline Mode:</span>
-              <span className="text-slate-300">
-                Changes are saved locally and will auto-sync when reconnected.
+              <span className="font-semibold text-amber-300">
+                {isNative ? 'Offline Mode:' : 'Browser Offline:'}
               </span>
-              {totalQueued > 0 && (
+              <span className="text-slate-300">
+                {isNative
+                  ? 'No internet connection. Your changes are saved on this phone and will be updated to the cloud when the network is available.'
+                  : 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.'}
+              </span>
+              {pendingCount > 0 && (
                 <span className="ml-1 px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded font-bold text-[10px]">
-                  {totalQueued} pending
+                  {pendingCount} changes waiting to sync
                 </span>
               )}
             </div>
-            <button
-              onClick={checkNow}
-              disabled={isChecking}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 border border-amber-500/30 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
-            >
-              <RefreshCw size={11} className={isChecking ? 'animate-spin' : ''} />
-              {isChecking ? 'Checking...' : 'Check Connection'}
-            </button>
+            <div className="flex items-center gap-2">
+              {offlineToast && (
+                <span className="text-[11px] text-amber-300/90 animate-fadeIn">{offlineToast}</span>
+              )}
+              <button
+                onClick={checkNow}
+                disabled={isChecking}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 border border-amber-500/30 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw size={11} className={isChecking ? 'animate-spin' : ''} />
+                {isChecking ? 'Checking...' : 'Check Connection'}
+              </button>
+            </div>
           </div>
         ) : isSyncing ? (
           <div className="bg-[#0f2120] border border-teal-500/30 text-teal-200 rounded-xl px-3.5 py-2 flex items-center justify-between gap-2 shadow-sm text-xs">
@@ -100,7 +117,7 @@ export default function OfflineStatusBanner() {
               </span>
             </div>
             <button
-              onClick={triggerSync}
+              onClick={handleSyncClick}
               className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/30 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer"
             >
               Retry Sync
@@ -109,7 +126,7 @@ export default function OfflineStatusBanner() {
         ) : showSyncedSuccess ? (
           <div className="bg-[#0e211a] border border-emerald-500/30 text-emerald-200 rounded-xl px-3.5 py-2 flex items-center gap-2 shadow-sm text-xs">
             <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
-            <span className="font-semibold text-emerald-300">All changes synced!</span>
+            <span className="font-semibold text-emerald-300">All changes synced</span>
             <span className="text-slate-300">Your cloud backup is up to date.</span>
           </div>
         ) : null}

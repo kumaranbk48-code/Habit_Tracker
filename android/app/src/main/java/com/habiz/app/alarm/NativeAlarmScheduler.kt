@@ -443,34 +443,21 @@ object NativeAlarmScheduler {
         var nextYear = 0
         var nextMonth = 0
         var nextDate = 0
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
 
-        for (dayOffset in 1..14) {
-            val candidate = Calendar.getInstance().apply {
-                timeInMillis = now
-                add(Calendar.DAY_OF_YEAR, dayOffset)
-                set(Calendar.HOUR_OF_DAY, targetHour)
-                set(Calendar.MINUTE, targetMinute)
-                set(Calendar.SECOND, 0)
-                set(Calendar.MILLISECOND, 0)
-            }
+        val occurrence = NextOccurrence.compute(
+            currentTimeMillis = now,
+            targetHour = targetHour,
+            targetMinute = targetMinute,
+            daysOfWeek = daysOfWeek,
+            includeTodayIfFuture = false
+        )
 
-            val dayIdx = candidate.get(Calendar.DAY_OF_WEEK) - 1
-            val dayName = if (dayIdx in 0..6) shortDayNames[dayIdx] else ""
-
-            if (!isEveryday && !allowedDays.any { dayName.startsWith(it) || it.startsWith(dayName) }) {
-                continue
-            }
-
-            val candidateMillis = candidate.timeInMillis
-            if (candidateMillis > now) {
-                nextTriggerMillis = candidateMillis
-                nextDateStr = dateFormat.format(Date(candidateMillis))
-                nextYear = candidate.get(Calendar.YEAR)
-                nextMonth = candidate.get(Calendar.MONTH) // 0-indexed, identical to JS Date.getMonth()
-                nextDate = candidate.get(Calendar.DATE) // 1-31, identical to JS Date.getDate()
-                break
-            }
+        if (occurrence != null) {
+            nextTriggerMillis = occurrence.triggerMillis
+            nextDateStr = occurrence.dateStr
+            nextYear = occurrence.year
+            nextMonth = occurrence.month
+            nextDate = occurrence.day
         }
 
         if (nextTriggerMillis <= now || nextDateStr.isEmpty()) {

@@ -8,6 +8,8 @@
  *    and replay capabilities upon network recovery).
  */
 
+import { Capacitor } from '@capacitor/core';
+
 const DB_NAME = 'habiz_offline_db';
 const DB_VERSION = 1;
 
@@ -156,6 +158,12 @@ function computeIdempotencyKey(userId, actionType, payload) {
  * it coalesces into the latest payload to avoid duplicate/conflicting records.
  */
 export async function enqueueOfflineAction(userId, actionType, payload) {
+  // APK-only offline: Web browser offline writes are blocked
+  if (typeof Capacitor !== 'undefined' && typeof Capacitor.isNativePlatform === 'function') {
+    if (!Capacitor.isNativePlatform()) {
+      return null;
+    }
+  }
   if (!userId || !actionType || !payload) return null;
   const db = await openOfflineDb();
   if (!db) return null;
@@ -241,9 +249,10 @@ export async function getPendingActions(userId) {
 }
 
 /**
- * Updates status of a queue action ('syncing', 'completed', 'failed', 'pending').
+ * Updates status of a queue action ('syncing', 'completed', 'failed', 'pending', 'stuck').
+ * Error classification: only server retries increment item.retries when options.incrementRetry is true.
  */
-export async function updateActionStatus(id, status, error = null) {
+export async function updateActionStatus(id, status, error = null, options = {}) {
   if (!id) return;
   const db = await openOfflineDb();
   if (!db) return;
@@ -262,7 +271,12 @@ export async function updateActionStatus(id, status, error = null) {
         item.updatedAt = new Date().toISOString();
         if (error) {
           item.lastError = String(error);
-          item.retries = (item.retries || 0) + 1;
+          if (options.errorCategory) {
+            item.errorCategory = options.errorCategory;
+          }
+          if (options.incrementRetry === true) {
+            item.retries = (item.retries || 0) + 1;
+          }
         }
         store.put(item);
         tx.oncomplete = () => {
@@ -297,6 +311,54 @@ export async function deleteAction(id) {
       tx.onerror = () => resolve(false);
     } catch {
       resolve(false);
+    }
+  });
+}
+
+/**
+ * Restores ONLY network-related stuck actions back to 'pending'.
+ * Server validation failures or permanent errors remain untouched.
+ */
+export async function resetNetworkStuckActions(userId) {
+  if (!userId) return 0;
+  const db = await openOfflineDb();
+  if (!db) return 0;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORES.SYNC_QUEUE, 'readwrite');
+      const store = tx.objectStore(STORES.SYNC_QUEUE);
+      const index = store.index('userId');
+      const req = index.getAll(String(userId));
+      let resetCount = 0;
+
+      req.onsuccess = () => {
+        const items = req.result || [];
+        const now = new Date().toISOString();
+        for (const item of items) {
+          const isNetwork =
+            item.errorCategory === 'network' ||
+            (item.lastError && (
+              item.lastError.includes('Network') ||
+              item.lastError.includes('Failed to fetch') ||
+              item.lastError.includes('disconnected') ||
+              item.lastError.includes('offline')
+            ));
+          if (item.status === 'stuck' && isNetwork) {
+            item.status = 'pending';
+            item.updatedAt = now;
+            store.put(item);
+            resetCount++;
+          }
+        }
+        tx.oncomplete = () => {
+          if (resetCount > 0) dispatchQueueEvent();
+          resolve(resetCount);
+        };
+      };
+      req.onerror = () => resolve(0);
+    } catch {
+      resolve(0);
     }
   });
 }

@@ -48,6 +48,7 @@ Desktop.ini
 
 # Android binaries & signing credentials
 *.apk
+!public/downloads/*.apk
 *.jks
 *.keystore
 android/keystore.properties

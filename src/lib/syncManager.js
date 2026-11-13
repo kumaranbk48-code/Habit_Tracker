@@ -11,6 +11,7 @@ import {
   deleteAction,
   getQueueStats,
   resetStuckActions,
+  resetNetworkStuckActions,
 } from './offlineDb';
 import { getOnlineStatus, verifyServerReachability } from './networkStatus';
 import refreshSessionOnce from './refreshSessionOnce';
@@ -21,11 +22,14 @@ let isSyncRunning = false;
 let lastSyncTimestamp = null;
 const syncListeners = new Set();
 
-async function markRetryOrStuck(action, errorMessage, userId) {
+async function markRetryOrStuck(action, errorMessage, userId, errorCategory = 'server') {
   const nextRetries = (action.retries || 0) + 1;
   if (nextRetries >= MAX_RETRY_ATTEMPTS) {
     console.error(`[SyncManager] Action ${action.id} reached max retries (${MAX_RETRY_ATTEMPTS}); marking as stuck.`);
-    await updateActionStatus(action.id, 'stuck', `${errorMessage} (max ${MAX_RETRY_ATTEMPTS} retries reached)`);
+    await updateActionStatus(action.id, 'stuck', `${errorMessage} (max ${MAX_RETRY_ATTEMPTS} retries reached)`, {
+      incrementRetry: true,
+      errorCategory,
+    });
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
         new CustomEvent('habittracker-sync-stuck', {
@@ -35,7 +39,10 @@ async function markRetryOrStuck(action, errorMessage, userId) {
     }
     return 'stuck';
   }
-  await updateActionStatus(action.id, 'pending', errorMessage);
+  await updateActionStatus(action.id, 'pending', errorMessage, {
+    incrementRetry: true,
+    errorCategory,
+  });
   return 'pending';
 }
 
@@ -52,15 +59,23 @@ async function processAction(action, accessToken) {
   const { actionType, payload } = action;
 
   if (actionType === 'TRACK_HABIT') {
+    const body = {
+      habit_id: payload.habit_id,
+      completion_date: payload.completion_date || payload.date,
+      status: payload.status,
+    };
+    if (payload.quantity_completed !== undefined) {
+      body.action = 'set';
+      body.amount = payload.quantity_completed;
+      body.quantity_completed = payload.quantity_completed;
+    } else if (payload.action) {
+      body.action = payload.action;
+      if (payload.amount !== undefined) body.amount = payload.amount;
+    }
     const res = await fetch('/api/tracking', {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        habit_id: payload.habit_id,
-        completion_date: payload.completion_date || payload.date,
-        status: payload.status,
-        quantity_completed: payload.quantity_completed ?? 0,
-      }),
+      body: JSON.stringify(body),
     });
     return res;
   }
@@ -159,16 +174,22 @@ export async function syncOfflineQueue(userId, accessToken) {
             currentToken = refreshedSession.access_token;
             response = await processAction(action, currentToken);
 
-            // If retry after refresh still returns 401, keep pending (never mark failed)
+            // If retry after refresh still returns 401, keep pending (never mark failed, do not consume retries)
             if (response.status === 401) {
               console.warn('[SyncManager] Action still 401 after token refresh. Keeping pending.');
-              await updateActionStatus(action.id, 'pending', 'Auth unauthorized after refresh');
+              await updateActionStatus(action.id, 'pending', 'Auth unauthorized after refresh', {
+                incrementRetry: false,
+                errorCategory: 'auth',
+              });
               errorCount++;
               break;
             }
           } else {
             console.warn('[SyncManager] Session refresh failed:', refreshError);
-            await updateActionStatus(action.id, 'pending', 'Session expired, waiting for login');
+            await updateActionStatus(action.id, 'pending', 'Session expired, waiting for login', {
+              incrementRetry: false,
+              errorCategory: 'auth',
+            });
             errorCount++;
             break;
           }
@@ -203,29 +224,35 @@ export async function syncOfflineQueue(userId, accessToken) {
             }
           }
         } else if (response.status === 429 || response.status === 408) {
-          // 429 Rate limited or 408 Request Timeout: retry with cap before marking stuck
+          // 429 Rate limited or 408 Request Timeout: retry with backoff/cap before marking stuck
           console.warn(`[SyncManager] Transient rate limit or timeout (${response.status}). Retrying later.`);
-          await markRetryOrStuck(action, `HTTP ${response.status}`, userId);
+          await markRetryOrStuck(action, `HTTP ${response.status}`, userId, 'server');
           errorCount++;
           break; // Stop further requests to avoid hammering or waiting
         } else if (response.status >= 400 && response.status < 500) {
-          // 4xx Client/Validation Error (e.g. 400, 404, 409, 422): permanent failure
+          // 4xx Client/Validation Error (e.g. 400, 404, 409, 422): permanent failure (do not retry)
           const errData = await response.json().catch(() => ({}));
           const errMsg = errData.error || `Server rejected with ${response.status}`;
           console.warn(`[SyncManager] Action ${action.id} failed validation:`, errMsg);
-          await updateActionStatus(action.id, 'failed', errMsg);
+          await updateActionStatus(action.id, 'failed', errMsg, {
+            incrementRetry: false,
+            errorCategory: 'validation',
+          });
           errorCount++;
         } else {
-          // 5xx Server Error or temporary error: retry with cap before marking stuck
+          // 5xx Server Error: retry with cap before marking stuck
           console.warn(`[SyncManager] Server error ${response.status}. Retrying later.`);
-          await markRetryOrStuck(action, `HTTP ${response.status}`, userId);
+          await markRetryOrStuck(action, `HTTP ${response.status}`, userId, 'server');
           errorCount++;
           break; // Stop further requests if server is unhealthy
         }
       } catch (networkErr) {
-        // Network dropped mid-sync: retry with cap before marking stuck
+        // Network dropped mid-sync: preserve work WITHOUT consuming server-error retries
         console.warn('[SyncManager] Network dropped during action sync:', networkErr);
-        await markRetryOrStuck(action, 'Network disconnected', userId);
+        await updateActionStatus(action.id, 'pending', 'Network disconnected', {
+          incrementRetry: false,
+          errorCategory: 'network',
+        });
         errorCount++;
         break;
       }
@@ -283,37 +310,54 @@ export function subscribeSyncStatus(userId, callback) {
 }
 
 /**
- * Global background sync listener: auto-syncs when reconnecting.
+ * Single Sync Owner: orchestrates automated queue sync across reconnect,
+ * app resume, SW triggers, and best-effort 30s foreground intervals.
  */
+function attemptAutoSync() {
+  try {
+    const stored = Object.keys(localStorage).find((k) => k.startsWith('sb-') && k.endsWith('-auth-token'));
+    if (stored) {
+      const sessionData = JSON.parse(localStorage.getItem(stored) || '{}');
+      if (sessionData?.access_token && sessionData?.user?.id) {
+        resetNetworkStuckActions(sessionData.user.id).then(() => {
+          syncOfflineQueue(sessionData.user.id, sessionData.access_token);
+        }).catch(() => {
+          syncOfflineQueue(sessionData.user.id, sessionData.access_token);
+        });
+      }
+    }
+  } catch {}
+}
+
 if (typeof window !== 'undefined') {
   window.addEventListener('habiz-connectivity-status', (e) => {
     if (e.detail?.isOnline) {
-      // Trigger background sync if session available in local storage
-      try {
-        const stored = Object.keys(localStorage).find((k) => k.startsWith('sb-') && k.endsWith('-auth-token'));
-        if (stored) {
-          const sessionData = JSON.parse(localStorage.getItem(stored) || '{}');
-          if (sessionData?.access_token && sessionData?.user?.id) {
-            syncOfflineQueue(sessionData.user.id, sessionData.access_token);
-          }
-        }
-      } catch {}
+      attemptAutoSync();
     }
   });
+
+  window.addEventListener('online', () => {
+    attemptAutoSync();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && getOnlineStatus()) {
+      attemptAutoSync();
+    }
+  });
+
+  // Best-effort 30s foreground interval (not guaranteed Android background sync)
+  setInterval(() => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible' && getOnlineStatus()) {
+      attemptAutoSync();
+    }
+  }, 30000);
 
   // Listen to service worker TRIGGER_BACKGROUND_SYNC message
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', (event) => {
       if (event.data?.type === 'TRIGGER_BACKGROUND_SYNC') {
-        try {
-          const stored = Object.keys(localStorage).find((k) => k.startsWith('sb-') && k.endsWith('-auth-token'));
-          if (stored) {
-            const sessionData = JSON.parse(localStorage.getItem(stored) || '{}');
-            if (sessionData?.access_token && sessionData?.user?.id) {
-              syncOfflineQueue(sessionData.user.id, sessionData.access_token);
-            }
-          }
-        } catch {}
+        attemptAutoSync();
       }
     });
   }

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android Notification Silhouette Icon (pure white on transparent) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 28,22 L 40,22 C 43,22 45,24 45,27 L 45,73 C 45,76 43,78 40,78 L 28,78 C 25,78 23,76 23,73 L 23,27 C 23,24 25,22 28,22 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 36,43 L 64,43 C 67,43 69,45 69,48 L 69,52 C 69,55 67,57 64,57 L 36,57 C 33,57 31,55 31,52 L 31,48 C 31,45 33,43 36,43 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 60,22 L 72,22 C 75,22 77,24 77,27 L 77,73 C 77,76 75,78 72,78 L 60,78 C 57,78 55,76 55,73 L 55,27 C 55,24 57,22 60,22 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 73,23 A 4,4 0 1,1 72.99,23 Z" />
+</vector>

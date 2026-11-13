@@ -12,12 +12,14 @@ const MILESTONES = {
 
 export default function MilestoneToast({ streak, onClose }) {
   const milestone = MILESTONES[streak];
-  if (!milestone) return null;
 
   useEffect(() => {
+    if (!milestone) return;
     const t = setTimeout(onClose, 6000);
     return () => clearTimeout(t);
-  }, [onClose]);
+  }, [onClose, milestone]);
+
+  if (!milestone) return null;
 
   return (
     <div

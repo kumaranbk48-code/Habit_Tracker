@@ -34,3 +34,4 @@ export async function fetchAllPaginated(url, init = {}, fetchImpl = fetch, pageS
 
   return { ok: true, status: 200, data: allItems, errorData: null };
 }
+

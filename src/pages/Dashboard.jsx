@@ -27,6 +27,8 @@ import { calculateXP, checkNewBadges, calculateCategoryStreaks } from '../hooks/
 import { calculateOverallHabitStrength, getStrengthBadge } from '../lib/habitStrength';
 import { fetchAllPaginated } from '../lib/fetchAllPages';
 import { saveCachedData, getCachedData, enqueueOfflineAction } from '../lib/offlineDb';
+import { Capacitor } from '@capacitor/core';
+import { getOnlineStatus } from '../lib/networkStatus';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const StatCard = ({ label, value, icon: Icon, colorClass, bgClass, children, onClick }) => (
@@ -255,6 +257,17 @@ export default function Dashboard() {
   const lastCelebrationRef = useRef(0);
 
   const toggleHabit = async (habit) => {
+    if (!session?.access_token) return;
+
+    const isNative = Capacitor.isNativePlatform();
+    if (!isNative && !getOnlineStatus()) {
+      setToast({
+        message: 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.',
+        type: 'error',
+      });
+      return;
+    }
+
     const isDone = todayCompletedIds.has(habit.id);
     const newStatus = !isDone;
 
@@ -318,13 +331,11 @@ export default function Dashboard() {
     };
     
     if (habit.tracking_type === 'quantity') {
-      if (newStatus) {
-        body.action = 'add';
-        const currentQty = existing?.quantity_completed || 0;
-        body.amount = Math.max(0, (habit.target_quantity || 1) - currentQty);
-      } else {
-        body.action = 'reset';
-      }
+      const targetQty = habit.target_quantity || 1;
+      const targetVal = newStatus ? targetQty : 0;
+      body.action = 'set';
+      body.amount = targetVal;
+      body.quantity_completed = targetVal;
     }
     
     try {
@@ -366,25 +377,53 @@ export default function Dashboard() {
         setToast({ message: 'Server rejected update. Reverting change.', type: 'error' });
       }
     } catch {
-      // Network failure / Offline: Keep optimistic state, save in IndexedDB & queue action
-      if (user?.id) {
-        await saveCachedData(user.id, 'tracking', nextTracking);
-        await enqueueOfflineAction(user.id, 'TRACK_HABIT', body);
+      if (!isNative) {
+        setAllTracking(prevTracking);
+        setStats(prevStats);
+        setToast({
+          message: 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.',
+          type: 'error',
+        });
+        return;
       }
-      setToast({ message: 'Saved offline. Changes will sync when reconnected.', type: 'info' });
-      if (newStatus) {
-        window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
-          detail: { targetType: 'habit', entityId: habit.id, date: today }
-        }));
+
+      let queuedId = null;
+      if (user?.id) {
+        queuedId = await enqueueOfflineAction(user.id, 'TRACK_HABIT', body);
+        if (queuedId) {
+          await saveCachedData(user.id, 'tracking', nextTracking);
+        }
+      }
+
+      if (queuedId) {
+        setToast({ message: 'Saved offline. Changes will sync when reconnected.', type: 'info' });
+        if (newStatus) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'habit', entityId: habit.id, date: today }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+            detail: { targetType: 'habit', entityId: habit.id, date: today }
+          }));
+        }
       } else {
-        window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
-          detail: { targetType: 'habit', entityId: habit.id, date: today }
-        }));
+        setAllTracking(prevTracking);
+        setStats(prevStats);
+        setToast({ message: 'Could not save offline changes.', type: 'error' });
       }
     }
   };
 
   const handleCompleteFromTimer = async (habit, options = {}) => {
+    const isNative = Capacitor.isNativePlatform();
+    if (!isNative && !getOnlineStatus()) {
+      setToast({
+        message: 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.',
+        type: 'error',
+      });
+      return;
+    }
+
     const existing = allTracking.find(t => t.habit_id === habit.id && t.completion_date === today);
     if (existing?.status === true) {
       setToast({
@@ -439,20 +478,25 @@ export default function Dashboard() {
           completion_date: today,
           status: true,
           completion_source: 'timer',
-          action: isQuantity ? 'add' : undefined,
-          amount: isQuantity ? targetQty : undefined,
+          action: isQuantity ? 'set' : undefined,
+          amount: isQuantity ? newQty : undefined,
+          quantity_completed: isQuantity ? newQty : undefined,
         }),
       });
 
       if (res.ok) {
+        const saved = await res.json().catch(() => null);
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'dashboard' } }));
-        if (saved?.status === true) {
+        const effectiveStatus = saved?.status ?? true;
+        const targetHabitId = saved?.habit_id || habit.id;
+        const targetDate = saved?.completion_date || today;
+        if (effectiveStatus === true) {
           window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
-            detail: { targetType: 'habit', entityId: saved.habit_id, date: saved.completion_date }
+            detail: { targetType: 'habit', entityId: targetHabitId, date: targetDate }
           }));
-        } else if (saved?.status === false) {
+        } else if (effectiveStatus === false) {
           window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
-            detail: { targetType: 'habit', entityId: saved.habit_id, date: saved.completion_date }
+            detail: { targetType: 'habit', entityId: targetHabitId, date: targetDate }
           }));
         }
         setToast({
@@ -466,7 +510,45 @@ export default function Dashboard() {
         setToast({ message: errJson.error || 'Failed to auto-complete habit from timer.', type: 'error' });
       }
     } catch (err) {
-      console.warn('[Dashboard] Timer auto-complete error:', err);
+      if (!isNative) {
+        if (previousState) {
+          setAllTracking((prev) => prev.map((t) => (t.habit_id === habit.id && t.completion_date === today ? previousState : t)));
+        } else {
+          setAllTracking((prev) => prev.filter((t) => !(t.habit_id === habit.id && t.completion_date === today)));
+        }
+        setToast({
+          message: 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.',
+          type: 'error',
+        });
+        return;
+      }
+
+      let queuedId = null;
+      if (user?.id) {
+        queuedId = await enqueueOfflineAction(user.id, 'TRACK_HABIT', {
+          habit_id: habit.id,
+          completion_date: today,
+          status: true,
+          completion_source: 'timer',
+          action: isQuantity ? 'set' : undefined,
+          amount: isQuantity ? newQty : undefined,
+          quantity_completed: isQuantity ? newQty : undefined,
+        });
+        if (queuedId) {
+          await saveCachedData(user.id, 'tracking', nextTracking);
+        }
+      }
+
+      if (queuedId) {
+        setToast({ message: 'Saved offline. Progress will sync when reconnected.', type: 'info' });
+      } else {
+        if (previousState) {
+          setAllTracking((prev) => prev.map((t) => (t.habit_id === habit.id && t.completion_date === today ? previousState : t)));
+        } else {
+          setAllTracking((prev) => prev.filter((t) => !(t.habit_id === habit.id && t.completion_date === today)));
+        }
+        setToast({ message: 'Could not save offline changes.', type: 'error' });
+      }
     }
   };
 
@@ -532,15 +614,6 @@ export default function Dashboard() {
         setHabitsList(prev => prev.map(h => h.id === habit.id ? { ...h, status: 'active' } : h));
         setToast({ message: `Resumed "${habit.habit_name}".`, type: 'success' });
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'dashboard' } }));
-        if (saved?.status === true) {
-          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
-            detail: { targetType: 'habit', entityId: saved.habit_id, date: saved.completion_date }
-          }));
-        } else if (saved?.status === false) {
-          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
-            detail: { targetType: 'habit', entityId: saved.habit_id, date: saved.completion_date }
-          }));
-        }
       } else {
         const errJson = await res.json().catch(() => ({}));
         setToast({ message: errJson.error || 'Failed to resume habit.', type: 'error' });
@@ -666,7 +739,7 @@ export default function Dashboard() {
               <RefreshCw size={13} /> Retry
             </button>
             <button
-              onClick={async () => { await signOut?.(); navigate('/login', { replace: true }); }}
+              onClick={(e) => signOut?.(e.currentTarget)}
               className="flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-xl transition-colors shadow-sm cursor-pointer"
             >
               Sign Out & Login

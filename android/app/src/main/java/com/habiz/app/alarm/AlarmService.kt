@@ -245,7 +245,7 @@ class AlarmService : Service() {
         )
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_name)
             .setContentTitle(displayTitle)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))

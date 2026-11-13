@@ -64,7 +64,7 @@ export default async function handler(req, res) {
       // Security check: Never allow logging completion for future dates
       const timeZone = getUserTimeZone(req, user);
       const today = getDateInTimeZone(new Date(), timeZone);
-      if (completion_date > today && (status === true || action === 'complete' || action === 'add' || action === 'set')) {
+      if (completion_date > today && (status === true || action === 'complete' || action === 'add' || action === 'set' || (req.body.quantity_completed !== undefined && req.body.quantity_completed > 0))) {
         return res.status(400).json({ error: 'Cannot mark habits as completed for future dates' });
       }
 
@@ -94,12 +94,13 @@ export default async function handler(req, res) {
         if (action === 'reset' || status === false) {
           newQuantity = 0;
           newStatus = false;
-        } else if (action === 'complete' || (status === true && (amount === undefined || amount === null) && !action)) {
+        } else if (action === 'complete' || (status === true && (amount === undefined || amount === null) && !action && req.body.quantity_completed === undefined)) {
           // Explicit "mark complete" action (from Alarm Takeover Modal, Calendar, etc.)
           newQuantity = target;
           newStatus = true;
-        } else if (action === 'set') {
-          const val = Number(amount);
+        } else if (action === 'set' || req.body.quantity_completed !== undefined) {
+          const rawVal = action === 'set' && amount !== undefined ? amount : req.body.quantity_completed;
+          const val = Number(rawVal);
           newQuantity = Number.isFinite(val) ? Math.max(0, val) : target;
           newStatus = newQuantity >= target;
         } else {

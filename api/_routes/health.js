@@ -1,10 +1,25 @@
 import supabase from './db-client.js';
 
 export default async function handler(req, res) {
+  if (typeof res.setHeader === 'function') {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  }
+
   const version =
     process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ||
     process.env.npm_package_version ||
     '1.0.0';
+
+  // Explicit uncached lite health branch: fast probe that skips DB work completely
+  const isLite = req.query?.lite === '1' || req.query?.lite === 'true' || req.method === 'HEAD';
+  if (isLite) {
+    return res.status(200).json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      version,
+      db: 'skipped_lite',
+    });
+  }
 
   let db = 'unreachable';
   const supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';

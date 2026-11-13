@@ -50,13 +50,12 @@ export default function Sidebar({ mobileOpen = false, onCloseMobile }) {
     return () => window.removeEventListener('habittracker-stats-updated', handleUpdate);
   }, [fetchSidebarStats]);
 
-  const handleSignOut = async () => {
+  const handleSignOut = (e) => {
     if (signOut) {
-      await signOut();
+      signOut(e?.currentTarget);
     } else {
-      await supabase.auth.signOut();
+      supabase.auth.signOut().then(() => navigate('/login', { replace: true }));
     }
-    navigate('/login', { replace: true });
   };
 
   const displayName = user?.user_metadata?.full_name

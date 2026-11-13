@@ -192,6 +192,28 @@ export default function Reminders() {
     fetchData();
   }, [fetchData]);
 
+  const openAdd = (preferredType = 'habit', preferredId = '') => {
+    setEditing(null);
+    const initialTime = '08:00';
+    setForm({
+      target_type: preferredType,
+      habit_id: preferredType === 'habit' ? (preferredId || habits[0]?.id || '') : (habits[0]?.id || ''),
+      goal_id: preferredType === 'goal' ? (preferredId || goals[0]?.id || '') : (goals[0]?.id || ''),
+      journey_id: preferredType === 'learning_journey' ? (preferredId || journeys[0]?.id || '') : (journeys[0]?.id || ''),
+      topic_id: '',
+      reminder_mode: preferredType === 'goal' ? 'deadline_proximity' : 'scheduled',
+      days_before_deadline: 1,
+      reminder_time: initialTime,
+      alerts: [initialTime],
+      custom_text: '',
+      routine_window: 'Morning',
+      days_of_week: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      notification_status: 'Active',
+      is_alarm: preferredType === 'habit',
+    });
+    setModalOpen(true);
+  };
+
   // Handle incoming navigation state (e.g. from Goal card or Learning Hub "Set Reminder")
   useEffect(() => {
     if (location.state?.openAdd) {
@@ -221,28 +243,6 @@ export default function Reminders() {
   const handleDisablePush = async () => {
     await unsubscribe();
     setToast({ message: 'Push notifications disabled', type: 'success' });
-  };
-
-  const openAdd = (preferredType = 'habit', preferredId = '') => {
-    setEditing(null);
-    const initialTime = '08:00';
-    setForm({
-      target_type: preferredType,
-      habit_id: preferredType === 'habit' ? (preferredId || habits[0]?.id || '') : (habits[0]?.id || ''),
-      goal_id: preferredType === 'goal' ? (preferredId || goals[0]?.id || '') : (goals[0]?.id || ''),
-      journey_id: preferredType === 'learning_journey' ? (preferredId || journeys[0]?.id || '') : (journeys[0]?.id || ''),
-      topic_id: '',
-      reminder_mode: preferredType === 'goal' ? 'deadline_proximity' : 'scheduled',
-      days_before_deadline: 1,
-      reminder_time: initialTime,
-      alerts: [initialTime],
-      custom_text: '',
-      routine_window: 'Morning',
-      days_of_week: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-      notification_status: 'Active',
-      is_alarm: preferredType === 'habit',
-    });
-    setModalOpen(true);
   };
 
   const openEdit = (reminder) => {

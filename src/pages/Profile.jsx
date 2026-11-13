@@ -11,7 +11,7 @@ import { motion } from 'framer-motion';
 import { calculateXP, checkNewBadges } from '../hooks/useGamification';
 
 export default function Profile() {
-  const { user } = useAuth();
+  const { user, signOut, signOutDirect } = useAuth();
   const [dashStats, setDashStats] = useState(null);
   const [unlockedIds, setUnlockedIds] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -202,7 +202,7 @@ export default function Profile() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || 'Deletion failed');
       }
-      await supabase.auth.signOut();
+      await signOutDirect();
       window.location.href = '/login';
     } catch (e) {
       alert('Failed to delete account: ' + e.message);
@@ -432,7 +432,7 @@ export default function Profile() {
               <motion.button
                 whileHover={{ x: 3 }}
                 transition={{ duration: 0.15 }}
-                onClick={() => supabase.auth.signOut()}
+                onClick={(e) => signOut(e.currentTarget)}
                 className="w-full p-3.5 rounded-2xl bg-white/[0.02] hover:bg-red-500/[0.08] border border-white/[0.05] hover:border-red-500/30 flex items-center justify-between group transition-all cursor-pointer text-left"
               >
                 <div className="flex items-center gap-3.5">

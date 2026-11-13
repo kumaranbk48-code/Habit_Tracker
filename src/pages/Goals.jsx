@@ -13,6 +13,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useConfetti } from '../hooks/useConfetti';
 import HabizLoader from '../components/HabizLoader';
 import { saveCachedData, getCachedData, enqueueOfflineAction } from '../lib/offlineDb';
+import { Capacitor } from '@capacitor/core';
+import { getOnlineStatus } from '../lib/networkStatus';
 
 function getLocalGoalsMeta(userId) {
   if (!userId) return {};
@@ -249,6 +251,15 @@ export default function Goals() {
   };
 
   const handleUpdateProgress = async (id, newValue) => {
+    const isNative = Capacitor.isNativePlatform();
+    if (!isNative && !getOnlineStatus()) {
+      setToast({
+        message: 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.',
+        type: 'error',
+      });
+      return;
+    }
+
     const targetGoal = goals.find((g) => g.id === id);
     if (!targetGoal) return;
     const isCompleted = targetGoal && targetGoal.target_value && Number(newValue) >= Number(targetGoal.target_value);
@@ -295,27 +306,53 @@ export default function Goals() {
         setGoals((prev) => prev.map((g) => g.id === id ? { ...g, current_value: targetGoal.current_value, status: targetGoal.status } : g));
       }
     } catch {
-      // Offline / Network Failure: keep optimistic progress and enqueue action
+      if (!isNative) {
+        setGoals((prev) => prev.map((g) => g.id === id ? { ...g, current_value: targetGoal.current_value, status: targetGoal.status } : g));
+        setToast({
+          message: 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.',
+          type: 'error',
+        });
+        return;
+      }
+
+      let queuedId = null;
       const updatedGoals = goals.map((g) => g.id === id ? { ...g, current_value: Number(newValue), status: newStatus } : g);
       if (user?.id) {
-        await saveCachedData(user.id, 'goals', updatedGoals);
-        await enqueueOfflineAction(user.id, 'UPDATE_GOAL', {
+        queuedId = await enqueueOfflineAction(user.id, 'UPDATE_GOAL', {
           id,
           goal_name: targetGoal?.goal_name,
           current_value: Number(newValue),
           status: newStatus,
         });
+        if (queuedId) {
+          await saveCachedData(user.id, 'goals', updatedGoals);
+        }
       }
-      setToast({ message: 'Saved offline. Progress will sync when reconnected.', type: 'info' });
-      if (isCompleted) {
-        window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
-          detail: { targetType: 'goal', entityId: id }
-        }));
+
+      if (queuedId) {
+        setToast({ message: 'Saved offline. Progress will sync when reconnected.', type: 'info' });
+        if (isCompleted) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'goal', entityId: id }
+          }));
+        }
+      } else {
+        setGoals((prev) => prev.map((g) => g.id === id ? { ...g, current_value: targetGoal.current_value, status: targetGoal.status } : g));
+        setToast({ message: 'Could not save offline changes.', type: 'error' });
       }
     }
   };
 
   const handleMarkComplete = async (id, undo = false) => {
+    const isNative = Capacitor.isNativePlatform();
+    if (!isNative && !getOnlineStatus()) {
+      setToast({
+        message: 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.',
+        type: 'error',
+      });
+      return;
+    }
+
     const targetGoal = goals.find((g) => g.id === id);
     if (!targetGoal) return;
     const newStatus = undo ? 'In Progress' : 'Completed';
@@ -362,25 +399,42 @@ export default function Goals() {
         setToast({ message: errData.error || 'Failed to update goal.', type: 'error' });
       }
     } catch {
-      // Offline / Network Failure: keep optimistic progress and enqueue action
+      if (!isNative) {
+        setGoals((prev) => prev.map((g) => g.id === id ? { ...g, status: targetGoal.status } : g));
+        setToast({
+          message: 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.',
+          type: 'error',
+        });
+        return;
+      }
+
+      let queuedId = null;
       const updatedGoals = goals.map((g) => g.id === id ? { ...g, status: newStatus } : g);
       if (user?.id) {
-        await saveCachedData(user.id, 'goals', updatedGoals);
-        await enqueueOfflineAction(user.id, 'UPDATE_GOAL', {
+        queuedId = await enqueueOfflineAction(user.id, 'UPDATE_GOAL', {
           id,
           goal_name: targetGoal.goal_name,
           status: newStatus,
         });
+        if (queuedId) {
+          await saveCachedData(user.id, 'goals', updatedGoals);
+        }
       }
-      setToast({ message: 'Saved offline. Changes will sync when reconnected.', type: 'info' });
-      if (!undo) {
-        window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
-          detail: { targetType: 'goal', entityId: id }
-        }));
+
+      if (queuedId) {
+        setToast({ message: 'Saved offline. Changes will sync when reconnected.', type: 'info' });
+        if (!undo) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'goal', entityId: id }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+            detail: { targetType: 'goal', entityId: id }
+          }));
+        }
       } else {
-        window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
-          detail: { targetType: 'goal', entityId: id }
-        }));
+        setGoals((prev) => prev.map((g) => g.id === id ? { ...g, status: targetGoal.status } : g));
+        setToast({ message: 'Could not save offline changes.', type: 'error' });
       }
     }
   };
@@ -459,7 +513,7 @@ export default function Goals() {
           setToast({ message: 'Goal completed! 🎉 All milestones done.', type: 'success' });
         }
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'goals' } }));
-        if (!undo) {
+        if (completed) {
           window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
             detail: { targetType: 'goal', entityId: id }
           }));

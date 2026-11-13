@@ -24,8 +24,18 @@ if (typeof window !== 'undefined') {
     console.error('[Global] Unhandled promise rejection:', event.reason);
   });
 
+  const CHUNK_RELOAD_KEY = 'habiz_stale_chunk_reload';
   window.addEventListener('error', (event) => {
     console.error('[Global] Uncaught error:', event.error || event.message);
+    const msg = event.message || event.error?.message || '';
+    const isStaleChunk = /Failed to fetch dynamically imported module|Importing a module script failed/i.test(msg);
+    if (isStaleChunk) {
+      const alreadyReloaded = sessionStorage.getItem(CHUNK_RELOAD_KEY);
+      if (!alreadyReloaded) {
+        sessionStorage.setItem(CHUNK_RELOAD_KEY, '1');
+        window.location.reload();
+      }
+    }
   });
 }
 

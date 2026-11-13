@@ -19,6 +19,8 @@ import SeasonManagerModal from '../components/SeasonManagerModal';
 import SeasonReviewModal from '../components/SeasonReviewModal';
 import HabizLoader from '../components/HabizLoader';
 import { saveCachedData, getCachedData, enqueueOfflineAction } from '../lib/offlineDb';
+import { Capacitor } from '@capacitor/core';
+import { getOnlineStatus } from '../lib/networkStatus';
 
 const PRESET_COLORS = ['#3d7a75', '#6b8e6a', '#c99a52', '#b3574f', '#7570ab', '#b6708f', '#4a95a3', '#6b7785'];
 
@@ -174,15 +176,6 @@ export default function Habits() {
           type: 'success',
         });
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
-        if (newStatus) {
-          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
-            detail: { targetType: 'habit', entityId: habitId, date: today }
-          }));
-        } else {
-          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
-            detail: { targetType: 'habit', entityId: habitId, date: today }
-          }));
-        }
       } else {
         const errJson = await res.json().catch(() => ({}));
         setToast({ message: errJson.error || 'Failed to update habit status.', type: 'error' });
@@ -341,6 +334,15 @@ export default function Habits() {
   };
 
   const toggleHabit = async (habitId) => {
+    const isNative = Capacitor.isNativePlatform();
+    if (!isNative && !getOnlineStatus()) {
+      setToast({
+        message: 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.',
+        type: 'error',
+      });
+      return;
+    }
+
     const previousTracking = [...tracking];
     const existing = tracking.find((t) => t.habit_id === habitId);
     const newStatus = existing ? !existing.status : true;
@@ -397,25 +399,51 @@ export default function Habits() {
         setToast({ message: errJson.error || 'Could not save habit status. Reverted change.', type: 'error' });
       }
     } catch {
-      // Offline / Network Failure: preserve optimistic tracking and enqueue action
-      if (user?.id) {
-        await saveCachedData(user.id, 'tracking', updatedTracking, today);
-        await enqueueOfflineAction(user.id, 'TRACK_HABIT', { habit_id: habitId, completion_date: today, status: newStatus });
+      if (!isNative) {
+        setTracking(previousTracking);
+        setToast({
+          message: 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.',
+          type: 'error',
+        });
+        return;
       }
-      setToast({ message: 'Saved offline. Changes will sync when reconnected.', type: 'info' });
-      if (newStatus) {
-        window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
-          detail: { targetType: 'habit', entityId: habitId, date: today }
-        }));
+
+      let queuedId = null;
+      if (user?.id) {
+        queuedId = await enqueueOfflineAction(user.id, 'TRACK_HABIT', { habit_id: habitId, completion_date: today, status: newStatus });
+        if (queuedId) {
+          await saveCachedData(user.id, 'tracking', updatedTracking, today);
+        }
+      }
+
+      if (queuedId) {
+        setToast({ message: 'Saved offline. Changes will sync when reconnected.', type: 'info' });
+        if (newStatus) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'habit', entityId: habitId, date: today }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+            detail: { targetType: 'habit', entityId: habitId, date: today }
+          }));
+        }
       } else {
-        window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
-          detail: { targetType: 'habit', entityId: habitId, date: today }
-        }));
+        setTracking(previousTracking);
+        setToast({ message: 'Could not save offline changes.', type: 'error' });
       }
     }
   };
 
   const handleLogQuantity = async (habitId, amount, reset = false) => {
+    const isNative = Capacitor.isNativePlatform();
+    if (!isNative && !getOnlineStatus()) {
+      setToast({
+        message: 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.',
+        type: 'error',
+      });
+      return;
+    }
+
     const previousTracking = [...tracking];
     const habit = habits.find((h) => h.id === habitId);
     const existing = tracking.find((t) => t.habit_id === habitId);
@@ -450,8 +478,9 @@ export default function Habits() {
         body: JSON.stringify({
           habit_id: habitId,
           completion_date: today,
-          action: reset ? 'reset' : 'add',
-          amount: reset ? undefined : amount,
+          action: 'set',
+          amount: newQty,
+          quantity_completed: newQty,
         }),
       });
       if (res.ok) {
@@ -477,32 +506,58 @@ export default function Habits() {
         setToast({ message: errJson.error || 'Failed to update progress. Reverted.', type: 'error' });
       }
     } catch {
-      // Offline / Network Failure: preserve optimistic tracking and enqueue action
+      if (!isNative) {
+        setTracking(previousTracking);
+        setToast({
+          message: 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.',
+          type: 'error',
+        });
+        return;
+      }
+
+      let queuedId = null;
       if (user?.id) {
-        await saveCachedData(user.id, 'tracking', updatedTracking, today);
-        await enqueueOfflineAction(user.id, 'TRACK_HABIT', {
+        queuedId = await enqueueOfflineAction(user.id, 'TRACK_HABIT', {
           habit_id: habitId,
           completion_date: today,
-          action: reset ? 'reset' : 'add',
-          amount: reset ? undefined : amount,
+          action: 'set',
+          amount: newQty,
           quantity_completed: newQty,
           status: newStatus,
         });
+        if (queuedId) {
+          await saveCachedData(user.id, 'tracking', updatedTracking, today);
+        }
       }
-      setToast({ message: 'Saved offline. Changes will sync when reconnected.', type: 'info' });
-      if (newStatus) {
-        window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
-          detail: { targetType: 'habit', entityId: habitId, date: today }
-        }));
+
+      if (queuedId) {
+        setToast({ message: 'Saved offline. Changes will sync when reconnected.', type: 'info' });
+        if (newStatus) {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'habit', entityId: habitId, date: today }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
+            detail: { targetType: 'habit', entityId: habitId, date: today }
+          }));
+        }
       } else {
-        window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
-          detail: { targetType: 'habit', entityId: habitId, date: today }
-        }));
+        setTracking(previousTracking);
+        setToast({ message: 'Could not save offline changes.', type: 'error' });
       }
     }
   };
 
   const handleCompleteFromTimer = async (habit, options = {}) => {
+    const isNative = Capacitor.isNativePlatform();
+    if (!isNative && !getOnlineStatus()) {
+      setToast({
+        message: 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.',
+        type: 'error',
+      });
+      return;
+    }
+
     const existing = tracking.find((t) => t.habit_id === habit.id);
     if (existing?.status === true) {
       setToast({
@@ -549,20 +604,25 @@ export default function Habits() {
           completion_date: today,
           status: true,
           completion_source: 'timer',
-          action: isQuantity ? 'add' : undefined,
-          amount: isQuantity ? targetQty : undefined,
+          action: isQuantity ? 'set' : undefined,
+          amount: isQuantity ? newQty : undefined,
+          quantity_completed: isQuantity ? newQty : undefined,
         }),
       });
 
       if (res.ok) {
+        const saved = await res.json().catch(() => null);
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
-        if (newStatus) {
+        const effectiveStatus = saved?.status ?? true;
+        const targetHabitId = saved?.habit_id || habit.id;
+        const targetDate = saved?.completion_date || today;
+        if (effectiveStatus === true) {
           window.dispatchEvent(new CustomEvent('habittracker-entity-completed', {
-            detail: { targetType: 'habit', entityId: habitId, date: today }
+            detail: { targetType: 'habit', entityId: targetHabitId, date: targetDate }
           }));
-        } else {
+        } else if (effectiveStatus === false) {
           window.dispatchEvent(new CustomEvent('habittracker-entity-uncompleted', {
-            detail: { targetType: 'habit', entityId: habitId, date: today }
+            detail: { targetType: 'habit', entityId: targetHabitId, date: targetDate }
           }));
         }
         setToast({
@@ -576,7 +636,45 @@ export default function Habits() {
         setToast({ message: errJson.error || 'Failed to auto-complete habit from timer.', type: 'error' });
       }
     } catch (err) {
-      console.warn('[Habits] Timer auto-complete error:', err);
+      if (!isNative) {
+        if (previousState) {
+          setTracking((prev) => prev.map((t) => (t.habit_id === habit.id ? previousState : t)));
+        } else {
+          setTracking((prev) => prev.filter((t) => t.habit_id !== habit.id));
+        }
+        setToast({
+          message: 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.',
+          type: 'error',
+        });
+        return;
+      }
+
+      let queuedId = null;
+      if (user?.id) {
+        queuedId = await enqueueOfflineAction(user.id, 'TRACK_HABIT', {
+          habit_id: habit.id,
+          completion_date: today,
+          status: true,
+          completion_source: 'timer',
+          action: isQuantity ? 'set' : undefined,
+          amount: isQuantity ? newQty : undefined,
+          quantity_completed: isQuantity ? newQty : undefined,
+        });
+        if (queuedId) {
+          await saveCachedData(user.id, 'tracking', tracking, today);
+        }
+      }
+
+      if (queuedId) {
+        setToast({ message: 'Saved offline. Progress will sync when reconnected.', type: 'info' });
+      } else {
+        if (previousState) {
+          setTracking((prev) => prev.map((t) => (t.habit_id === habit.id ? previousState : t)));
+        } else {
+          setTracking((prev) => prev.filter((t) => t.habit_id !== habit.id));
+        }
+        setToast({ message: 'Could not save offline changes.', type: 'error' });
+      }
     }
   };
 

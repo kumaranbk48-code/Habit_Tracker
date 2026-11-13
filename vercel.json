@@ -1,6 +1,23 @@
 {
   "headers": [
     {
+      "source": "/downloads/(.*)",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/vnd.android.package-archive"
+        },
+        {
+          "key": "Content-Disposition",
+          "value": "attachment; filename=\"HabiZ.apk\""
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, must-revalidate"
+        }
+      ]
+    },
+    {
       "source": "/(.*)",
       "headers": [
         {
@@ -36,7 +53,7 @@
       "destination": "/api/index.js"
     },
     {
-      "source": "/((?!api/|assets/).*)",
+      "source": "/((?!api/|assets/|downloads/|.*\\.apk$).*)",
       "destination": "/index.html"
     }
   ]

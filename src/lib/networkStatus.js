@@ -7,17 +7,20 @@
  */
 
 let currentOnlineState = typeof navigator !== 'undefined' ? navigator.onLine : true;
+let connectionDetail = typeof navigator !== 'undefined' && !navigator.onLine ? 'device_offline' : 'online';
 let isCheckingHealth = false;
 let checkTimer = null;
 const listeners = new Set();
 
 /**
- * Pings the lightweight /api/health endpoint with a strict timeout.
+ * Pings the lightweight /api/health?lite=1 endpoint with a strict timeout.
+ * Separates device offline vs server unavailable.
  * @param {number} timeoutMs
  * @returns {Promise<boolean>}
  */
 export async function verifyServerReachability(timeoutMs = 3500) {
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    connectionDetail = 'device_offline';
     setOnlineState(false);
     return false;
   }
@@ -29,7 +32,7 @@ export async function verifyServerReachability(timeoutMs = 3500) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(`/api/health?_t=${Date.now()}`, {
+    const res = await fetch(`/api/health?lite=1&_t=${Date.now()}`, {
       method: 'GET',
       cache: 'no-store',
       headers: { 'Accept': 'application/json' },
@@ -38,16 +41,26 @@ export async function verifyServerReachability(timeoutMs = 3500) {
     clearTimeout(timer);
 
     const reachable = res.ok && res.status === 200;
+    connectionDetail = reachable ? 'online' : 'server_unavailable';
     setOnlineState(reachable);
     return reachable;
   } catch {
     clearTimeout(timer);
+    connectionDetail = 'server_unavailable';
     setOnlineState(false);
     return false;
   } finally {
     isCheckingHealth = false;
     notifyListeners();
   }
+}
+
+/**
+ * Returns specific connection diagnostic state:
+ * 'online' | 'device_offline' | 'server_unavailable'
+ */
+export function getConnectionDetail() {
+  return connectionDetail;
 }
 
 function setOnlineState(newState) {

@@ -28,3 +28,4 @@ export async function fetchAllSupabaseRows(buildQuery, pageSize = 1000) {
 
   return { data: allRows, error: null };
 }
+

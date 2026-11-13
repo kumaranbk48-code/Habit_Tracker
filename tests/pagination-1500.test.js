@@ -225,3 +225,4 @@ test('G-08 pagination handles 1500 tracking rows without silent 1000-row truncat
     assert.equal(new Set(full.data.map((r) => r.id)).size, 1500);
   }
 });
+

@@ -77,7 +77,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((k) => k !== STATIC_CACHE)
+          .filter((k) => k.startsWith('habittracker-') && k !== STATIC_CACHE)
           .map((k) => caches.delete(k))
       )
     ).then(() => self.clients.claim())
@@ -88,6 +88,7 @@ self.addEventListener('activate', (event) => {
 // - Navigation requests (HTML): Network-First → Cache Fallback (/index.html) → /offline.html
 // - Static assets (JS, CSS, images, fonts): Cache-First → Network Fallback
 // - Sensitive API requests (/api/*): NEVER cached in Cache API
+// - APK installer downloads: ALWAYS bypassed from SW interception
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -97,6 +98,9 @@ self.addEventListener('fetch', (event) => {
 
   // 2. Strict Security: NEVER cache or intercept sensitive API endpoints
   if (url.pathname.startsWith('/api/')) return;
+
+  // 2b. APK downloads bypass: never intercept or cache APK installer packages
+  if (url.pathname.startsWith('/downloads/') || url.pathname.endsWith('.apk')) return;
 
   const isSameOrigin = url.origin === self.location.origin;
   const isGoogleFont = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import supabase from '../lib/supabase';
-import { clearUserCache, getQueueStats } from '../lib/offlineDb';
+import { clearUserCache } from '../lib/offlineDb';
+import SignOutConfirmDialog from '../components/SignOutConfirmDialog';
 import refreshSessionOnce from '../lib/refreshSessionOnce';
 
 const getApiBaseUrl = () => {
@@ -89,12 +90,20 @@ window.fetch = async (...args) => {
   return response;
 };
 
-const AuthContext = createContext({ user: null, session: null, loading: true, signOut: async () => {} });
+const AuthContext = createContext({
+  user: null,
+  session: null,
+  loading: true,
+  signOut: () => {},
+  requestSignOut: () => {},
+  signOutDirect: async () => {},
+});
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [dialogState, setDialogState] = useState({ isOpen: false, triggerElement: null });
 
   const purgeUserStorage = (currentUserId, { preserveQueue = true } = {}) => {
     try {
@@ -123,24 +132,9 @@ export function AuthProvider({ children }) {
     } catch {}
   };
 
-  const signOut = async () => {
+  // Direct sign out (used for session expiration, account deletion, or confirmed signout)
+  const signOutDirect = async () => {
     const currentId = user?.id;
-    if (currentId) {
-      try {
-        const stats = await getQueueStats(currentId);
-        if (stats?.pending > 0) {
-          const confirmed = typeof window !== 'undefined' && window.confirm
-            ? window.confirm('You have unsynced offline changes that will be lost. Sign out anyway?')
-            : true;
-          if (!confirmed) {
-            return;
-          }
-        }
-      } catch (err) {
-        console.warn('[Auth] Error checking queue stats before sign-out:', err);
-      }
-    }
-
     try {
       await supabase.auth.signOut();
     } catch (e) {
@@ -150,6 +144,14 @@ export function AuthProvider({ children }) {
       setUser(null);
       purgeUserStorage(currentId, { preserveQueue: false });
     }
+  };
+
+  // User-initiated sign out (opens accessible confirmation dialog)
+  const requestSignOut = (triggerElement = null) => {
+    setDialogState({
+      isOpen: true,
+      triggerElement: triggerElement || (typeof document !== 'undefined' ? document.activeElement : null),
+    });
   };
 
   useEffect(() => {
@@ -192,8 +194,25 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signOut }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        loading,
+        signOut: requestSignOut,
+        requestSignOut,
+        signOutDirect,
+      }}
+    >
       {children}
+      <SignOutConfirmDialog
+        isOpen={dialogState.isOpen}
+        onClose={() => setDialogState({ isOpen: false, triggerElement: null })}
+        onConfirm={signOutDirect}
+        userId={user?.id}
+        accessToken={session?.access_token}
+        triggerElement={dialogState.triggerElement}
+      />
     </AuthContext.Provider>
   );
 }
