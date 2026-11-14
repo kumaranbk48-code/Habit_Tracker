@@ -438,3 +438,319 @@ test('Behavioral Regression: Issue 3 - Profile session failure sets loadError an
   });
 });
 
+test('Behavioral Regression: Reminders and Habits Stale-Response Guard & Failure-Path Refetch', async (t) => {
+  // Helper to create test harness for Reminders
+  function createRemindersHarness(initialReminder) {
+    let state = [{ ...initialReminder }];
+    let server = { ...initialReminder };
+    const fetchSeqRef = { current: 0 };
+
+    const fetchData = (overrideDataPromise) => {
+      const seq = ++fetchSeqRef.current;
+      return (async () => {
+        const data = overrideDataPromise ? await overrideDataPromise : [{ ...server }];
+        if (seq === fetchSeqRef.current) {
+          state = data.map(r => ({ ...r }));
+        }
+      })();
+    };
+
+    const handleEdit = (editPromise, newFields, failureGetPromise) => {
+      const originalReminder = { ...state[0] };
+      const formFieldsToRestore = {
+        custom_text: originalReminder.custom_text,
+        reminder_time: originalReminder.reminder_time,
+        is_alarm: originalReminder.is_alarm,
+      };
+      // Optimistic edit
+      state = state.map(r => r.id === originalReminder.id ? { ...r, ...newFields } : r);
+
+      return (async () => {
+        try {
+          await editPromise;
+          server = { ...server, ...newFields };
+        } catch {
+          // Rollback
+          state = state.map(r => r.id === originalReminder.id ? { ...r, ...formFieldsToRestore } : r);
+          // Failure-path refetch
+          fetchData(failureGetPromise);
+        }
+      })();
+    };
+
+    const handleToggleAlarm = (togglePromise, toggleSuccessGetPromise) => {
+      const originalIsAlarm = state[0].is_alarm;
+      const newIsAlarm = !originalIsAlarm;
+      state = state.map(r => r.id === state[0].id ? { ...r, is_alarm: newIsAlarm } : r);
+
+      return (async () => {
+        try {
+          await togglePromise;
+          server.is_alarm = newIsAlarm;
+          fetchData(toggleSuccessGetPromise);
+        } catch {
+          state = state.map(r => r.id === state[0].id ? { ...r, is_alarm: originalIsAlarm } : r);
+        }
+      })();
+    };
+
+    return {
+      getState: () => ({ ...state[0] }),
+      getServer: () => ({ ...server }),
+      fetchData,
+      handleEdit,
+      handleToggleAlarm,
+      fetchSeqRef,
+    };
+  }
+
+  // a) Reminders: Edit fails first, toggle succeeds, failure-triggered GET arrives AFTER toggle's success GET carrying stale data -> final UI must match server
+  await t.test('Case a: Reminders - Edit fails first, toggle succeeds, stale failure-GET arrives after toggle-success GET', async () => {
+    const harness = createRemindersHarness({ id: 'rem-1', custom_text: 'Old Text', reminder_time: '08:00', is_alarm: false });
+
+    let editReject, toggleResolve, failGetResolve, toggleGetResolve;
+    const editP = new Promise((_, rej) => { editReject = rej; });
+    const toggleP = new Promise((res) => { toggleResolve = res; });
+    const failGetP = new Promise((res) => { failGetResolve = res; });
+    const toggleGetP = new Promise((res) => { toggleGetResolve = res; });
+
+    // 1. Edit begins (in-flight)
+    const editOp = harness.handleEdit(editP, { custom_text: 'New Text', reminder_time: '09:00', is_alarm: false }, failGetP);
+
+    // 2. Edit fails first -> triggers rollback and initiates fail-GET (seq 1)
+    editReject(new Error('500 Error'));
+    await editOp;
+
+    // 3. User flips alarm toggle -> toggle succeeds on server
+    const toggleOp = harness.handleToggleAlarm(toggleP, toggleGetP);
+    toggleResolve();
+    await toggleOp;
+
+    // 4. Toggle's success GET (seq 2) arrives with fresh server state (is_alarm: true)
+    toggleGetResolve([{ id: 'rem-1', custom_text: 'Old Text', reminder_time: '08:00', is_alarm: true }]);
+    await new Promise(res => setImmediate(res));
+    assert.equal(harness.getState().is_alarm, true);
+
+    // 5. Stale failure-GET (seq 1) arrives AFTER toggle-success GET carrying old is_alarm: false
+    failGetResolve([{ id: 'rem-1', custom_text: 'Old Text', reminder_time: '08:00', is_alarm: false }]);
+    await new Promise(res => setImmediate(res));
+
+    // Stale response must be discarded by sequence guard!
+    assert.equal(harness.getState().is_alarm, true, 'is_alarm must remain true from fresh toggle GET');
+    assert.equal(harness.getState().custom_text, 'Old Text', 'custom_text must remain Old Text');
+    assert.deepEqual(harness.getState(), harness.getServer(), 'UI state must match server state');
+  });
+
+  // b) Reminders: Edit fails first, toggle succeeds, fresh GET -> consistent
+  await t.test('Case b: Reminders - Edit fails first, toggle succeeds, fresh GET arrives', async () => {
+    const harness = createRemindersHarness({ id: 'rem-1', custom_text: 'Old Text', reminder_time: '08:00', is_alarm: false });
+
+    // Edit fails
+    await harness.handleEdit(Promise.reject(new Error('Network drop')), { custom_text: 'New Text' });
+    // Toggle succeeds
+    await harness.handleToggleAlarm(Promise.resolve());
+    await new Promise(res => setImmediate(res));
+
+    assert.equal(harness.getState().is_alarm, true);
+    assert.equal(harness.getState().custom_text, 'Old Text');
+    assert.deepEqual(harness.getState(), harness.getServer());
+  });
+
+  // c) Reminders: Edit fails first, toggle also fails -> consistent
+  await t.test('Case c: Reminders - Edit fails first, toggle also fails', async () => {
+    const harness = createRemindersHarness({ id: 'rem-1', custom_text: 'Old Text', reminder_time: '08:00', is_alarm: false });
+
+    // Edit fails
+    await harness.handleEdit(Promise.reject(new Error('Edit error')), { custom_text: 'New Text' });
+    // Toggle also fails
+    await harness.handleToggleAlarm(Promise.reject(new Error('Toggle error')));
+    await new Promise(res => setImmediate(res));
+
+    assert.equal(harness.getState().is_alarm, false);
+    assert.equal(harness.getState().custom_text, 'Old Text');
+    assert.deepEqual(harness.getState(), harness.getServer());
+  });
+
+  // d) Reminders: Toggle succeeds first, edit fails -> consistent
+  await t.test('Case d: Reminders - Toggle succeeds first, edit fails', async () => {
+    const harness = createRemindersHarness({ id: 'rem-1', custom_text: 'Old Text', reminder_time: '08:00', is_alarm: false });
+
+    let editReject, toggleResolve;
+    const editP = new Promise((_, rej) => { editReject = rej; });
+    const toggleP = new Promise((res) => { toggleResolve = res; });
+
+    // 1. Edit starts (in-flight)
+    const editOp = harness.handleEdit(editP, { custom_text: 'New Text', is_alarm: false });
+
+    // 2. Toggle runs and succeeds first
+    const toggleOp = harness.handleToggleAlarm(toggleP);
+    toggleResolve();
+    await toggleOp;
+    assert.equal(harness.getServer().is_alarm, true);
+
+    // 3. Edit fails
+    editReject(new Error('Edit failed'));
+    await editOp;
+    await new Promise(res => setImmediate(res));
+
+    // Refetch from failure reconciles is_alarm to server truth
+    assert.equal(harness.getState().is_alarm, true);
+    assert.equal(harness.getState().custom_text, 'Old Text');
+    assert.deepEqual(harness.getState(), harness.getServer());
+  });
+
+  // Helper to create test harness for Habits
+  function createHabitsHarness(initialHabit) {
+    let state = [{ ...initialHabit }];
+    let server = { ...initialHabit };
+    const fetchSeqRef = { current: 0 };
+
+    const fetchData = (overrideDataPromise) => {
+      const seq = ++fetchSeqRef.current;
+      return (async () => {
+        const data = overrideDataPromise ? await overrideDataPromise : [{ ...server }];
+        if (seq === fetchSeqRef.current) {
+          state = data.map(h => ({ ...h }));
+        }
+      })();
+    };
+
+    const handleEdit = (editPromise, newFields, failureGetPromise) => {
+      const originalHabit = { ...state[0] };
+      // Optimistic edit
+      state = state.map(h => h.id === originalHabit.id ? { ...h, ...newFields } : h);
+
+      return (async () => {
+        try {
+          await editPromise;
+          server = { ...server, ...newFields };
+        } catch {
+          // Rollback
+          state = state.map(h => h.id === originalHabit.id ? { ...h, ...originalHabit } : h);
+          // Failure-path refetch
+          fetchData(failureGetPromise);
+        }
+      })();
+    };
+
+    const handleTogglePause = (togglePromise, toggleSuccessGetPromise) => {
+      const newStatus = state[0].status === 'paused' ? 'active' : 'paused';
+      const originalStatus = state[0].status;
+      state = state.map(h => h.id === state[0].id ? { ...h, status: newStatus } : h);
+
+      return (async () => {
+        try {
+          await togglePromise;
+          server.status = newStatus;
+          fetchData(toggleSuccessGetPromise);
+        } catch {
+          state = state.map(h => h.id === state[0].id ? { ...h, status: originalStatus } : h);
+        }
+      })();
+    };
+
+    return {
+      getState: () => ({ ...state[0] }),
+      getServer: () => ({ ...server }),
+      fetchData,
+      handleEdit,
+      handleTogglePause,
+      fetchSeqRef,
+    };
+  }
+
+  // e.1) Habits: Edit fails first, pause succeeds, failure-triggered GET arrives AFTER pause's success GET carrying stale data -> final UI must match server
+  await t.test('Case e.1: Habits - Edit fails first, pause succeeds, stale failure-GET arrives after pause-success GET', async () => {
+    const harness = createHabitsHarness({ id: 'h-1', habit_name: 'Original Habit', status: 'active' });
+
+    let editReject, toggleResolve, failGetResolve, toggleGetResolve;
+    const editP = new Promise((_, rej) => { editReject = rej; });
+    const toggleP = new Promise((res) => { toggleResolve = res; });
+    const failGetP = new Promise((res) => { failGetResolve = res; });
+    const toggleGetP = new Promise((res) => { toggleGetResolve = res; });
+
+    // 1. Edit begins (in-flight)
+    const editOp = harness.handleEdit(editP, { habit_name: 'Renamed Habit' }, failGetP);
+
+    // 2. Edit fails first -> triggers rollback and initiates fail-GET (seq 1)
+    editReject(new Error('Server error'));
+    await editOp;
+
+    // 3. User pauses habit -> toggle succeeds on server
+    const toggleOp = harness.handleTogglePause(toggleP, toggleGetP);
+    toggleResolve();
+    await toggleOp;
+
+    // 4. Toggle's success GET (seq 2) arrives with fresh server state (status: 'paused')
+    toggleGetResolve([{ id: 'h-1', habit_name: 'Original Habit', status: 'paused' }]);
+    await new Promise(res => setImmediate(res));
+    assert.equal(harness.getState().status, 'paused');
+
+    // 5. Stale failure-GET (seq 1) arrives AFTER toggle-success GET carrying old status: 'active'
+    failGetResolve([{ id: 'h-1', habit_name: 'Original Habit', status: 'active' }]);
+    await new Promise(res => setImmediate(res));
+
+    // Stale response must be discarded by sequence guard!
+    assert.equal(harness.getState().status, 'paused', 'status must remain paused from fresh toggle GET');
+    assert.equal(harness.getState().habit_name, 'Original Habit', 'habit_name must remain Original Habit');
+    assert.deepEqual(harness.getState(), harness.getServer(), 'UI habits state must match server');
+  });
+
+  // e.2) Habits: Edit fails first, pause succeeds, fresh GET -> consistent
+  await t.test('Case e.2: Habits - Edit fails first, pause succeeds, fresh GET arrives', async () => {
+    const harness = createHabitsHarness({ id: 'h-1', habit_name: 'Original Habit', status: 'active' });
+
+    // Edit fails
+    await harness.handleEdit(Promise.reject(new Error('Network error')), { habit_name: 'Renamed Habit' });
+    // Pause succeeds
+    await harness.handleTogglePause(Promise.resolve());
+    await new Promise(res => setImmediate(res));
+
+    assert.equal(harness.getState().status, 'paused');
+    assert.equal(harness.getState().habit_name, 'Original Habit');
+    assert.deepEqual(harness.getState(), harness.getServer());
+  });
+
+  // e.3) Habits: Edit fails first, pause also fails -> consistent
+  await t.test('Case e.3: Habits - Edit fails first, pause also fails', async () => {
+    const harness = createHabitsHarness({ id: 'h-1', habit_name: 'Original Habit', status: 'active' });
+
+    // Edit fails
+    await harness.handleEdit(Promise.reject(new Error('Edit error')), { habit_name: 'Renamed Habit' });
+    // Pause fails
+    await harness.handleTogglePause(Promise.reject(new Error('Pause error')));
+    await new Promise(res => setImmediate(res));
+
+    assert.equal(harness.getState().status, 'active');
+    assert.equal(harness.getState().habit_name, 'Original Habit');
+    assert.deepEqual(harness.getState(), harness.getServer());
+  });
+
+  // e.4) Habits: Pause succeeds first, edit fails -> consistent
+  await t.test('Case e.4: Habits - Pause succeeds first, edit fails', async () => {
+    const harness = createHabitsHarness({ id: 'h-1', habit_name: 'Original Habit', status: 'active' });
+
+    let editReject, toggleResolve;
+    const editP = new Promise((_, rej) => { editReject = rej; });
+    const toggleP = new Promise((res) => { toggleResolve = res; });
+
+    // 1. Edit starts (in-flight)
+    const editOp = harness.handleEdit(editP, { habit_name: 'Renamed Habit' });
+
+    // 2. Pause runs and succeeds first
+    const toggleOp = harness.handleTogglePause(toggleP);
+    toggleResolve();
+    await toggleOp;
+    assert.equal(harness.getServer().status, 'paused');
+
+    // 3. Edit fails -> rollback runs and failure-path fetchData reconciles with server
+    editReject(new Error('Edit error'));
+    await editOp;
+    await new Promise(res => setImmediate(res));
+
+    assert.equal(harness.getState().status, 'paused');
+    assert.equal(harness.getState().habit_name, 'Original Habit');
+    assert.deepEqual(harness.getState(), harness.getServer());
+  });
+});
+

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import supabase from '../lib/supabase';
@@ -57,6 +57,7 @@ export default function Reminders() {
   const [editing, setEditing] = useState(null);
   const [toast, setToast] = useState(null);
   const [formLoading, setFormLoading] = useState(false);
+  const fetchSeqRef = useRef(0);
 
   // Filters
   const [categoryFilter, setCategoryFilter] = useState('All'); // 'All' | 'habit' | 'goal' | 'learning'
@@ -103,13 +104,15 @@ export default function Reminders() {
   };
 
   const fetchData = useCallback(async () => {
+    const seq = ++fetchSeqRef.current;
     let currentSession = session;
     if (!currentSession) {
       const { data } = await supabase.auth.getSession();
       currentSession = data?.session;
     }
+    if (seq !== fetchSeqRef.current) return;
     if (!currentSession) {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) setLoading(false);
       return;
     }
     setFetchError('');
@@ -121,9 +124,13 @@ export default function Reminders() {
         fetch('/api/learning', { headers: { Authorization: `Bearer ${currentSession.access_token}` } }),
       ]);
 
+      if (seq !== fetchSeqRef.current) return;
+
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
-        setFetchError(e.error || 'Failed to load reminders.');
+        if (seq === fetchSeqRef.current) {
+          setFetchError(e.error || 'Failed to load reminders.');
+        }
         return;
       }
 
@@ -131,6 +138,8 @@ export default function Reminders() {
       const habitsData = habitsRes.ok ? await habitsRes.json() : [];
       const goalsData = goalsRes.ok ? await goalsRes.json() : [];
       const learningData = learningRes.ok ? await learningRes.json() : {};
+
+      if (seq !== fetchSeqRef.current) return;
 
       const r = Array.isArray(data) ? data : [];
       const h = Array.isArray(habitsData) ? habitsData : [];
@@ -169,10 +178,12 @@ export default function Reminders() {
       scheduleLocalReminders(activeReminders);
       window.dispatchEvent(new CustomEvent('habittracker-reminders-updated'));
     } catch (err) {
+      if (seq !== fetchSeqRef.current) return;
       console.warn('[Reminders] Network error, reading cached reminders from IndexedDB:', err);
       if (user?.id) {
         try {
           const cached = await getCachedData(user.id, 'reminders');
+          if (seq !== fetchSeqRef.current) return;
           if (cached && Array.isArray(cached)) {
             setReminders(cached);
             setFetchError('');
@@ -182,9 +193,13 @@ export default function Reminders() {
           console.warn('[Reminders] Cache read error:', cacheErr);
         }
       }
-      setFetchError('Offline — viewing cached reminders.');
+      if (seq === fetchSeqRef.current) {
+        setFetchError('Offline — viewing cached reminders.');
+      }
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, [session, user?.id, scheduleLocalReminders]);
 
@@ -455,6 +470,7 @@ export default function Reminders() {
           if (formFieldsToRestore) {
             setReminders((current) => current.map((r) => (r.id === editing.id ? { ...r, ...formFieldsToRestore } : r)));
           }
+          fetchData();
         } else if (optimisticEntry?.id) {
           setReminders((current) => current.filter((r) => r.id !== optimisticEntry.id));
         }
@@ -466,6 +482,7 @@ export default function Reminders() {
         if (formFieldsToRestore) {
           setReminders((current) => current.map((r) => (r.id === editing.id ? { ...r, ...formFieldsToRestore } : r)));
         }
+        fetchData();
       } else if (optimisticEntry?.id) {
         setReminders((current) => current.filter((r) => r.id !== optimisticEntry.id));
       }

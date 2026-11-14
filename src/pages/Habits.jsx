@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
@@ -50,6 +50,7 @@ export default function Habits() {
   const [editing, setEditing] = useState(null);
   const [toast, setToast] = useState(null);
   const [formLoading, setFormLoading] = useState(false);
+  const fetchSeqRef = useRef(0);
   const [poppingHabit, setPoppingHabit] = useState(null);
   const [perfectDay, setPerfectDay] = useState(false);
 
@@ -92,6 +93,7 @@ export default function Habits() {
 
   const fetchData = useCallback(async () => {
     if (!session) return;
+    const seq = ++fetchSeqRef.current;
     setFetchError('');
     try {
       const [habitsRes, trackingRes, seasonsRes] = await Promise.all([
@@ -99,14 +101,19 @@ export default function Habits() {
         fetch(`/api/tracking?date=${today}`, { headers: { Authorization: `Bearer ${session.access_token}` } }),
         fetch('/api/seasons', { headers: { Authorization: `Bearer ${session.access_token}` } }).catch(() => null),
       ]);
+      if (seq !== fetchSeqRef.current) return;
       if (!habitsRes.ok || !trackingRes.ok) {
         const e = await (!habitsRes.ok ? habitsRes : trackingRes).json().catch(() => ({}));
-        setFetchError(e.error || 'Failed to load data. Please refresh.');
+        if (seq === fetchSeqRef.current) {
+          setFetchError(e.error || 'Failed to load data. Please refresh.');
+        }
         return;
       }
       const habitsData = await habitsRes.json();
       const trackingData = await trackingRes.json();
       const seasonsData = (seasonsRes && seasonsRes.ok) ? await seasonsRes.json() : null;
+
+      if (seq !== fetchSeqRef.current) return;
 
       const h = Array.isArray(habitsData) ? habitsData : [];
       const t = Array.isArray(trackingData) ? trackingData : [];
@@ -124,6 +131,7 @@ export default function Habits() {
       const completed = t.filter((r) => r.status === true).length;
       setPerfectDay(activeHabitsCount > 0 && completed >= activeHabitsCount);
     } catch (err) {
+      if (seq !== fetchSeqRef.current) return;
       console.warn('[Habits] Network error, reading cached habits from IndexedDB:', err);
       if (user?.id) {
         try {
@@ -132,6 +140,7 @@ export default function Habits() {
             getCachedData(user.id, 'tracking', today),
             getCachedData(user.id, 'seasons'),
           ]);
+          if (seq !== fetchSeqRef.current) return;
           if (cachedHabits) {
             const h = Array.isArray(cachedHabits) ? cachedHabits : [];
             const t = Array.isArray(cachedTracking) ? cachedTracking : [];
@@ -148,9 +157,13 @@ export default function Habits() {
           console.warn('[Habits] Failed to load offline cache:', cacheErr);
         }
       }
-      setFetchError('Offline — viewing cached habits.');
+      if (seq === fetchSeqRef.current) {
+        setFetchError('Offline — viewing cached habits.');
+      }
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, [session, user?.id, today]);
 
@@ -176,6 +189,7 @@ export default function Habits() {
           type: 'success',
         });
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
+        fetchData();
       } else {
         const errJson = await res.json().catch(() => ({}));
         setToast({ message: errJson.error || 'Failed to update habit status.', type: 'error' });
@@ -314,6 +328,7 @@ export default function Habits() {
         if (originalHabit) {
           setHabits((current) => current.map((h) => (h.id === editing.id ? { ...h, ...originalHabit } : h)));
         }
+        fetchData();
         const e = await res.json().catch(() => ({}));
         setToast({ message: e.error || 'Something went wrong — please try again.', type: 'error' });
       }
@@ -321,6 +336,7 @@ export default function Habits() {
       if (originalHabit) {
         setHabits((current) => current.map((h) => (h.id === editing.id ? { ...h, ...originalHabit } : h)));
       }
+      fetchData();
       setToast({ message: 'Network error — check your connection.', type: 'error' });
     } finally {
       setFormLoading(false);
