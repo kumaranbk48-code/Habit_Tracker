@@ -119,7 +119,7 @@ export default function LearningJourneyDetail() {
     });
 
     try {
-      await fetch('/api/learning?action=toggle_task', {
+      const res = await fetch('/api/learning?action=toggle_task', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -127,8 +127,46 @@ export default function LearningJourneyDetail() {
         },
         body: JSON.stringify({ id: taskId, completed })
       });
+      if (!res.ok) {
+        // Rollback only this task
+        setSelectedTopic(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            tasks: (prev.tasks || []).map(t => t.id === taskId ? { ...t, completed: !completed } : t)
+          };
+        });
+        setJourneyData(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            topics: (prev.topics || []).map(topic => ({
+              ...topic,
+              tasks: (topic.tasks || []).map(t => t.id === taskId ? { ...t, completed: !completed } : t)
+            }))
+          };
+        });
+      }
     } catch (err) {
       console.error('Failed to toggle task:', err);
+      // Rollback only this task
+      setSelectedTopic(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          tasks: (prev.tasks || []).map(t => t.id === taskId ? { ...t, completed: !completed } : t)
+        };
+      });
+      setJourneyData(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          topics: (prev.topics || []).map(topic => ({
+            ...topic,
+            tasks: (topic.tasks || []).map(t => t.id === taskId ? { ...t, completed: !completed } : t)
+          }))
+        };
+      });
     }
     fetchJourneyDetail(true);
 
@@ -143,8 +181,29 @@ export default function LearningJourneyDetail() {
 
   const handleAddTask = async (topicId, title) => {
     if (!session || !id) return;
+    const tempTaskId = `temp_task_${Date.now()}`;
+    const newTask = { id: tempTaskId, topic_id: topicId, journey_id: id, title, completed: false };
+
+    // Optimistic task addition for instant feedback
+    setSelectedTopic(prev => {
+      if (!prev || prev.id !== topicId) return prev;
+      return {
+        ...prev,
+        tasks: [...(prev.tasks || []), newTask]
+      };
+    });
+    setJourneyData(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        topics: (prev.topics || []).map(topic => (
+          topic.id === topicId ? { ...topic, tasks: [...(topic.tasks || []), newTask] } : topic
+        ))
+      };
+    });
+
     try {
-      await fetch('/api/learning?action=add_task', {
+      const res = await fetch('/api/learning?action=add_task', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -152,14 +211,74 @@ export default function LearningJourneyDetail() {
         },
         body: JSON.stringify({ topic_id: topicId, journey_id: id, title })
       });
+      if (res.ok) {
+        const savedTask = await res.json().catch(() => null);
+        if (savedTask?.id) {
+          setSelectedTopic(prev => {
+            if (!prev || prev.id !== topicId) return prev;
+            return {
+              ...prev,
+              tasks: (prev.tasks || []).map(t => (t.id === tempTaskId ? { ...t, ...savedTask, id: savedTask.id } : t))
+            };
+          });
+          setJourneyData(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              topics: (prev.topics || []).map(topic => (
+                topic.id === topicId
+                  ? { ...topic, tasks: (topic.tasks || []).map(t => (t.id === tempTaskId ? { ...t, ...savedTask, id: savedTask.id } : t)) }
+                  : topic
+              ))
+            };
+          });
+        }
+        fetchJourneyDetail(true);
+      } else {
+        // Rollback
+        setSelectedTopic(prev => {
+          if (!prev || prev.id !== topicId) return prev;
+          return {
+            ...prev,
+            tasks: (prev.tasks || []).filter(t => t.id !== tempTaskId)
+          };
+        });
+        setJourneyData(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            topics: (prev.topics || []).map(topic => (
+              topic.id === topicId ? { ...topic, tasks: (topic.tasks || []).filter(t => t.id !== tempTaskId) } : topic
+            ))
+          };
+        });
+      }
     } catch (err) {
       console.error('Failed to add task:', err);
+      // Rollback
+      setSelectedTopic(prev => {
+        if (!prev || prev.id !== topicId) return prev;
+        return {
+          ...prev,
+          tasks: (prev.tasks || []).filter(t => t.id !== tempTaskId)
+        };
+      });
+      setJourneyData(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          topics: (prev.topics || []).map(topic => (
+            topic.id === topicId ? { ...topic, tasks: (topic.tasks || []).filter(t => t.id !== tempTaskId) } : topic
+          ))
+        };
+      });
     }
-    fetchJourneyDetail(true);
   };
 
   const handleDeleteTask = async (topicId, taskId) => {
     if (!session || !id) return;
+    const taskToDelete = selectedTopic?.tasks?.find(t => t.id === taskId)
+      || journeyData?.topics?.find(tp => tp.id === topicId)?.tasks?.find(t => t.id === taskId);
     // Optimistic update
     setSelectedTopic(prev => {
       if (!prev) return prev;
@@ -180,7 +299,7 @@ export default function LearningJourneyDetail() {
     });
 
     try {
-      await fetch('/api/learning', {
+      const res = await fetch('/api/learning', {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -188,17 +307,73 @@ export default function LearningJourneyDetail() {
         },
         body: JSON.stringify({ id: taskId, type: 'task' })
       });
+      if (res.ok) {
+        fetchJourneyDetail(true);
+      } else if (taskToDelete) {
+        setSelectedTopic(prev => {
+          if (!prev || prev.id !== topicId) return prev;
+          return {
+            ...prev,
+            tasks: prev.tasks?.some(t => t.id === taskId) ? prev.tasks : [...(prev.tasks || []), taskToDelete]
+          };
+        });
+        setJourneyData(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            topics: (prev.topics || []).map(topic => (
+              topic.id === topicId
+                ? { ...topic, tasks: topic.tasks?.some(t => t.id === taskId) ? topic.tasks : [...(topic.tasks || []), taskToDelete] }
+                : topic
+            ))
+          };
+        });
+      }
     } catch (err) {
       console.error('Failed to delete task:', err);
+      if (taskToDelete) {
+        setSelectedTopic(prev => {
+          if (!prev || prev.id !== topicId) return prev;
+          return {
+            ...prev,
+            tasks: prev.tasks?.some(t => t.id === taskId) ? prev.tasks : [...(prev.tasks || []), taskToDelete]
+          };
+        });
+        setJourneyData(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            topics: (prev.topics || []).map(topic => (
+              topic.id === topicId
+                ? { ...topic, tasks: topic.tasks?.some(t => t.id === taskId) ? topic.tasks : [...(topic.tasks || []), taskToDelete] }
+                : topic
+            ))
+          };
+        });
+      }
     }
-    fetchJourneyDetail(true);
   };
 
   const handleDeleteTopic = async (topicId) => {
     if (!session || !id) return;
     if (!confirm('Are you sure you want to delete this topic and all its subtasks?')) return;
+    const deletedTopic = journeyData?.topics?.find(t => t.id === topicId);
+
+    // Optimistic topic deletion
+    setJourneyData(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        topics: (prev.topics || []).filter(t => t.id !== topicId)
+      };
+    });
+    if (selectedTopic?.id === topicId) {
+      setTopicModalOpen(false);
+      setSelectedTopic(null);
+    }
+
     try {
-      await fetch('/api/learning', {
+      const res = await fetch('/api/learning', {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -206,14 +381,27 @@ export default function LearningJourneyDetail() {
         },
         body: JSON.stringify({ id: topicId, type: 'topic' })
       });
-      if (selectedTopic?.id === topicId) {
-        setTopicModalOpen(false);
-        setSelectedTopic(null);
+      if (res.ok) {
+        fetchJourneyDetail(true);
+      } else {
+        setJourneyData(prev => {
+          if (!prev || !deletedTopic) return prev;
+          return {
+            ...prev,
+            topics: prev.topics?.some(t => t.id === topicId) ? prev.topics : [...(prev.topics || []), deletedTopic]
+          };
+        });
       }
     } catch (err) {
       console.error('Failed to delete topic:', err);
+      setJourneyData(prev => {
+        if (!prev || !deletedTopic) return prev;
+        return {
+          ...prev,
+          topics: prev.topics?.some(t => t.id === topicId) ? prev.topics : [...(prev.topics || []), deletedTopic]
+        };
+      });
     }
-    fetchJourneyDetail(true);
   };
 
   const handleDeleteJourney = async () => {

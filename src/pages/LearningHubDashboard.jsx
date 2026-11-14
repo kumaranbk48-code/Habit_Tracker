@@ -151,8 +151,14 @@ export default function LearningHubDashboard() {
   const handleDeleteJourney = async (e, journeyId) => {
     e.stopPropagation();
     if (!session || !confirm('Are you sure you want to delete this learning journey and all its topics?')) return;
+    const prevJourneys = data.journeys;
+    // Optimistic UI update: immediately remove from local journeys state
+    setData(prev => ({
+      ...prev,
+      journeys: (prev.journeys || []).filter(j => j.id !== journeyId)
+    }));
     try {
-      await fetch('/api/learning', {
+      const res = await fetch('/api/learning', {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -160,9 +166,17 @@ export default function LearningHubDashboard() {
         },
         body: JSON.stringify({ id: journeyId, type: 'journey' })
       });
-      fetchDashboardData(true);
+      if (res.ok) {
+        fetchDashboardData(true);
+      } else {
+        setData(prev => ({ ...prev, journeys: prevJourneys }));
+        const err = await res.json().catch(() => ({}));
+        setFetchError(err.error || 'Failed to delete journey');
+      }
     } catch (err) {
       console.error('Failed to delete journey:', err);
+      setData(prev => ({ ...prev, journeys: prevJourneys }));
+      setFetchError('Network error — failed to delete journey');
     }
   };
 

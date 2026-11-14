@@ -548,7 +548,7 @@ export default function Goals() {
   };
 
   const handleDeleteMilestone = async (id) => {
-    const prevMilestones = milestones;
+    const deletedMilestone = milestones.find((m) => m.id === id);
     // Optimistic UI update for immediate removal
     setMilestones(prev => prev.filter(m => m.id !== id));
     try {
@@ -561,12 +561,12 @@ export default function Goals() {
         setToast({ message: 'Milestone deleted', type: 'success' });
         fetchGoals();
       } else {
-        setMilestones(prevMilestones);
+        setMilestones(current => (deletedMilestone && !current.some(m => m.id === id) ? [...current, deletedMilestone] : current));
         const e = await res.json().catch(() => ({}));
         setToast({ message: e.error || 'Failed to delete milestone.', type: 'error' });
       }
     } catch {
-      setMilestones(prevMilestones);
+      setMilestones(current => (deletedMilestone && !current.some(m => m.id === id) ? [...current, deletedMilestone] : current));
       setToast({ message: 'Network error — check your connection.', type: 'error' });
     }
   };

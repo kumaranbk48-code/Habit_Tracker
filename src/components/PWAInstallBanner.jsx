@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useSyncExternalStore } from 'react';
 import { Download, ShieldCheck, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
+import { subscribeModalOpen, getIsAnyModalOpen } from './Modal';
 
 export default function PWAInstallBanner() {
+  const isModalOpen = useSyncExternalStore(subscribeModalOpen, getIsAnyModalOpen, () => false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [show, setShow] = useState(false);
   const [installed, setInstalled] = useState(false);
@@ -63,10 +65,10 @@ export default function PWAInstallBanner() {
     localStorage.setItem('pwa-banner-dismissed', '1');
   };
 
-  if (!show || installed || isNative) return null;
+  if (!show || installed || isNative || isModalOpen) return null;
 
   return (
-    <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[150] w-[calc(100%-2rem)] max-w-sm toast-enter">
+    <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-sm toast-enter">
       <div className="bg-white dark:bg-[#1a2129] border border-[#e2e8ec] dark:border-[#2a343d] rounded-2xl shadow-2xl p-4 flex flex-col gap-2">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-[#3d7a75] rounded-xl flex items-center justify-center flex-shrink-0">

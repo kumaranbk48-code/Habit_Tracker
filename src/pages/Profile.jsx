@@ -15,6 +15,7 @@ export default function Profile() {
   const [dashStats, setDashStats] = useState(null);
   const [unlockedIds, setUnlockedIds] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [savingName, setSavingName] = useState(false);
   const [editNameModal, setEditNameModal] = useState(false);
   const [helpModal, setHelpModal] = useState(false);
@@ -37,6 +38,7 @@ export default function Profile() {
 
   const fetchProfileData = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { setLoading(false); return; }
     try {
@@ -50,9 +52,11 @@ export default function Profile() {
       ]);
 
       let statsData = null;
-      if (dashRes.ok) {
+      if (dashRes && dashRes.ok) {
         statsData = await dashRes.json();
         setDashStats(statsData);
+      } else {
+        setLoadError(true);
       }
 
       let earned = [];
@@ -69,6 +73,7 @@ export default function Profile() {
       }
     } catch (e) {
       console.error('Failed to fetch profile stats', e);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -216,7 +221,7 @@ export default function Profile() {
   const xp = calculateXP(dashStats);
   const streak = dashStats?.currentStreak || 0;
   const longestStreak = dashStats?.longestStreak || 0;
-  const totalCompletions = dashStats?.totalCompletions || 0;
+  const totalCompletions = dashStats?.totalAllTimeCompletions || 0;
   const joinedDate = user?.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'Recent';
 
   // Level & XP values
@@ -237,6 +242,27 @@ export default function Profile() {
           </p>
         </div>
       </div>
+
+      {/* ── Load Error Banner with Retry ── */}
+      {loadError && !dashStats && (
+        <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-sm flex-shrink-0">
+              !
+            </div>
+            <div>
+              <p className="text-sm font-bold text-rose-200">Unable to load profile data</p>
+              <p className="text-xs text-rose-300/70">Check your connection and try again.</p>
+            </div>
+          </div>
+          <button
+            onClick={() => fetchProfileData()}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 transition-all cursor-pointer flex-shrink-0"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* ── User Header Card (Theme-matched Emerald / Teal Atmospheric Glassmorphic Card) ── */}
       <div className="relative rounded-3xl overflow-hidden border border-teal-500/25 bg-gradient-to-br from-[#0a1922] via-[#0d212b] to-[#07131a] p-6 sm:p-8 shadow-2xl">
@@ -321,56 +347,99 @@ export default function Profile() {
         <div className="relative z-10 grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-white/[0.08]">
           <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/[0.05]">
             <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Current Streak</div>
-            <div className="text-lg sm:text-xl font-black text-amber-400 mt-0.5 flex items-center gap-1">
-              <span>{streak}</span>
-              <span className="text-xs font-normal text-slate-400">days 🔥</span>
-            </div>
+            {dashStats ? (
+              <div className="text-lg sm:text-xl font-black text-amber-400 mt-0.5 flex items-center gap-1">
+                <span>{streak}</span>
+                <span className="text-xs font-normal text-slate-400">days 🔥</span>
+              </div>
+            ) : loadError ? (
+              <div className="text-lg sm:text-xl font-bold text-slate-500 mt-0.5">--</div>
+            ) : (
+              <div className="h-6 w-16 bg-white/10 rounded-lg animate-pulse mt-1" />
+            )}
           </div>
 
           <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/[0.05]">
             <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Best Streak</div>
-            <div className="text-lg sm:text-xl font-black text-teal-300 mt-0.5 flex items-center gap-1">
-              <span>{longestStreak}</span>
-              <span className="text-xs font-normal text-slate-400">days 🏆</span>
-            </div>
+            {dashStats ? (
+              <div className="text-lg sm:text-xl font-black text-teal-300 mt-0.5 flex items-center gap-1">
+                <span>{longestStreak}</span>
+                <span className="text-xs font-normal text-slate-400">days 🏆</span>
+              </div>
+            ) : loadError ? (
+              <div className="text-lg sm:text-xl font-bold text-slate-500 mt-0.5">--</div>
+            ) : (
+              <div className="h-6 w-16 bg-white/10 rounded-lg animate-pulse mt-1" />
+            )}
           </div>
 
           <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/[0.05]">
             <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Completions</div>
-            <div className="text-lg sm:text-xl font-black text-white mt-0.5 flex items-center gap-1">
-              <span>{totalCompletions}</span>
-              <span className="text-xs font-normal text-slate-400">rituals ✅</span>
-            </div>
+            {dashStats ? (
+              <div className="text-lg sm:text-xl font-black text-white mt-0.5 flex items-center gap-1">
+                <span>{totalCompletions}</span>
+                <span className="text-xs font-normal text-slate-400">rituals ✅</span>
+              </div>
+            ) : loadError ? (
+              <div className="text-lg sm:text-xl font-bold text-slate-500 mt-0.5">--</div>
+            ) : (
+              <div className="h-6 w-16 bg-white/10 rounded-lg animate-pulse mt-1" />
+            )}
           </div>
 
           <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/[0.05]">
             <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Badges Unlocked</div>
-            <div className="text-lg sm:text-xl font-black text-white mt-0.5 flex items-center gap-1">
-              <span>{unlockedIds.length}</span>
-              <span className="text-xs font-normal text-slate-400">achievements 🎖️</span>
-            </div>
+            {dashStats ? (
+              <div className="text-lg sm:text-xl font-black text-white mt-0.5 flex items-center gap-1">
+                <span>{unlockedIds.length}</span>
+                <span className="text-xs font-normal text-slate-400">achievements 🎖️</span>
+              </div>
+            ) : loadError ? (
+              <div className="text-lg sm:text-xl font-bold text-slate-500 mt-0.5">--</div>
+            ) : (
+              <div className="h-6 w-16 bg-white/10 rounded-lg animate-pulse mt-1" />
+            )}
           </div>
         </div>
 
         {/* Level XP Bar */}
         <div className="relative z-10 mt-5 pt-5 border-t border-white/[0.06]">
-          <div className="flex items-center justify-between text-xs font-semibold mb-2">
-            <span className="text-white font-bold flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded-md bg-teal-500/20 text-teal-300 text-[10px] font-black uppercase">Level {currentLevel}</span>
-              <span>{levelTitle}</span>
-            </span>
-            <span className="text-slate-400">
-              <span className="text-teal-300 font-mono font-bold">{currentLevelXP}</span>
-              <span className="text-slate-500"> / 100 XP</span>
-            </span>
-          </div>
+          {dashStats ? (
+            <>
+              <div className="flex items-center justify-between text-xs font-semibold mb-2">
+                <span className="text-white font-bold flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-md bg-teal-500/20 text-teal-300 text-[10px] font-black uppercase">Level {currentLevel}</span>
+                  <span>{levelTitle}</span>
+                </span>
+                <span className="text-slate-400">
+                  <span className="text-teal-300 font-mono font-bold">{currentLevelXP}</span>
+                  <span className="text-slate-500"> / 100 XP</span>
+                </span>
+              </div>
 
-          <div className="w-full h-2.5 rounded-full bg-slate-900/80 border border-white/[0.06] overflow-hidden p-0.5">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-[#178274] via-[#2dd4bf] to-emerald-400 transition-all duration-700 shadow-[0_0_12px_rgba(45,212,191,0.4)]"
-              style={{ width: `${Math.min(100, Math.max(5, currentLevelXP))}%` }}
-            />
-          </div>
+              <div className="w-full h-2.5 rounded-full bg-slate-900/80 border border-white/[0.06] overflow-hidden p-0.5">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-[#178274] via-[#2dd4bf] to-emerald-400 transition-all duration-700 shadow-[0_0_12px_rgba(45,212,191,0.4)]"
+                  style={{ width: `${Math.min(100, Math.max(5, currentLevelXP))}%` }}
+                />
+              </div>
+            </>
+          ) : loadError ? (
+            <div className="flex items-center justify-between text-xs text-slate-500 py-1">
+              <span>Stats unavailable</span>
+              <button
+                onClick={() => fetchProfileData()}
+                className="text-teal-400 hover:text-teal-300 hover:underline cursor-pointer font-semibold"
+              >
+                Retry
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="h-4 w-32 bg-white/10 rounded animate-pulse" />
+              <div className="w-full h-2.5 rounded-full bg-white/5 animate-pulse" />
+            </div>
+          )}
         </div>
       </div>
 
@@ -494,12 +563,18 @@ export default function Profile() {
               Small rituals practiced with patience reshape your daily rhythm and purpose.
             </p>
             <div className="flex items-center gap-2.5 pt-1 text-xs text-slate-200 font-medium flex-wrap">
-              <span className="px-3 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10">
-                🔥 {streak} Days Active
-              </span>
-              <span className="px-3 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10">
-                ✅ {totalCompletions} Completed
-              </span>
+              {dashStats ? (
+                <>
+                  <span className="px-3 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10">
+                    🔥 {streak} Days Active
+                  </span>
+                  <span className="px-3 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10">
+                    ✅ {totalCompletions} Completed
+                  </span>
+                </>
+              ) : (
+                <div className="h-6 w-44 bg-white/10 rounded-full animate-pulse" />
+              )}
             </div>
           </div>
         </div>

@@ -3,8 +3,36 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+// ── Shared Modal-Open State (Tracks active modals across the app) ─────────────
+let openModalCount = 0;
+const modalListeners = new Set();
+
+function notifyModalListeners() {
+  modalListeners.forEach((fn) => fn());
+}
+
+export function subscribeModalOpen(callback) {
+  modalListeners.add(callback);
+  return () => modalListeners.delete(callback);
+}
+
+export function getIsAnyModalOpen() {
+  return openModalCount > 0;
+}
+
 export default function Modal({ open, isOpen, onClose, title, children, maxWidth = 'max-w-md' }) {
   const isModalOpen = Boolean(open ?? isOpen);
+
+  // Track open modal count for banner suppression
+  useEffect(() => {
+    if (!isModalOpen) return;
+    openModalCount++;
+    notifyModalListeners();
+    return () => {
+      openModalCount = Math.max(0, openModalCount - 1);
+      notifyModalListeners();
+    };
+  }, [isModalOpen]);
 
   // Close on Escape key
   useEffect(() => {

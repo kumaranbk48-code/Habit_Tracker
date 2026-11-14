@@ -290,6 +290,14 @@ export default function Habits() {
     }
 
     setFormLoading(true);
+    const originalHabit = editing ? habits.find((h) => h.id === editing.id) : null;
+
+    // For editing, apply optimistic update immediately so the list reflects changes without delay
+    if (editing) {
+      setHabits((prev) => prev.map((h) => (h.id === editing.id ? { ...h, ...form } : h)));
+      setModalOpen(false);
+    }
+
     try {
       const method = editing ? 'PUT' : 'POST';
       const body = editing ? { ...form, id: editing.id } : form;
@@ -303,10 +311,16 @@ export default function Habits() {
         setModalOpen(false);
         fetchData();
       } else {
+        if (originalHabit) {
+          setHabits((current) => current.map((h) => (h.id === editing.id ? { ...h, ...originalHabit } : h)));
+        }
         const e = await res.json().catch(() => ({}));
         setToast({ message: e.error || 'Something went wrong — please try again.', type: 'error' });
       }
     } catch {
+      if (originalHabit) {
+        setHabits((current) => current.map((h) => (h.id === editing.id ? { ...h, ...originalHabit } : h)));
+      }
       setToast({ message: 'Network error — check your connection.', type: 'error' });
     } finally {
       setFormLoading(false);
@@ -315,6 +329,9 @@ export default function Habits() {
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this habit?')) return;
+    const deletedHabit = habits.find((h) => h.id === id);
+    // Optimistic removal for immediate UI feedback
+    setHabits((prev) => prev.filter((h) => h.id !== id));
     try {
       const res = await fetch('/api/habits', {
         method: 'DELETE',
@@ -325,10 +342,16 @@ export default function Habits() {
         setToast({ message: 'Habit deleted', type: 'success' });
         fetchData();
       } else {
+        if (deletedHabit) {
+          setHabits((current) => (current.some((h) => h.id === id) ? current : [...current, deletedHabit]));
+        }
         const e = await res.json().catch(() => ({}));
         setToast({ message: e.error || 'Failed to delete.', type: 'error' });
       }
     } catch {
+      if (deletedHabit) {
+        setHabits((current) => (current.some((h) => h.id === id) ? current : [...current, deletedHabit]));
+      }
       setToast({ message: 'Network error.', type: 'error' });
     }
   };
@@ -1338,7 +1361,7 @@ export default function Habits() {
               className="px-5 py-2 text-xs font-bold text-white bg-[#178274] hover:bg-[#136c60] rounded-xl transition-all shadow-md shadow-teal-950/40 disabled:opacity-60 flex items-center gap-2 cursor-pointer"
             >
               {formLoading && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-              {editing ? 'Update Habit' : 'Save Habit'}
+              {formLoading ? 'Saving...' : editing ? 'Update Habit' : 'Save Habit'}
             </button>
           </div>
         </form>

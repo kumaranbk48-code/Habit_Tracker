@@ -278,6 +278,10 @@ export default function Reminders() {
   const handleToggleAlarm = async (rem) => {
     const currentIsAlarm = Boolean(rem.is_alarm || rem.reminder_mode === 'alarm');
     const newIsAlarm = !currentIsAlarm;
+    const originalAlarm = currentIsAlarm;
+
+    // Instant optimistic update
+    setReminders((prev) => prev.map((r) => (r.id === rem.id ? { ...r, is_alarm: newIsAlarm } : r)));
 
     // Immediately schedule or update alarm natively on Android
     if (isNative) {
@@ -303,10 +307,12 @@ export default function Reminders() {
         });
         fetchData();
       } else {
+        setReminders((current) => current.map((r) => (r.id === rem.id ? { ...r, is_alarm: originalAlarm } : r)));
         const errJson = await res.json().catch(() => ({}));
         setToast({ message: errJson.error || 'Failed to toggle alarm mode', type: 'error' });
       }
     } catch {
+      setReminders((current) => current.map((r) => (r.id === rem.id ? { ...r, is_alarm: originalAlarm } : r)));
       setToast({ message: 'Network error', type: 'error' });
     }
   };
@@ -329,6 +335,8 @@ export default function Reminders() {
     }
 
     setFormLoading(true);
+    const originalReminder = editing ? reminders.find((r) => r.id === editing.id) : null;
+    let optimisticEntry = null;
     try {
       const cleanAlerts = (Array.isArray(form.alerts) && form.alerts.length > 0 ? form.alerts : [form.reminder_time]).map(getTimeValue);
       const cleanMainTime = getTimeValue(form.reminder_time) || cleanAlerts[0] || '08:00';
@@ -379,6 +387,27 @@ export default function Reminders() {
         }
       }
 
+      const targetHabit = habits.find((h) => h.id === form.habit_id);
+      const targetGoal = goals.find((g) => g.id === form.goal_id);
+      const targetJourney = journeys.find((j) => j.id === form.journey_id);
+      optimisticEntry = {
+        ...payload,
+        id: editing ? editing.id : `temp_${Date.now()}`,
+        habits: targetHabit ? { habit_name: targetHabit.habit_name, icon: targetHabit.icon, color: targetHabit.color } : null,
+        goals: targetGoal ? { goal_name: targetGoal.goal_name, icon: targetGoal.icon, color: targetGoal.color } : null,
+        learning_journeys: targetJourney ? { title: targetJourney.title, icon: targetJourney.icon, color: targetJourney.color } : null,
+        notification_status: payload.notification_status || 'Active',
+        is_alarm: payload.is_alarm || false,
+      };
+
+      // Optimistic update so reminder appears / updates immediately in list
+      if (editing) {
+        setReminders((prev) => prev.map((r) => (r.id === editing.id ? { ...r, ...optimisticEntry } : r)));
+      } else {
+        setReminders((prev) => [optimisticEntry, ...prev]);
+      }
+      setModalOpen(false);
+
       const method = editing ? 'PUT' : 'POST';
       const body = editing ? { ...payload, id: editing.id } : payload;
       const res = await fetch('/api/reminders', {
@@ -388,14 +417,36 @@ export default function Reminders() {
       });
 
       if (res.ok) {
+        const savedData = await res.json().catch(() => null);
+        if (savedData?.id && !editing) {
+          setReminders((current) => current.map((r) => (r.id === optimisticEntry.id ? { ...r, ...savedData, id: savedData.id } : r)));
+          if (isNative) {
+            cancelNativeReminder(optimisticEntry.id).catch(() => {});
+            const targetName = form.target_type === 'habit'
+              ? habits.find((h) => h.id === form.habit_id)?.habit_name
+              : form.target_type === 'goal'
+              ? goals.find((g) => g.id === form.goal_id)?.goal_name
+              : journeys.find((j) => j.id === form.journey_id)?.title || 'Reminder';
+            scheduleSingleNativeReminder({ ...savedData, target_name: targetName }, targetName).catch(() => {});
+          }
+        }
         setToast({ message: editing ? 'Reminder updated!' : 'Reminder created! 🔔', type: 'success' });
-        setModalOpen(false);
         fetchData();
       } else {
+        if (editing) {
+          setReminders((current) => current.map((r) => (r.id === editing.id ? { ...r, ...originalReminder } : r)));
+        } else if (optimisticEntry?.id) {
+          setReminders((current) => current.filter((r) => r.id !== optimisticEntry.id));
+        }
         const errJson = await res.json().catch(() => ({}));
         setToast({ message: errJson.error || 'Failed to save reminder.', type: 'error' });
       }
     } catch {
+      if (editing) {
+        setReminders((current) => current.map((r) => (r.id === editing.id ? { ...r, ...originalReminder } : r)));
+      } else if (optimisticEntry?.id) {
+        setReminders((current) => current.filter((r) => r.id !== optimisticEntry.id));
+      }
       setToast({ message: 'Network error — please check your connection.', type: 'error' });
     } finally {
       setFormLoading(false);
@@ -404,6 +455,10 @@ export default function Reminders() {
 
   const handleToggleStatus = async (reminder) => {
     const newStatus = reminder.notification_status === 'Active' ? 'Inactive' : 'Active';
+    const originalStatus = reminder.notification_status;
+
+    // Instant optimistic status update
+    setReminders((prev) => prev.map((r) => (r.id === reminder.id ? { ...r, notification_status: newStatus } : r)));
 
     // Immediately update Android AlarmManager scheduling on device
     if (isNative) {
@@ -428,16 +483,22 @@ export default function Reminders() {
         });
         fetchData();
       } else {
+        setReminders((current) => current.map((r) => (r.id === reminder.id ? { ...r, notification_status: originalStatus } : r)));
         const errJson = await res.json().catch(() => ({}));
         setToast({ message: errJson.error || 'Failed to update reminder status.', type: 'error' });
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setReminders((current) => current.map((r) => (r.id === reminder.id ? { ...r, notification_status: originalStatus } : r)));
+      setToast({ message: 'Network error — failed to update reminder status.', type: 'error' });
     }
   };
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this reminder?')) return;
+    const deletedReminder = reminders.find((r) => r.id === id);
+
+    // Instant optimistic deletion
+    setReminders((prev) => prev.filter((r) => r.id !== id));
 
     // Immediately remove from Android AlarmManager
     if (isNative) {
@@ -454,10 +515,12 @@ export default function Reminders() {
         setToast({ message: 'Reminder deleted', type: 'success' });
         fetchData();
       } else {
+        setReminders((current) => (deletedReminder && !current.some((r) => r.id === id) ? [...current, deletedReminder] : current));
         const e = await res.json().catch(() => ({}));
         setToast({ message: e.error || 'Failed to delete.', type: 'error' });
       }
     } catch {
+      setReminders((current) => (deletedReminder && !current.some((r) => r.id === id) ? [...current, deletedReminder] : current));
       setToast({ message: 'Network error.', type: 'error' });
     }
   };
