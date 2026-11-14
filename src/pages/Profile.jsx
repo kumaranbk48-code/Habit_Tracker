@@ -39,9 +39,13 @@ export default function Profile() {
   const fetchProfileData = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) { setLoading(false); return; }
     try {
+      const { data: { session } = {} } = await supabase.auth.getSession();
+      if (!session) {
+        setLoadError(true);
+        return;
+      }
+
       const [dashRes, achRes] = await Promise.all([
         fetch('/api/dashboard', {
           headers: { Authorization: `Bearer ${session.access_token}` },
@@ -572,6 +576,10 @@ export default function Profile() {
                     ✅ {totalCompletions} Completed
                   </span>
                 </>
+              ) : loadError ? (
+                <span className="px-3 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-slate-500">
+                  Stats unavailable
+                </span>
               ) : (
                 <div className="h-6 w-44 bg-white/10 rounded-full animate-pulse" />
               )}

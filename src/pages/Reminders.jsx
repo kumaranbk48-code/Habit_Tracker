@@ -336,6 +336,24 @@ export default function Reminders() {
 
     setFormLoading(true);
     const originalReminder = editing ? reminders.find((r) => r.id === editing.id) : null;
+    const formFieldsToRestore = originalReminder ? {
+      target_type: originalReminder.target_type,
+      habit_id: originalReminder.habit_id,
+      goal_id: originalReminder.goal_id,
+      journey_id: originalReminder.journey_id,
+      topic_id: originalReminder.topic_id,
+      reminder_mode: originalReminder.reminder_mode,
+      reminder_time: originalReminder.reminder_time,
+      alerts: originalReminder.alerts,
+      routine_window: originalReminder.routine_window,
+      days_before_deadline: originalReminder.days_before_deadline,
+      days_of_week: originalReminder.days_of_week,
+      custom_text: originalReminder.custom_text,
+      is_alarm: originalReminder.is_alarm,
+      habits: originalReminder.habits,
+      goals: originalReminder.goals,
+      learning_journeys: originalReminder.learning_journeys,
+    } : null;
     let optimisticEntry = null;
     try {
       const cleanAlerts = (Array.isArray(form.alerts) && form.alerts.length > 0 ? form.alerts : [form.reminder_time]).map(getTimeValue);
@@ -357,7 +375,7 @@ export default function Reminders() {
         days_before_deadline: Number(form.days_before_deadline) || 0,
         days_of_week: Array.isArray(form.days_of_week) && form.days_of_week.length > 0 ? form.days_of_week : WEEKDAYS,
         custom_text: form.custom_text || '',
-        notification_status: form.notification_status || 'Active',
+        ...(!editing && { notification_status: form.notification_status || 'Active' }),
         is_alarm: Boolean(form.is_alarm),
       };
 
@@ -396,11 +414,11 @@ export default function Reminders() {
         habits: targetHabit ? { habit_name: targetHabit.habit_name, icon: targetHabit.icon, color: targetHabit.color } : null,
         goals: targetGoal ? { goal_name: targetGoal.goal_name, icon: targetGoal.icon, color: targetGoal.color } : null,
         learning_journeys: targetJourney ? { title: targetJourney.title, icon: targetJourney.icon, color: targetJourney.color } : null,
-        notification_status: payload.notification_status || 'Active',
+        ...(!editing && { notification_status: payload.notification_status || 'Active' }),
         is_alarm: payload.is_alarm || false,
       };
 
-      // Optimistic update so reminder appears / updates immediately in list
+      // Optimistic update so reminder appears / updates immediately in list without clobbering concurrent status updates
       if (editing) {
         setReminders((prev) => prev.map((r) => (r.id === editing.id ? { ...r, ...optimisticEntry } : r)));
       } else {
@@ -434,7 +452,9 @@ export default function Reminders() {
         fetchData();
       } else {
         if (editing) {
-          setReminders((current) => current.map((r) => (r.id === editing.id ? { ...r, ...originalReminder } : r)));
+          if (formFieldsToRestore) {
+            setReminders((current) => current.map((r) => (r.id === editing.id ? { ...r, ...formFieldsToRestore } : r)));
+          }
         } else if (optimisticEntry?.id) {
           setReminders((current) => current.filter((r) => r.id !== optimisticEntry.id));
         }
@@ -443,7 +463,9 @@ export default function Reminders() {
       }
     } catch {
       if (editing) {
-        setReminders((current) => current.map((r) => (r.id === editing.id ? { ...r, ...originalReminder } : r)));
+        if (formFieldsToRestore) {
+          setReminders((current) => current.map((r) => (r.id === editing.id ? { ...r, ...formFieldsToRestore } : r)));
+        }
       } else if (optimisticEntry?.id) {
         setReminders((current) => current.filter((r) => r.id !== optimisticEntry.id));
       }
