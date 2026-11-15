@@ -16,6 +16,7 @@ export function useSyncManager() {
     stuckCount: 0,
     totalQueued: 0,
     lastSyncTimestamp: null,
+    lastCycleSyncedCount: 0,
   });
 
   useEffect(() => {
