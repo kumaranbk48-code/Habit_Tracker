@@ -7,7 +7,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 export default function OfflineStatusBanner() {
   const { isOnline, isChecking, checkNow } = useNetworkStatus();
-  const { isSyncing, pendingCount, totalQueued, failedCount, stuckCount, triggerSync, retryStuck } = useSyncManager();
+  const {
+    isSyncing,
+    pendingCount,
+    totalQueued,
+    failedCount,
+    stuckCount,
+    lastCycleSyncedCount = 0,
+    triggerSync,
+    retryStuck,
+  } = useSyncManager();
   const [showSyncedSuccess, setShowSyncedSuccess] = useState(false);
   const [prevSyncing, setPrevSyncing] = useState(false);
   const [offlineToast, setOfflineToast] = useState(null);
@@ -27,13 +36,20 @@ export default function OfflineStatusBanner() {
 
   // Track completion transition to display temporary success check
   useEffect(() => {
-    if (prevSyncing && !isSyncing && failedCount === 0 && stuckCount === 0 && totalQueued === 0) {
+    if (
+      prevSyncing &&
+      !isSyncing &&
+      lastCycleSyncedCount > 0 &&
+      failedCount === 0 &&
+      stuckCount === 0 &&
+      totalQueued === 0
+    ) {
       setShowSyncedSuccess(true);
       const timer = setTimeout(() => setShowSyncedSuccess(false), 3500);
       return () => clearTimeout(timer);
     }
     setPrevSyncing(isSyncing);
-  }, [isSyncing, prevSyncing, failedCount, stuckCount, totalQueued]);
+  }, [isSyncing, prevSyncing, lastCycleSyncedCount, failedCount, stuckCount, totalQueued]);
 
   // If online, not syncing, no failed/stuck items, and not showing success, stay hidden
   if (isOnline && !isSyncing && failedCount === 0 && stuckCount === 0 && !showSyncedSuccess) {

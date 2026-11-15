@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
@@ -50,6 +50,7 @@ export default function Habits() {
   const [editing, setEditing] = useState(null);
   const [toast, setToast] = useState(null);
   const [formLoading, setFormLoading] = useState(false);
+  const fetchSeqRef = useRef(0);
   const [poppingHabit, setPoppingHabit] = useState(null);
   const [perfectDay, setPerfectDay] = useState(false);
 
@@ -92,6 +93,7 @@ export default function Habits() {
 
   const fetchData = useCallback(async () => {
     if (!session) return;
+    const seq = ++fetchSeqRef.current;
     setFetchError('');
     try {
       const [habitsRes, trackingRes, seasonsRes] = await Promise.all([
@@ -99,14 +101,19 @@ export default function Habits() {
         fetch(`/api/tracking?date=${today}`, { headers: { Authorization: `Bearer ${session.access_token}` } }),
         fetch('/api/seasons', { headers: { Authorization: `Bearer ${session.access_token}` } }).catch(() => null),
       ]);
+      if (seq !== fetchSeqRef.current) return;
       if (!habitsRes.ok || !trackingRes.ok) {
         const e = await (!habitsRes.ok ? habitsRes : trackingRes).json().catch(() => ({}));
-        setFetchError(e.error || 'Failed to load data. Please refresh.');
+        if (seq === fetchSeqRef.current) {
+          setFetchError(e.error || 'Failed to load data. Please refresh.');
+        }
         return;
       }
       const habitsData = await habitsRes.json();
       const trackingData = await trackingRes.json();
       const seasonsData = (seasonsRes && seasonsRes.ok) ? await seasonsRes.json() : null;
+
+      if (seq !== fetchSeqRef.current) return;
 
       const h = Array.isArray(habitsData) ? habitsData : [];
       const t = Array.isArray(trackingData) ? trackingData : [];
@@ -124,6 +131,7 @@ export default function Habits() {
       const completed = t.filter((r) => r.status === true).length;
       setPerfectDay(activeHabitsCount > 0 && completed >= activeHabitsCount);
     } catch (err) {
+      if (seq !== fetchSeqRef.current) return;
       console.warn('[Habits] Network error, reading cached habits from IndexedDB:', err);
       if (user?.id) {
         try {
@@ -132,6 +140,7 @@ export default function Habits() {
             getCachedData(user.id, 'tracking', today),
             getCachedData(user.id, 'seasons'),
           ]);
+          if (seq !== fetchSeqRef.current) return;
           if (cachedHabits) {
             const h = Array.isArray(cachedHabits) ? cachedHabits : [];
             const t = Array.isArray(cachedTracking) ? cachedTracking : [];
@@ -148,9 +157,13 @@ export default function Habits() {
           console.warn('[Habits] Failed to load offline cache:', cacheErr);
         }
       }
-      setFetchError('Offline — viewing cached habits.');
+      if (seq === fetchSeqRef.current) {
+        setFetchError('Offline — viewing cached habits.');
+      }
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, [session, user?.id, today]);
 
@@ -176,6 +189,7 @@ export default function Habits() {
           type: 'success',
         });
         window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'habits' } }));
+        fetchData();
       } else {
         const errJson = await res.json().catch(() => ({}));
         setToast({ message: errJson.error || 'Failed to update habit status.', type: 'error' });
@@ -290,6 +304,14 @@ export default function Habits() {
     }
 
     setFormLoading(true);
+    const originalHabit = editing ? habits.find((h) => h.id === editing.id) : null;
+
+    // For editing, apply optimistic update immediately so the list reflects changes without delay
+    if (editing) {
+      setHabits((prev) => prev.map((h) => (h.id === editing.id ? { ...h, ...form } : h)));
+      setModalOpen(false);
+    }
+
     try {
       const method = editing ? 'PUT' : 'POST';
       const body = editing ? { ...form, id: editing.id } : form;
@@ -303,10 +325,18 @@ export default function Habits() {
         setModalOpen(false);
         fetchData();
       } else {
+        if (originalHabit) {
+          setHabits((current) => current.map((h) => (h.id === editing.id ? { ...h, ...originalHabit } : h)));
+        }
+        fetchData();
         const e = await res.json().catch(() => ({}));
         setToast({ message: e.error || 'Something went wrong — please try again.', type: 'error' });
       }
     } catch {
+      if (originalHabit) {
+        setHabits((current) => current.map((h) => (h.id === editing.id ? { ...h, ...originalHabit } : h)));
+      }
+      fetchData();
       setToast({ message: 'Network error — check your connection.', type: 'error' });
     } finally {
       setFormLoading(false);
@@ -315,6 +345,9 @@ export default function Habits() {
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this habit?')) return;
+    const deletedHabit = habits.find((h) => h.id === id);
+    // Optimistic removal for immediate UI feedback
+    setHabits((prev) => prev.filter((h) => h.id !== id));
     try {
       const res = await fetch('/api/habits', {
         method: 'DELETE',
@@ -325,10 +358,16 @@ export default function Habits() {
         setToast({ message: 'Habit deleted', type: 'success' });
         fetchData();
       } else {
+        if (deletedHabit) {
+          setHabits((current) => (current.some((h) => h.id === id) ? current : [...current, deletedHabit]));
+        }
         const e = await res.json().catch(() => ({}));
         setToast({ message: e.error || 'Failed to delete.', type: 'error' });
       }
     } catch {
+      if (deletedHabit) {
+        setHabits((current) => (current.some((h) => h.id === id) ? current : [...current, deletedHabit]));
+      }
       setToast({ message: 'Network error.', type: 'error' });
     }
   };
@@ -1338,7 +1377,7 @@ export default function Habits() {
               className="px-5 py-2 text-xs font-bold text-white bg-[#178274] hover:bg-[#136c60] rounded-xl transition-all shadow-md shadow-teal-950/40 disabled:opacity-60 flex items-center gap-2 cursor-pointer"
             >
               {formLoading && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-              {editing ? 'Update Habit' : 'Save Habit'}
+              {formLoading ? 'Saving...' : editing ? 'Update Habit' : 'Save Habit'}
             </button>
           </div>
         </form>

@@ -5,6 +5,7 @@
  * offline transactional operations when network connectivity is verified.
  */
 
+import { Capacitor } from '@capacitor/core';
 import {
   getPendingActions,
   updateActionStatus,
@@ -129,11 +130,6 @@ export async function syncOfflineQueue(userId, accessToken) {
     return { success: false, syncedCount: 0, errorCount: 0 };
   }
 
-  if (isSyncRunning) {
-    console.log('[SyncManager] Sync already in flight. Skipping duplicate trigger.');
-    return { success: true, syncedCount: 0, errorCount: 0 };
-  }
-
   // Ensure network is genuinely reachable before attempting sync
   if (!getOnlineStatus()) {
     const reachable = await verifyServerReachability(2500);
@@ -143,9 +139,15 @@ export async function syncOfflineQueue(userId, accessToken) {
     }
   }
 
-  isSyncRunning = true;
-  notifySyncListeners(userId);
+  if (isSyncRunning) {
+    console.log('[SyncManager] Sync already in flight. Skipping duplicate trigger.');
+    return { success: true, syncedCount: 0, errorCount: 0 };
+  }
 
+  // Acquire lock FIRST before reading the queue so concurrent calls never duplicate uploads
+  isSyncRunning = true;
+
+  let hasWork = false;
   let syncedCount = 0;
   let errorCount = 0;
   let currentToken = accessToken;
@@ -154,9 +156,11 @@ export async function syncOfflineQueue(userId, accessToken) {
     const pendingActions = await getPendingActions(userId);
     if (!pendingActions || pendingActions.length === 0) {
       isSyncRunning = false;
-      notifySyncListeners(userId);
       return { success: true, syncedCount: 0, errorCount: 0 };
     }
+
+    hasWork = true;
+    notifySyncListeners(userId);
 
     console.log(`[SyncManager] Replaying ${pendingActions.length} pending offline actions...`);
 
@@ -260,8 +264,12 @@ export async function syncOfflineQueue(userId, accessToken) {
 
     lastSyncTimestamp = new Date();
   } finally {
-    isSyncRunning = false;
-    notifySyncListeners(userId);
+    if (hasWork) {
+      isSyncRunning = false;
+      notifySyncListeners(userId, { lastCycleSyncedCount: syncedCount });
+    } else {
+      isSyncRunning = false;
+    }
   }
 
   return { success: errorCount === 0, syncedCount, errorCount };
@@ -275,7 +283,7 @@ export async function retryStuckSyncQueue(userId, accessToken) {
   return await syncOfflineQueue(userId, accessToken);
 }
 
-async function notifySyncListeners(userId) {
+async function notifySyncListeners(userId, extraDetail = {}) {
   const stats = await getQueueStats(userId);
   const detail = {
     isSyncing: isSyncRunning,
@@ -285,6 +293,8 @@ async function notifySyncListeners(userId) {
     stuckCount: stats.stuck || 0,
     totalQueued: stats.total,
     lastSyncTimestamp,
+    lastCycleSyncedCount: extraDetail.lastCycleSyncedCount ?? 0,
+    ...extraDetail,
   };
 
   for (const listener of syncListeners) {
@@ -329,7 +339,10 @@ function attemptAutoSync() {
   } catch {}
 }
 
-if (typeof window !== 'undefined') {
+export function registerAutoSyncTriggers() {
+  if (typeof window === 'undefined') return false;
+  if (!Capacitor.isNativePlatform()) return false;
+
   window.addEventListener('habiz-connectivity-status', (e) => {
     if (e.detail?.isOnline) {
       attemptAutoSync();
@@ -361,4 +374,10 @@ if (typeof window !== 'undefined') {
       }
     });
   }
+
+  return true;
+}
+
+if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+  registerAutoSyncTriggers();
 }

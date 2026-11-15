@@ -188,7 +188,7 @@ export default function SeasonManagerModal({
       }
 
       await fetchAllSeasons();
-      if (onSeasonUpdated) onSeasonUpdated();
+      if (onSeasonUpdated) await onSeasonUpdated();
       setTab('active');
       setIsEditingExisting(false);
       setEditingSeasonId(null);
@@ -340,7 +340,7 @@ export default function SeasonManagerModal({
       }
 
       await fetchAllSeasons();
-      if (onSeasonUpdated) onSeasonUpdated();
+      if (onSeasonUpdated) await onSeasonUpdated();
       setTab('active');
     } catch (err) {
       setErrorMsg(err.message || 'Failed to reactivate season. Please try again.');
@@ -551,11 +551,12 @@ export default function SeasonManagerModal({
 
                           <button
                             type="button"
+                            disabled={loading}
                             onClick={() => handleEndSeason(season)}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-xs font-bold transition-all shadow-sm cursor-pointer"
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 disabled:opacity-50 text-slate-950 text-xs font-bold transition-all shadow-sm cursor-pointer"
                           >
                             <Award size={13} />
-                            <span>End Season &amp; Move to Past</span>
+                            <span>{loading ? 'Ending...' : 'End Season & Move to Past'}</span>
                           </button>
                         </div>
                       </div>
@@ -824,7 +825,7 @@ export default function SeasonManagerModal({
               <button
                 type="submit"
                 disabled={loading}
-                className="px-5 py-2 rounded-xl text-xs font-bold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white shadow-md shadow-[#3d7a75]/20 transition-all active:scale-95 disabled:opacity-50"
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-[#3d7a75] hover:bg-[#2f5f5b] text-white shadow-md shadow-[#3d7a75]/20 transition-all active:scale-95 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
               >
                 {loading ? 'Saving...' : isEditingExisting ? 'Save Changes' : 'Launch Season'}
               </button>

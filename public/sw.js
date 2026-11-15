@@ -476,7 +476,7 @@ self.addEventListener('sync', (event) => {
 self.addEventListener('periodicsync', (event) => {
   if (event.tag === 'check-daily-habits' || event.tag === 'daily-habit-check') {
     event.waitUntil(
-      caches.open(STATIC_CACHE).then((cache) => cache.add('/api/dashboard').catch(() => {}))
+      fetch('/api/dashboard').catch(() => {})
     );
   }
 });
