@@ -4,6 +4,18 @@ import { applyCors } from './cors.js';
 import { getUserTimeZone, getDateInTimeZone } from './date-utils.js';
 import { fetchAllSupabaseRows } from './paginate-query.js';
 
+function parseUTCDate(ymd) {
+  const [y, m, d] = String(ymd || '').split('-').map(Number);
+  return new Date(Date.UTC(y || 1970, (m || 1) - 1, d || 1));
+}
+
+function formatUTCYMD(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
 
@@ -34,6 +46,49 @@ export default async function handler(req, res) {
       const seasons = data || [];
       seasons.sort((a, b) => new Date(b.created_at || b.start_date) - new Date(a.created_at || a.start_date));
       return { seasons, error: null };
+    }
+
+    async function applySeasonHabitSelection(seasonId, activeIds) {
+      const { data: allUserHabits, error: habitsErr } = await supabase
+        .from('habits')
+        .select('id, status, season_id')
+        .eq('user_id', user_id);
+      if (habitsErr) throw habitsErr;
+
+      const activeSet = new Set(activeIds);
+      if (activeIds.length > 0) {
+        await supabase
+          .from('habits')
+          .update({ status: 'active', season_id: seasonId })
+          .eq('user_id', user_id)
+          .in('id', activeIds);
+      }
+
+      // Only pause habits that were active or already owned by this season so
+      // habits paused manually by the user remain untouched.
+      const toPauseIds = (allUserHabits || [])
+        .filter(h => !activeSet.has(h.id) && (h.status !== 'paused' || h.season_id === seasonId))
+        .map(h => h.id);
+
+      if (toPauseIds.length > 0) {
+        await supabase
+          .from('habits')
+          .update({ status: 'paused', season_id: seasonId })
+          .eq('user_id', user_id)
+          .in('id', toPauseIds);
+      }
+    }
+
+    async function resumeSeasonHabits(seasonId) {
+      try {
+        await supabase
+          .from('habits')
+          .update({ status: 'active', season_id: null })
+          .eq('user_id', user_id)
+          .eq('season_id', seasonId);
+      } catch (err) {
+        console.error('[/api/seasons] Failed to resume season habits:', err?.message || err);
+      }
     }
 
     // ── GET: List seasons, get active season, or get season review ─────────────
@@ -87,10 +142,10 @@ export default async function handler(req, res) {
         const endDate = season.end_date;
         const effectiveEnd = today < endDate ? today : endDate;
 
-        const startD = new Date(startDate + 'T00:00:00');
-        const endD = new Date(effectiveEnd + 'T00:00:00');
-        const totalDurationDays = Math.max(1, Math.round((new Date(endDate + 'T00:00:00') - startD) / (1000 * 60 * 60 * 24)) + 1);
-        const daysElapsed = Math.max(1, Math.round((endD - startD) / (1000 * 60 * 60 * 24)) + 1);
+        const startD = parseUTCDate(startDate);
+        const endD = parseUTCDate(effectiveEnd);
+        const totalDurationDays = Math.max(1, Math.round((parseUTCDate(endDate) - startD) / 86400000) + 1);
+        const daysElapsed = Math.max(1, Math.round((endD - startD) / 86400000) + 1);
 
         let trackingLogs = [];
         if (habitIds.length > 0) {
@@ -116,8 +171,8 @@ export default async function handler(req, res) {
 
         let bestStreak = 0;
         let currentStreak = 0;
-        for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
-          const dateStr = d.toISOString().split('T')[0];
+        for (let ts = startD.getTime(); ts <= endD.getTime(); ts += 86400000) {
+          const dateStr = formatUTCYMD(new Date(ts));
           if (completedDates.has(dateStr)) {
             currentStreak++;
             if (currentStreak > bestStreak) bestStreak = currentStreak;
@@ -180,27 +235,28 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: 'Failed to fetch seasons' });
       }
 
-      // Check for seasons whose end_date has naturally expired: auto-mark as 'ended'
+      // Check for seasons whose end_date has naturally expired: auto-mark as 'ended' and resume season habits
       for (const s of seasonsData) {
         if (s.status === 'active' && today > s.end_date) {
           s.status = 'ended';
-          supabase
-            .from('seasons')
-            .update({ status: 'ended', updated_at: new Date().toISOString() })
-            .eq('id', s.id)
-            .eq('user_id', user_id)
-            .then(() => {})
-            .catch(() => {});
+          try {
+            await supabase
+              .from('seasons')
+              .update({ status: 'ended', updated_at: new Date().toISOString() })
+              .eq('id', s.id)
+              .eq('user_id', user_id);
+          } catch {}
+          await resumeSeasonHabits(s.id);
         }
       }
 
       // Enrich each season with day calculations
       const enrichedSeasons = seasonsData.map(s => {
-        const startD = new Date(s.start_date + 'T00:00:00');
-        const endD = new Date(s.end_date + 'T00:00:00');
-        const nowD = new Date(today + 'T00:00:00');
-        const totalDays = Math.max(1, Math.round((endD - startD) / (1000 * 60 * 60 * 24)) + 1);
-        const dayNumber = Math.max(1, Math.min(totalDays, Math.round((nowD - startD) / (1000 * 60 * 60 * 24)) + 1));
+        const startD = parseUTCDate(s.start_date);
+        const endD = parseUTCDate(s.end_date);
+        const nowD = parseUTCDate(today);
+        const totalDays = Math.max(1, Math.round((endD - startD) / 86400000) + 1);
+        const dayNumber = Math.max(1, Math.min(totalDays, Math.round((nowD - startD) / 86400000) + 1));
         const progressPct = Math.min(100, Math.round((dayNumber / totalDays) * 100));
         const isEndedByDate = today > s.end_date;
         return {
@@ -308,29 +364,7 @@ export default async function handler(req, res) {
       // Best-effort update habits status & season_id
       if (activeIds.length > 0) {
         try {
-          const { data: allUserHabits } = await supabase
-            .from('habits')
-            .select('id')
-            .eq('user_id', user_id);
-
-          const activeSet = new Set(activeIds);
-          const unchosenIds = (allUserHabits || [])
-            .map(h => h.id)
-            .filter(hId => !activeSet.has(hId));
-
-          await supabase
-            .from('habits')
-            .update({ status: 'active', season_id: createdSeason.id })
-            .eq('user_id', user_id)
-            .in('id', activeIds);
-
-          if (unchosenIds.length > 0) {
-            await supabase
-              .from('habits')
-              .update({ status: 'paused', season_id: null })
-              .eq('user_id', user_id)
-              .in('id', unchosenIds);
-          }
+          await applySeasonHabitSelection(createdSeason.id, activeIds);
         } catch {}
       }
 
@@ -372,14 +406,8 @@ export default async function handler(req, res) {
           return res.status(500).json({ error: 'Failed to end season' });
         }
 
-        // Resume habits
-        try {
-          await supabase
-            .from('habits')
-            .update({ status: 'active', season_id: null })
-            .eq('user_id', user_id)
-            .eq('season_id', id);
-        } catch {}
+        // Resume habits tied to this season
+        await resumeSeasonHabits(id);
 
         return res.status(200).json({ season: supabaseSeason });
       }
@@ -427,30 +455,7 @@ export default async function handler(req, res) {
               habit_id: hId,
             }));
             await supabase.from('season_habits').insert(rows);
-
-            const { data: allUserHabits } = await supabase
-              .from('habits')
-              .select('id')
-              .eq('user_id', user_id);
-
-            const activeSet = new Set(activeIds);
-            const unchosenIds = (allUserHabits || [])
-              .map(h => h.id)
-              .filter(hId => !activeSet.has(hId));
-
-            await supabase
-              .from('habits')
-              .update({ status: 'active', season_id: id })
-              .eq('user_id', user_id)
-              .in('id', activeIds);
-
-            if (unchosenIds.length > 0) {
-              await supabase
-                .from('habits')
-                .update({ status: 'paused', season_id: null })
-                .eq('user_id', user_id)
-                .in('id', unchosenIds);
-            }
+            await applySeasonHabitSelection(id, activeIds);
           }
         } catch (err) {
           console.error('[/api/seasons] Error updating season habits:', err);
@@ -462,6 +467,31 @@ export default async function handler(req, res) {
 
       // Action 4: Edit Season metadata
       if (action === 'edit' && id) {
+        const { data: existingSeason, error: existingErr } = await supabase
+          .from('seasons')
+          .select('*')
+          .eq('id', id)
+          .eq('user_id', user_id)
+          .maybeSingle();
+
+        if (existingErr) {
+          console.error('[/api/seasons] Fetch existing season for edit error:', existingErr.message);
+          return res.status(500).json({ error: 'Failed to edit season' });
+        }
+        if (!existingSeason) {
+          return res.status(404).json({ error: 'Season not found' });
+        }
+
+        const effectiveStart = start_date !== undefined ? start_date : existingSeason.start_date;
+        const effectiveEnd = end_date !== undefined ? end_date : existingSeason.end_date;
+
+        if ((start_date !== undefined || end_date !== undefined) && (!effectiveStart || !effectiveEnd)) {
+          return res.status(400).json({ error: 'Start date and end date are required' });
+        }
+        if (effectiveStart && effectiveEnd && effectiveStart > effectiveEnd) {
+          return res.status(400).json({ error: 'Start date cannot be after end date' });
+        }
+
         const updateObj = {
           ...(name?.trim() && { name: name.trim() }),
           ...(description !== undefined && { description: description?.trim() || null }),
@@ -488,6 +518,24 @@ export default async function handler(req, res) {
 
       // Action 5: Reactivate an ended/archived season
       if (action === 'reactivate' && id) {
+        const { data: existingSeason, error: existingErr } = await supabase
+          .from('seasons')
+          .select('*')
+          .eq('id', id)
+          .eq('user_id', user_id)
+          .maybeSingle();
+
+        if (existingErr) {
+          console.error('[/api/seasons] Reactivate lookup error:', existingErr.message);
+          return res.status(500).json({ error: 'Failed to reactivate season' });
+        }
+        if (!existingSeason) {
+          return res.status(404).json({ error: 'Season not found' });
+        }
+        if (existingSeason.end_date && today > existingSeason.end_date) {
+          return res.status(400).json({ error: "This season's end date has passed. Edit the dates first." });
+        }
+
         const { data: supabaseReactivated, error: reactivateErr } = await supabase
           .from('seasons')
           .update({ status: 'active', updated_at: new Date().toISOString() })
@@ -500,6 +548,18 @@ export default async function handler(req, res) {
           console.error('[/api/seasons] Reactivate season error:', reactivateErr?.message);
           return res.status(500).json({ error: 'Failed to reactivate season' });
         }
+
+        try {
+          const { data: shRows } = await supabase
+            .from('season_habits')
+            .select('habit_id')
+            .eq('season_id', id)
+            .eq('user_id', user_id);
+          const linkedIds = (shRows || []).map(r => r.habit_id).filter(Boolean);
+          if (linkedIds.length > 0) {
+            await applySeasonHabitSelection(id, linkedIds);
+          }
+        } catch {}
 
         return res.status(200).json({ season: supabaseReactivated });
       }
@@ -519,11 +579,7 @@ export default async function handler(req, res) {
           .eq('season_id', id)
           .eq('user_id', user_id);
 
-        await supabase
-          .from('habits')
-          .update({ status: 'active', season_id: null })
-          .eq('season_id', id)
-          .eq('user_id', user_id);
+        await resumeSeasonHabits(id);
 
         const { error: delErr } = await supabase
           .from('seasons')

@@ -15,9 +15,15 @@ export default function TopBar({ onOpenMobileMenu }) {
   const initial = displayName.charAt(0).toUpperCase() || 'B';
   const avatar = user?.user_metadata?.avatar_url;
 
-  const todayStr = new Date().toLocaleDateString('en-US', {
+  const now = new Date();
+  const todayStr = now.toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
+    day: 'numeric'
+  });
+  const shortTodayStr = now.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
     day: 'numeric'
   });
 
@@ -40,34 +46,35 @@ export default function TopBar({ onOpenMobileMenu }) {
 
   return (
     <>
-      <header className="w-full flex items-center justify-between gap-4 py-4 px-2 sm:px-4 mb-4 border-b border-white/[0.04]">
+      <header className="w-full flex items-center justify-between gap-2 sm:gap-4 py-4 px-2 sm:px-4 mb-4 border-b border-white/[0.04]">
         {/* Left: Mobile menu button + Date */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           {onOpenMobileMenu && (
             <button
               onClick={onOpenMobileMenu}
-              className="md:hidden p-2 text-slate-400 hover:text-white rounded-xl bg-[#0f1721] border border-white/[0.06] transition-colors"
+              className="md:hidden p-2 text-slate-400 hover:text-white rounded-xl bg-[#0f1721] border border-white/[0.06] transition-colors flex-shrink-0"
               aria-label="Open menu"
             >
               <Menu size={18} />
             </button>
           )}
 
-          <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-400 font-medium">
-            <CalendarIcon size={14} className="text-teal-400/80 hidden sm:inline" />
-            <span className="text-slate-300 font-medium">{todayStr}</span>
+          <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-400 font-medium min-w-0">
+            <CalendarIcon size={14} className="text-teal-400/80 hidden sm:inline flex-shrink-0" />
+            <span className="text-slate-300 font-medium whitespace-nowrap sm:hidden">{shortTodayStr}</span>
+            <span className="text-slate-300 font-medium whitespace-nowrap hidden sm:inline">{todayStr}</span>
           </div>
         </div>
 
         {/* Right: Search, Notifications, Theme, Avatar */}
-        <div className="flex items-center gap-2.5 sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
           {/* Interactive Search Bar / Trigger */}
           <button
             type="button"
             onClick={handleOpenSearch}
-            className="group relative flex items-center gap-2.5 w-36 sm:w-56 md:w-64 pl-8 pr-2.5 py-1.5 text-xs rounded-xl bg-[#0e1620] border border-white/[0.08] hover:border-teal-500/40 text-slate-400 hover:text-slate-200 transition-all cursor-pointer shadow-xs text-left"
+            className="group relative flex items-center gap-2 sm:gap-2.5 w-28 sm:w-56 md:w-64 pl-7 sm:pl-8 pr-2 sm:pr-2.5 py-1.5 text-xs rounded-xl bg-[#0e1620] border border-white/[0.08] hover:border-teal-500/40 text-slate-400 hover:text-slate-200 transition-all cursor-pointer shadow-xs text-left"
           >
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 group-hover:text-teal-400 transition-colors pointer-events-none" />
+            <Search size={14} className="absolute left-2 sm:left-2.5 top-1/2 -translate-y-1/2 text-slate-400 group-hover:text-teal-400 transition-colors pointer-events-none" />
             <span className="truncate">Search Habits...</span>
             <kbd className="hidden sm:inline-flex items-center gap-0.5 ml-auto text-[10px] font-mono font-bold text-slate-400 bg-white/[0.05] border border-white/[0.08] px-1.5 py-0.5 rounded-md">
               <span className="text-[11px]">⌘</span>K

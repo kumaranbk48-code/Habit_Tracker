@@ -134,8 +134,8 @@ export default function HabitHeatmap({ data = {}, totalHabits = 0 }) {
       {/* Heatmap Matrix Centered & Gracefully Aligned */}
       <div className="overflow-x-auto pb-2 relative z-10 custom-scrollbar">
         <div className="min-w-max flex justify-start lg:justify-center gap-3 sm:gap-4 lg:gap-5 items-start mx-auto px-1">
-          {monthsData.map((m, mi) => (
-            <div key={mi} className="flex flex-col items-center">
+          {monthsData.slice().reverse().map((m) => (
+            <div key={`${m.year}-${m.month}`} className="flex flex-col items-center">
               <div className="flex" style={{ gap: '3px' }}>
                 {m.weeks.map((week, wi) => (
                   <div key={wi} className="flex flex-col" style={{ gap: '3px' }}>

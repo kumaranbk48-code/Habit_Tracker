@@ -39,7 +39,7 @@ export default function QuantityTracker({ current = 0, target = 0, unit = '', on
           style={{ width: `${pct}%` }}
         />
       </div>
-      <div className="flex flex-wrap items-center gap-1 min-w-0">
+      <div className="flex flex-nowrap items-center gap-1 min-w-0">
         <input
           type="number"
           step="any"
@@ -48,7 +48,7 @@ export default function QuantityTracker({ current = 0, target = 0, unit = '', on
           onChange={(e) => setAmount(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAdd(); } }}
           placeholder="Amount"
-          className="w-16 min-w-0 px-2 py-1 text-xs border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-[#3d7a75] outline-none dark:text-gray-100 dark:bg-gray-800"
+          className="flex-1 min-w-0 w-auto max-w-[5rem] px-2 py-1 text-xs border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-[#3d7a75] outline-none dark:text-gray-100 dark:bg-gray-800"
         />
         <button
           onClick={handleAdd}
