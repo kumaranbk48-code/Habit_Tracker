@@ -57,6 +57,19 @@ class AlarmService : Service() {
         @Volatile
         var currentAlarmId: Int = 0
             private set
+
+        fun removeAlarm(removeId: Int, removeHabitId: String) {
+            if (removeId != 0 || removeHabitId.isNotEmpty()) {
+                synchronized(activeAlarms) {
+                    activeAlarms.removeAll {
+                        (removeId != 0 && it.id == removeId) ||
+                            (removeHabitId.isNotEmpty() && it.habitId == removeHabitId)
+                    }
+                }
+            } else {
+                activeAlarms.clear()
+            }
+        }
     }
 
     private var mediaPlayer: MediaPlayer? = null
@@ -93,16 +106,7 @@ class AlarmService : Service() {
         if (action == ACTION_STOP) {
             val removeId = intent?.getIntExtra("id", 0) ?: 0
             val removeHabitId = intent?.getStringExtra("habitId") ?: ""
-            if (removeId != 0 || removeHabitId.isNotEmpty()) {
-                synchronized(activeAlarms) {
-                    activeAlarms.removeAll { 
-                        (removeId != 0 && it.id == removeId) || 
-                        (removeHabitId.isNotEmpty() && it.habitId == removeHabitId) 
-                    }
-                }
-            } else {
-                activeAlarms.clear()
-            }
+            removeAlarm(removeId, removeHabitId)
 
             if (activeAlarms.isEmpty()) {
                 stopAlarm()
@@ -219,6 +223,7 @@ class AlarmService : Service() {
             putExtra("id", id)
             putExtra("title", title)
             putExtra("body", body)
+            putExtra("scheduledTime", scheduledTime)
             putExtra("reminderId", reminderId)
             putExtra("habitId", habitId)
             putExtra("targetType", targetType)
@@ -234,8 +239,10 @@ class AlarmService : Service() {
         val dismissIntent = Intent(this, AlarmActionReceiver::class.java).apply {
             this.action = AlarmActionReceiver.ACTION_DISMISS
             putExtra("id", id)
+            putExtra("scheduledTime", scheduledTime)
             putExtra("reminderId", reminderId)
             putExtra("habitId", habitId)
+            putExtra("targetType", targetType)
         }
         val dismissPendingIntent = PendingIntent.getBroadcast(
             this,

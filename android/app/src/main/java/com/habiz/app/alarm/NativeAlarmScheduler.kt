@@ -38,6 +38,7 @@ object NativeAlarmScheduler {
     private val prefsLock = Any()
     private const val KEY_COMPLETED_GOALS = "completed_goals_set"
     private const val KEY_COMPLETED_LEARNING = "completed_learning_set"
+    private const val KEY_PENDING_ALARM_ACTIONS = "pending_alarm_actions"
 
     /**
      * Replicates the exact hashStringToId algorithm from src/lib/nativeNotifications.js
@@ -195,6 +196,7 @@ object NativeAlarmScheduler {
         completedLearning: List<String>,
         todayDate: String
     ) {
+        val pendingCompleteHabits = mutableListOf<String>()
         synchronized(prefsLock) {
             val prefs = getPrefs(context)
             val editor = prefs.edit()
@@ -202,8 +204,17 @@ object NativeAlarmScheduler {
             // Prune stale dates and replace all entries for todayDate so un-completions are reflected immediately
             val existingHabits = pruneCompletedHabits(prefs.getStringSet(KEY_COMPLETED_HABITS, emptySet()) ?: emptySet())
             val updatedHabits = existingHabits.filter { !it.endsWith(":$todayDate") }.toMutableSet()
-            for (hId in completedHabits) {
-                updatedHabits.add("$hId:$todayDate")
+            val pendingActions = readPendingActionList(context)
+            val mergedTodayHabits = PendingAlarmLogic.mergeCompletionsWithPending(completedHabits, pendingActions, todayDate)
+            for (entry in mergedTodayHabits) {
+                updatedHabits.add(entry)
+                val sepIdx = entry.lastIndexOf(':')
+                if (sepIdx > 0) {
+                    val hId = entry.substring(0, sepIdx)
+                    if (!completedHabits.contains(hId)) {
+                        pendingCompleteHabits.add(hId)
+                    }
+                }
             }
             editor.putStringSet(KEY_COMPLETED_HABITS, updatedHabits)
 
@@ -217,11 +228,14 @@ object NativeAlarmScheduler {
         }
         Log.i(
             TAG,
-            "[COMPLETION] Synced native completions: ${completedHabits.size} habit(s) on $todayDate, ${completedGoals.size} goal(s), ${completedLearning.size} learning activity(ies)"
+            "[COMPLETION] Synced native completions: ${completedHabits.size} server habit(s) + ${pendingCompleteHabits.size} pending local habit(s) on $todayDate, ${completedGoals.size} goal(s), ${completedLearning.size} learning activity(ies)"
         )
 
         // CHECK B: Ensure any active snooze for a completed item is cancelled
         for (hId in completedHabits) {
+            cancelSnoozeForEntity(context, hId, "")
+        }
+        for (hId in pendingCompleteHabits) {
             cancelSnoozeForEntity(context, hId, "")
         }
         for (gId in completedGoals) {
@@ -230,6 +244,113 @@ object NativeAlarmScheduler {
         for (lId in completedLearning) {
             cancelSnoozeForEntity(context, lId, "")
         }
+    }
+
+    // --- Durable pending native alarm action log ---
+
+    private fun readPendingActionList(context: Context): List<PendingAlarmAction> {
+        val raw = getPrefs(context).getString(KEY_PENDING_ALARM_ACTIONS, "[]") ?: "[]"
+        val arr = try { JSONArray(raw) } catch (_: Exception) { JSONArray() }
+        val result = mutableListOf<PendingAlarmAction>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            val type = obj.optString("type", "")
+            val date = obj.optString("date", "")
+            if (type.isEmpty() || date.isEmpty()) continue
+            result.add(
+                PendingAlarmAction(
+                    id = obj.optString("id", ""),
+                    type = type,
+                    habitId = obj.optString("habitId", ""),
+                    reminderId = obj.optString("reminderId", ""),
+                    targetType = obj.optString("targetType", "habit"),
+                    date = date,
+                    occurrenceMinute = obj.optString("occurrenceMinute", ""),
+                    timestamp = obj.optLong("timestamp", 0L)
+                )
+            )
+        }
+        return result
+    }
+
+    private fun toJsonArray(actions: List<PendingAlarmAction>): JSONArray {
+        val arr = JSONArray()
+        for (action in actions) {
+            arr.put(
+                JSONObject().apply {
+                    put("id", action.id)
+                    put("type", action.type)
+                    put("habitId", action.habitId)
+                    put("reminderId", action.reminderId)
+                    put("targetType", action.targetType)
+                    put("date", action.date)
+                    put("occurrenceMinute", action.occurrenceMinute)
+                    put("timestamp", action.timestamp)
+                }
+            )
+        }
+        return arr
+    }
+
+    fun addPendingAction(
+        context: Context,
+        type: String,
+        habitId: String,
+        reminderId: String,
+        targetType: String,
+        date: String,
+        occurrenceMinute: String,
+        timestamp: Long = System.currentTimeMillis()
+    ) {
+        if (habitId.isEmpty() && reminderId.isEmpty()) return
+        synchronized(prefsLock) {
+            val current = readPendingActionList(context)
+            val newAction = PendingAlarmAction(
+                id = PendingAlarmLogic.makeActionId(type, habitId, reminderId, date),
+                type = type,
+                habitId = habitId,
+                reminderId = reminderId,
+                targetType = targetType.ifEmpty { "habit" },
+                date = date,
+                occurrenceMinute = occurrenceMinute,
+                timestamp = timestamp
+            )
+            val updated = PendingAlarmLogic.addAction(current, newAction, timestamp)
+            getPrefs(context).edit()
+                .putString(KEY_PENDING_ALARM_ACTIONS, toJsonArray(updated).toString())
+                .commit()
+        }
+        Log.i(TAG, "[PENDING_ACTION] Logged $type for entity='$habitId' reminder='$reminderId' date='$date' minute='$occurrenceMinute'")
+    }
+
+    fun getPendingActions(context: Context): JSONArray {
+        synchronized(prefsLock) {
+            val now = System.currentTimeMillis()
+            val current = readPendingActionList(context)
+            val pruned = PendingAlarmLogic.pruneExpired(current, now)
+            if (pruned.size != current.size) {
+                getPrefs(context).edit()
+                    .putString(KEY_PENDING_ALARM_ACTIONS, toJsonArray(pruned).toString())
+                    .commit()
+            }
+            return toJsonArray(pruned)
+        }
+    }
+
+    fun clearPendingActions(
+        context: Context,
+        ids: Set<String> = emptySet(),
+        timestamps: Set<Long> = emptySet(),
+        clearAll: Boolean = false
+    ) {
+        synchronized(prefsLock) {
+            val current = readPendingActionList(context)
+            val remaining = PendingAlarmLogic.acknowledgeActions(current, ids, timestamps, clearAll)
+            getPrefs(context).edit()
+                .putString(KEY_PENDING_ALARM_ACTIONS, toJsonArray(remaining).toString())
+                .commit()
+        }
+        Log.i(TAG, "[PENDING_ACTION] Cleared pending actions (all=$clearAll, ids=${ids.size}, timestamps=${timestamps.size})")
     }
 
     /**

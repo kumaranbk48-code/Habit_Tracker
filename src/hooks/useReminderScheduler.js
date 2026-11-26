@@ -7,7 +7,13 @@ import {
   hashStringToId,
   recordNativeCompletion,
   recordNativeUncompletion,
+  processPendingAlarmActions,
+  recordNativeHandledAction,
+  getHandledNativeState,
+  markFiredAlarmKey,
+  shouldSkipInAppAlarmFire,
 } from '../lib/nativeNotifications';
+import { getCachedData } from '../lib/offlineDb';
 import { LocalNotifications } from '@capacitor/local-notifications';
 
 function getTimeValue(val) {
@@ -66,6 +72,18 @@ export function useReminderScheduler() {
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
     try {
+      // Process durable native alarm actions FIRST and wait before server fetch / syncNativeCompletions
+      let pendingCompletedIds = [];
+      if (isNative) {
+        const pendingRes = await processPendingAlarmActions(session).catch(() => null);
+        if (pendingRes?.completedHabitIds?.length) {
+          pendingCompletedIds = pendingRes.completedHabitIds;
+          for (const hId of pendingCompletedIds) {
+            completedHabitsRef.current.add(hId);
+          }
+        }
+      }
+
       const [remRes, trackRes, repingRes, dashRes, goalsRes] = await Promise.all([
         fetch('/api/reminders', {
           headers: { Authorization: `Bearer ${session.access_token}` },
@@ -121,9 +139,13 @@ export function useReminderScheduler() {
       if (trackRes.ok) {
         const trackData = await trackRes.json();
         if (Array.isArray(trackData)) {
-          completedHabitsRef.current = new Set(
+          const serverDone = new Set(
             trackData.filter((t) => t.status === true).map((t) => t.habit_id)
           );
+          for (const hId of pendingCompletedIds) {
+            serverDone.add(hId);
+          }
+          completedHabitsRef.current = serverDone;
         }
       }
 
@@ -166,6 +188,19 @@ export function useReminderScheduler() {
       }
     } catch (err) {
       console.warn('[ReminderScheduler] Failed to refresh scheduler data:', err);
+      // When offline, still populate completedHabitsRef from local cached tracking so ticker suppresses handled habits
+      if (session?.user?.id) {
+        try {
+          const cachedTrack = await getCachedData(session.user.id, 'tracking', today);
+          if (Array.isArray(cachedTrack)) {
+            for (const row of cachedTrack) {
+              if (row?.status === true && row?.habit_id) {
+                completedHabitsRef.current.add(row.habit_id);
+              }
+            }
+          }
+        } catch {}
+      }
     } finally {
       isRefreshingRef.current = false;
       if (pendingRefreshReasonRef.current) {
@@ -246,13 +281,28 @@ export function useReminderScheduler() {
     window.addEventListener('habittracker-entity-uncompleted', handleEntityUncompleted);
 
     const handleNativeAlarmHandled = (e) => {
-      const { reminderId, habitId } = e.detail || {};
+      const { reminderId, habitId, timestamp } = e.detail || {};
+      const nowD = new Date();
+      const todayYmd = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, '0')}-${String(nowD.getDate()).padStart(2, '0')}`;
+      const currentTime = lastMinuteLoggedRef.current || `${String(nowD.getHours()).padStart(2, '0')}:${String(nowD.getMinutes()).padStart(2, '0')}`;
+      const type = e.type === 'habittracker-alarm-snoozed' ? 'snooze' : 'complete';
+
+      if (type === 'complete' && habitId) {
+        completedHabitsRef.current.add(habitId);
+      }
+      recordNativeHandledAction({
+        type,
+        habitId,
+        reminderId,
+        date: todayYmd,
+        occurrenceMinute: currentTime,
+        timestamp: timestamp || Date.now(),
+      });
+
       if (reminderId) firedRef.current.add(reminderId);
       if (habitId) firedRef.current.add(habitId);
-      const currentTime = lastMinuteLoggedRef.current;
-      if (currentTime) {
-        if (reminderId) firedRef.current.add(`${reminderId}-${currentTime}`);
-        if (habitId) firedRef.current.add(`${habitId}-${currentTime}`);
+      if (currentTime && reminderId) {
+        firedRef.current.add(`${reminderId}_${todayYmd}_${currentTime}`);
       }
     };
     window.addEventListener('habittracker-alarm-dismissed', handleNativeAlarmHandled);
@@ -266,7 +316,7 @@ export function useReminderScheduler() {
       }
     }, 30000);
 
-    // Refresh immediately when returning to foreground
+    // Refresh immediately when returning to foreground (visibilitychange + Capacitor WebView resume)
     const handleVisibilityChange = () => {
       if (typeof document !== 'undefined' && !document.hidden) {
         refreshReminders('app_foregrounded');
@@ -274,6 +324,7 @@ export function useReminderScheduler() {
     };
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', handleVisibilityChange);
+      document.addEventListener('resume', handleVisibilityChange);
     }
 
     return () => {
@@ -288,6 +339,7 @@ export function useReminderScheduler() {
       window.removeEventListener('habittracker-alarm-completed', handleNativeAlarmHandled);
       if (typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
+        document.removeEventListener('resume', handleVisibilityChange);
       }
       clearInterval(syncInterval);
     };
@@ -357,7 +409,13 @@ export function useReminderScheduler() {
       }
 
       if (actionId === 'complete' && extra.habitId && session?.access_token) {
-        const today = new Date().toISOString().split('T')[0];
+        if (extra.fromNativeAlarmEvent) {
+          await processPendingAlarmActions(session);
+          refreshReminders('alarm_completed');
+          return;
+        }
+        const dNow = new Date();
+        const today = `${dNow.getFullYear()}-${String(dNow.getMonth() + 1).padStart(2, '0')}-${String(dNow.getDate()).padStart(2, '0')}`;
         try {
           await fetch('/api/tracking', {
             method: 'POST',
@@ -369,6 +427,7 @@ export function useReminderScheduler() {
               habit_id: extra.habitId,
               completion_date: today,
               status: true,
+              action: 'complete',
             }),
           });
           window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
@@ -424,6 +483,9 @@ export function useReminderScheduler() {
         console.log(`[ReminderScheduler] Checking ${remindersRef.current.length} active reminder(s) at ${currentTime} (${currentDay})`);
       }
 
+      const nativeState = getHandledNativeState(now.getTime());
+      const combinedFiredKeys = new Set([...firedRef.current, ...nativeState.firedKeys]);
+
       for (const reminder of remindersRef.current) {
         const status = (reminder.notification_status || 'active').toLowerCase();
         if (status !== 'active') continue;
@@ -477,10 +539,27 @@ export function useReminderScheduler() {
         const timeMatches = alertsList.some((t) => t === currentTime);
         if (!timeMatches) continue;
 
-        // 3. Deduplication: Only fire once per minute per reminder
+        // 3. Deduplication & Check A / native-handled skip BEFORE recording firedKey or dispatching events
         const triggerKey = `${reminder.id}_${todayYMD}_${currentTime}`;
-        if (firedRef.current.has(triggerKey)) continue;
+        const skipCheck = shouldSkipInAppAlarmFire(reminder, {
+          todayYMD,
+          currentTime,
+          nowMs: now.getTime(),
+          completedHabits: completedHabitsRef.current,
+          completedGoals: completedGoalsRef.current,
+          completedLearning: completedLearningRef.current,
+          handledHabitDates: nativeState.handledHabitDates,
+          recentSnoozes: nativeState.recentSnoozes,
+          firedKeys: combinedFiredKeys,
+        });
+        if (skipCheck.skip) {
+          if (skipCheck.reason !== 'already_fired_or_handled_minute') {
+            console.log(`[ReminderScheduler] Skipping reminder "${reminder.habits?.habit_name || reminder.id}" (${skipCheck.reason})`);
+          }
+          continue;
+        }
         firedRef.current.add(triggerKey);
+        markFiredAlarmKey(triggerKey);
 
         // Keep firedRef bounded
         if (firedRef.current.size > 200) {
@@ -627,12 +706,16 @@ export function useReminderScheduler() {
       for (const ev of repings) {
         if (!ev.next_reping_at) continue;
         if (completedHabitsRef.current.has(ev.habit_id)) continue;
+        if (nativeState.handledHabitDates.has(`${ev.habit_id}:${todayYMD}`)) continue;
+        const snoozeTs = nativeState.recentSnoozes.get(ev.habit_id);
+        if (typeof snoozeTs === 'number' && (now.getTime() - snoozeTs) < 10 * 60 * 1000) continue;
 
         const dueAt = new Date(ev.next_reping_at).getTime();
         if (dueAt <= now.getTime()) {
           const repingKey = `reping_${ev.id}_${ev.reping_count}`;
-          if (firedRef.current.has(repingKey)) continue;
+          if (combinedFiredKeys.has(repingKey)) continue;
           firedRef.current.add(repingKey);
+          markFiredAlarmKey(repingKey);
 
           // Find associated reminder
           const matchedReminder = remindersRef.current?.find((r) => r.habit_id === ev.habit_id);

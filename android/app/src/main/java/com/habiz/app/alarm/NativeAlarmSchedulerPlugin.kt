@@ -403,4 +403,48 @@ class NativeAlarmSchedulerPlugin : Plugin() {
             call.reject("Failed to get dismissed alarms: ${e.message}", e)
         }
     }
+
+    @PluginMethod
+    fun getPendingAlarmActions(call: PluginCall) {
+        try {
+            val actions = NativeAlarmScheduler.getPendingActions(context)
+            val ret = JSObject()
+            ret.put("actions", JSArray(actions.toString()))
+            call.resolve(ret)
+        } catch (e: Exception) {
+            call.reject("Failed to get pending alarm actions: ${e.message}", e)
+        }
+    }
+
+    @PluginMethod
+    fun ackPendingAlarmActions(call: PluginCall) {
+        try {
+            val clearAll = call.getBoolean("all") ?: false
+            val ids = mutableSetOf<String>()
+            val timestamps = mutableSetOf<Long>()
+
+            val idsArray = call.getArray("ids")
+            if (idsArray != null) {
+                for (i in 0 until idsArray.length()) {
+                    val v = idsArray.optString(i, "")
+                    if (v.isNotEmpty()) ids.add(v)
+                }
+            }
+
+            val tsArray = call.getArray("timestamps")
+            if (tsArray != null) {
+                for (i in 0 until tsArray.length()) {
+                    val v = tsArray.optLong(i, 0L)
+                    if (v > 0L) timestamps.add(v)
+                }
+            }
+
+            NativeAlarmScheduler.clearPendingActions(context, ids, timestamps, clearAll)
+            val ret = JSObject()
+            ret.put("cleared", true)
+            call.resolve(ret)
+        } catch (e: Exception) {
+            call.reject("Failed to acknowledge pending alarm actions: ${e.message}", e)
+        }
+    }
 }

@@ -137,11 +137,31 @@ class AlarmActivity : AppCompatActivity() {
             val cur = alarmQueue.removeAt(0)
             Log.i(TAG, "[ACTIVITY] Snooze (+10 min) tapped for alarm id=${cur.id}")
 
+            // Remove synchronously from activeAlarms so AlarmActivity cannot re-show it
+            AlarmService.removeAlarm(cur.id, cur.habitId)
+
+            val now = System.currentTimeMillis()
+            val refTime = if (cur.scheduledTime > 0L) cur.scheduledTime else now
+            val todayDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(now))
+            val occMinute = SimpleDateFormat("HH:mm", Locale.US).format(Date(refTime))
+
+            NativeAlarmScheduler.addPendingAction(
+                context = this,
+                type = "snooze",
+                habitId = cur.habitId,
+                reminderId = cur.reminderId,
+                targetType = cur.targetType,
+                date = todayDate,
+                occurrenceMinute = occMinute,
+                timestamp = now
+            )
+
             val snoozeIntent = Intent(this, AlarmActionReceiver::class.java).apply {
                 this.action = AlarmActionReceiver.ACTION_SNOOZE
                 putExtra("id", cur.id)
                 putExtra("title", cur.title)
                 putExtra("body", cur.body)
+                putExtra("scheduledTime", cur.scheduledTime)
                 putExtra("reminderId", cur.reminderId)
                 putExtra("habitId", cur.habitId)
                 putExtra("targetType", cur.targetType)
@@ -160,24 +180,36 @@ class AlarmActivity : AppCompatActivity() {
             val cur = alarmQueue.removeAt(0)
             Log.i(TAG, "[ACTIVITY] Mark Done tapped for alarm id=${cur.id}")
 
-            val todayDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+            // Remove synchronously from activeAlarms so AlarmActivity cannot re-show it
+            AlarmService.removeAlarm(cur.id, cur.habitId)
 
-            // 1. Immediately record native completion & cancel any active snooze
-            NativeAlarmScheduler.saveCompletedEntity(this, cur.targetType, cur.habitId, todayDate)
-            NativeAlarmScheduler.cancelSnoozeForEntity(this, cur.habitId, cur.reminderId)
+            val now = System.currentTimeMillis()
+            val refTime = if (cur.scheduledTime > 0L) cur.scheduledTime else now
+            val todayDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(now))
+            val occMinute = SimpleDateFormat("HH:mm", Locale.US).format(Date(refTime))
 
-            // 2. Broadcast dismiss intent to update AlarmService
+            // Durable idempotent pending-action log (safe even before MainActivity starts)
+            NativeAlarmScheduler.addPendingAction(
+                context = this,
+                type = "complete",
+                habitId = cur.habitId,
+                reminderId = cur.reminderId,
+                targetType = cur.targetType,
+                date = todayDate,
+                occurrenceMinute = occMinute,
+                timestamp = now
+            )
+
+            // Single path: AlarmActionReceiver handles saveCompletedEntity, cancelSnooze, stop service, and notify JS
             val dismissIntent = Intent(this, AlarmActionReceiver::class.java).apply {
                 this.action = AlarmActionReceiver.ACTION_DISMISS
                 putExtra("id", cur.id)
+                putExtra("scheduledTime", cur.scheduledTime)
                 putExtra("reminderId", cur.reminderId)
                 putExtra("habitId", cur.habitId)
                 putExtra("targetType", cur.targetType)
             }
             sendBroadcast(dismissIntent)
-
-            // 3. Notify JavaScript bridge
-            NativeAlarmSchedulerPlugin.notifyCompleted(cur.id, cur.reminderId, cur.habitId, cur.targetType)
 
             if (alarmQueue.isNotEmpty()) {
                 renderCurrentAlarm()
@@ -186,9 +218,6 @@ class AlarmActivity : AppCompatActivity() {
                 try {
                     val mainIntent = Intent(this, MainActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                        putExtra("alarmCompletedHabitId", cur.habitId)
-                        putExtra("alarmCompletedTargetType", cur.targetType)
-                        putExtra("alarmCompletedReminderId", cur.reminderId)
                     }
                     startActivity(mainIntent)
                 } catch (e: Exception) {

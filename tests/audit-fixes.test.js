@@ -154,7 +154,7 @@ test('Audit Fix 3: Optimistic Updates & Saving Feedback', async (t) => {
 
 test('Audit Fix: Profile Failure Recovery & Retry', async (t) => {
   const profilePath = path.resolve(process.cwd(), 'src', 'pages', 'Profile.jsx');
-  const profileCode = fs.readFileSync(profilePath, 'utf8');
+  const profileCode = fs.readFileSync(profilePath, 'utf8').replace(/\r\n/g, '\n');
 
   await t.test('Profile defines loadError state and handles failed fetch', () => {
     assert.ok(profileCode.includes('const [loadError, setLoadError] = useState(false);'), 'Profile must have loadError state');

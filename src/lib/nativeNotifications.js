@@ -1,10 +1,203 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { enqueueOfflineAction, getCachedData, saveCachedData } from './offlineDb.js';
+import { getOnlineStatus } from './networkStatus.js';
 
 export const isNative = Capacitor.isNativePlatform();
 export const NativeAlarmScheduler = registerPlugin('NativeAlarmScheduler');
 
 let initialized = false;
+let pendingActionsInFlight = null;
+
+const HANDLED_NATIVE_KEY = 'habiz_handled_native_actions';
+const RECENT_SNOOZES_KEY = 'habiz_native_snoozes';
+const FIRED_ALARM_KEYS_STORAGE = 'habiz_fired_alarm_keys';
+const SNOOZE_COOLDOWN_MS = 10 * 60 * 1000;
+
+const handledHabitDatesMemory = new Set();
+const recentSnoozesMemory = new Map();
+const firedAlarmKeysMemory = new Set();
+
+function safeGetStorage() {
+  if (typeof localStorage !== 'undefined') return localStorage;
+  return null;
+}
+
+function formatLocalYmd(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatLocalHm(d = new Date()) {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+export function recordNativeHandledAction(action = {}, storage = safeGetStorage()) {
+  const type = String(action.type || '').toLowerCase();
+  const habitId = action.habitId ? String(action.habitId) : '';
+  const reminderId = action.reminderId ? String(action.reminderId) : '';
+  const date = action.date || formatLocalYmd();
+  const occurrenceMinute = action.occurrenceMinute || formatLocalHm();
+  const ts = Number(action.timestamp) || Date.now();
+
+  if (habitId && date && type === 'complete') {
+    const key = `${habitId}:${date}`;
+    handledHabitDatesMemory.add(key);
+    if (storage) {
+      try {
+        const raw = JSON.parse(storage.getItem(HANDLED_NATIVE_KEY) || '[]');
+        const list = Array.isArray(raw) ? raw.filter((e) => e && e.date === date && e.key !== key) : [];
+        list.push({ key, date, ts });
+        storage.setItem(HANDLED_NATIVE_KEY, JSON.stringify(list.slice(-100)));
+      } catch {}
+    }
+  }
+
+  if (habitId && type === 'snooze') {
+    recentSnoozesMemory.set(habitId, ts);
+    if (storage) {
+      try {
+        const raw = JSON.parse(storage.getItem(RECENT_SNOOZES_KEY) || '{}');
+        const map = raw && typeof raw === 'object' ? raw : {};
+        const cleaned = {};
+        for (const [k, v] of Object.entries(map)) {
+          if (ts - Number(v) < SNOOZE_COOLDOWN_MS) cleaned[k] = Number(v);
+        }
+        cleaned[habitId] = ts;
+        storage.setItem(RECENT_SNOOZES_KEY, JSON.stringify(cleaned));
+      } catch {}
+    }
+  }
+
+  if (reminderId && date && occurrenceMinute) {
+    markFiredAlarmKey(`${reminderId}_${date}_${occurrenceMinute}`, storage);
+  }
+}
+
+export function clearNativeHandledHabitDate(habitId, date = formatLocalYmd(), storage = safeGetStorage()) {
+  if (!habitId || !date) return;
+  const key = `${habitId}:${date}`;
+  handledHabitDatesMemory.delete(key);
+  if (storage) {
+    try {
+      const raw = JSON.parse(storage.getItem(HANDLED_NATIVE_KEY) || '[]');
+      if (Array.isArray(raw)) {
+        const filtered = raw.filter((e) => e && e.key !== key);
+        storage.setItem(HANDLED_NATIVE_KEY, JSON.stringify(filtered));
+      }
+    } catch {}
+  }
+}
+
+export function markFiredAlarmKey(triggerKey, storage = safeGetStorage()) {
+  if (!triggerKey) return;
+  firedAlarmKeysMemory.add(triggerKey);
+  if (firedAlarmKeysMemory.size > 200) {
+    const arr = Array.from(firedAlarmKeysMemory);
+    firedAlarmKeysMemory.clear();
+    for (const item of arr.slice(-100)) firedAlarmKeysMemory.add(item);
+  }
+  if (storage) {
+    try {
+      const raw = JSON.parse(storage.getItem(FIRED_ALARM_KEYS_STORAGE) || '[]');
+      const list = Array.isArray(raw) ? raw.filter((k) => k !== triggerKey) : [];
+      list.push(triggerKey);
+      storage.setItem(FIRED_ALARM_KEYS_STORAGE, JSON.stringify(list.slice(-200)));
+    } catch {}
+  }
+}
+
+export function getHandledNativeState(nowMs = Date.now(), storage = safeGetStorage()) {
+  const handledHabitDates = new Set(handledHabitDatesMemory);
+  const recentSnoozes = new Map(recentSnoozesMemory);
+  const firedKeys = new Set(firedAlarmKeysMemory);
+
+  if (storage) {
+    const today = formatLocalYmd(new Date(nowMs));
+    try {
+      const rawHandled = JSON.parse(storage.getItem(HANDLED_NATIVE_KEY) || '[]');
+      if (Array.isArray(rawHandled)) {
+        for (const item of rawHandled) {
+          if (item?.key && item?.date === today) {
+            handledHabitDates.add(item.key);
+          }
+        }
+      }
+    } catch {}
+    try {
+      const rawSnoozes = JSON.parse(storage.getItem(RECENT_SNOOZES_KEY) || '{}');
+      if (rawSnoozes && typeof rawSnoozes === 'object') {
+        for (const [hId, ts] of Object.entries(rawSnoozes)) {
+          const t = Number(ts);
+          if (Number.isFinite(t) && (nowMs - t) >= 0 && (nowMs - t) < SNOOZE_COOLDOWN_MS) {
+            if (!recentSnoozes.has(hId) || t > recentSnoozes.get(hId)) {
+              recentSnoozes.set(hId, t);
+            }
+          }
+        }
+      }
+    } catch {}
+    try {
+      const rawFired = JSON.parse(storage.getItem(FIRED_ALARM_KEYS_STORAGE) || '[]');
+      if (Array.isArray(rawFired)) {
+        for (const k of rawFired) {
+          if (typeof k === 'string') firedKeys.add(k);
+        }
+      }
+    } catch {}
+  }
+
+  for (const [hId, ts] of Array.from(recentSnoozes.entries())) {
+    if ((nowMs - ts) < 0 || (nowMs - ts) >= SNOOZE_COOLDOWN_MS) {
+      recentSnoozes.delete(hId);
+    }
+  }
+
+  return { handledHabitDates, recentSnoozes, firedKeys };
+}
+
+/**
+ * Pure predicate deciding whether the in-app reminder/alarm ticker should suppress firing.
+ */
+export function shouldSkipInAppAlarmFire(reminder, params = {}) {
+  if (!reminder) return { skip: true, reason: 'missing_reminder' };
+  const {
+    todayYMD = formatLocalYmd(),
+    currentTime = formatLocalHm(),
+    nowMs = Date.now(),
+    completedHabits = new Set(),
+    completedGoals = new Set(),
+    completedLearning = new Set(),
+    handledHabitDates = new Set(),
+    recentSnoozes = new Map(),
+    firedKeys = new Set(),
+  } = params;
+
+  const triggerKey = `${reminder.id}_${todayYMD}_${currentTime}`;
+  if (firedKeys?.has(triggerKey)) {
+    return { skip: true, reason: 'already_fired_or_handled_minute' };
+  }
+
+  const type = (reminder.target_type || 'habit').toLowerCase();
+  if (type === 'habit' && reminder.habit_id) {
+    const habitId = String(reminder.habit_id);
+    if (completedHabits?.has(habitId)) {
+      return { skip: true, reason: 'completed_habit' };
+    }
+    if (handledHabitDates?.has(`${habitId}:${todayYMD}`)) {
+      return { skip: true, reason: 'pending_or_handled_native_action' };
+    }
+    const snoozedAt = recentSnoozes instanceof Map ? recentSnoozes.get(habitId) : recentSnoozes?.[habitId];
+    if (typeof snoozedAt === 'number' && (nowMs - snoozedAt) >= 0 && (nowMs - snoozedAt) < SNOOZE_COOLDOWN_MS) {
+      return { skip: true, reason: 'recent_native_snooze' };
+    }
+  } else if (type === 'goal' && reminder.goal_id && completedGoals?.has(reminder.goal_id)) {
+    return { skip: true, reason: 'completed_goal' };
+  } else if ((type === 'learning_journey' || type === 'learning_topic' || type === 'learning') && completedLearning?.has(reminder.journey_id || reminder.topic_id)) {
+    return { skip: true, reason: 'completed_learning' };
+  }
+
+  return { skip: false };
+}
 
 // Convert string ID to a deterministic 32-bit positive integer for Android LocalNotifications
 export function hashStringToId(str) {
@@ -680,11 +873,15 @@ export async function recordNativeCompletion(targetType, entityId, date, reminde
  */
 export async function recordNativeUncompletion(targetType, entityId, date) {
   if (!isNative || !entityId) return;
+  const resolvedDate = date || formatLocalYmd();
+  if ((targetType || 'habit').toLowerCase() === 'habit') {
+    clearNativeHandledHabitDate(String(entityId), resolvedDate);
+  }
   try {
     await NativeAlarmScheduler.recordUncompletion({
       targetType: targetType || 'habit',
       entityId: String(entityId),
-      date: date || new Date().toISOString().split('T')[0],
+      date: resolvedDate,
     });
     console.log(`[NativeNotifications] Recorded native uncompletion: type=${targetType || 'habit'}, entityId=${entityId}`);
   } catch (err) {
@@ -735,6 +932,209 @@ export async function getNativeDismissedAlarms() {
   }
 }
 
+async function updateOfflineTrackingCaches(userId, habitId, date, quantityCompleted) {
+  const applyEntry = (arr) => {
+    const list = Array.isArray(arr) ? arr : [];
+    const idx = list.findIndex((t) => t.habit_id === habitId && (!t.completion_date || t.completion_date === date));
+    const entry = {
+      habit_id: habitId,
+      completion_date: date,
+      status: true,
+      ...(quantityCompleted !== undefined ? { quantity_completed: quantityCompleted } : {}),
+    };
+    if (idx !== -1) {
+      const updated = [...list];
+      updated[idx] = { ...updated[idx], ...entry };
+      return updated;
+    }
+    return [...list, entry];
+  };
+
+  try {
+    const cachedByDate = await getCachedData(userId, 'tracking', date);
+    if (cachedByDate !== null) {
+      await saveCachedData(userId, 'tracking', applyEntry(cachedByDate), date);
+    }
+    const cachedDefault = await getCachedData(userId, 'tracking');
+    if (cachedDefault !== null) {
+      await saveCachedData(userId, 'tracking', applyEntry(cachedDefault));
+    }
+  } catch (err) {
+    console.warn('[NativeNotifications] Failed updating offline tracking cache:', err);
+  }
+}
+
+async function runProcessPendingAlarmActions(session, options = {}) {
+  const userId = session?.user?.id;
+  const accessToken = session?.access_token;
+  if (!userId) {
+    return { processed: 0, completedHabitIds: [], snoozedActions: [], ackedIds: [] };
+  }
+
+  const scheduler = options.scheduler || NativeAlarmScheduler;
+  const fetchFn = options.fetchImpl || (typeof fetch === 'function' ? fetch : null);
+  const enqueueFn = options.enqueueAction || enqueueOfflineAction;
+  const getOnlineFn = options.getOnlineStatusImpl || getOnlineStatus;
+  const storage = options.storage !== undefined ? options.storage : safeGetStorage();
+
+  let actions = [];
+  try {
+    const res = await scheduler.getPendingAlarmActions();
+    actions = Array.isArray(res?.actions) ? res.actions : [];
+  } catch (err) {
+    console.warn('[NativeNotifications] getPendingAlarmActions failed:', err);
+    return { processed: 0, completedHabitIds: [], snoozedActions: [], ackedIds: [] };
+  }
+
+  if (actions.length === 0) {
+    return { processed: 0, completedHabitIds: [], snoozedActions: [], ackedIds: [] };
+  }
+
+  // Immediately record all pending native actions so in-app ticker suppresses duplicate popups
+  for (const act of actions) {
+    recordNativeHandledAction(act, storage);
+  }
+
+  let habitsList = Array.isArray(options.habits) ? options.habits : null;
+  if (!habitsList && !options.skipCacheLookup) {
+    try {
+      const cached = await getCachedData(userId, 'habits');
+      if (Array.isArray(cached)) habitsList = cached;
+    } catch {}
+  }
+
+  const ackIds = [];
+  const ackTimestamps = [];
+  const completedItems = [];
+  const snoozedActions = [];
+
+  for (const act of actions) {
+    const type = String(act.type || '').toLowerCase();
+    const targetType = String(act.targetType || 'habit').toLowerCase();
+
+    if (type === 'snooze') {
+      snoozedActions.push(act);
+      if (act.id) ackIds.push(act.id);
+      if (act.timestamp) ackTimestamps.push(act.timestamp);
+      continue;
+    }
+
+    if (type === 'complete' && targetType === 'habit' && act.habitId) {
+      const habitId = String(act.habitId);
+      const date = act.date || formatLocalYmd();
+      const habitMeta = habitsList?.find((h) => String(h.id) === habitId);
+      const isQuantity = habitMeta?.tracking_type === 'quantity';
+      const targetQty = Number(habitMeta?.target_quantity) || 1;
+
+      const serverBody = {
+        habit_id: habitId,
+        completion_date: date,
+        status: true,
+        action: 'complete',
+        ...(isQuantity ? { amount: targetQty } : {}),
+      };
+
+      const offlineBody = {
+        habit_id: habitId,
+        completion_date: date,
+        status: true,
+        action: 'complete',
+        ...(isQuantity ? { amount: targetQty, quantity_completed: targetQty } : {}),
+      };
+
+      let sentOrQueued = false;
+      let shouldFallbackOffline = !getOnlineFn() || !accessToken || !fetchFn;
+
+      if (!shouldFallbackOffline) {
+        try {
+          const resp = await fetchFn('/api/tracking', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify(serverBody),
+          });
+
+          if (resp.ok) {
+            sentOrQueued = true;
+          } else {
+            const errJson = await resp.json().catch(() => ({}));
+            const errMsg = String(errJson?.error || '');
+            if (resp.status === 409 || /already completed/i.test(errMsg)) {
+              sentOrQueued = true;
+            } else if (resp.status >= 500 || resp.status === 429 || resp.status === 408 || resp.status === 401) {
+              shouldFallbackOffline = true;
+            }
+          }
+        } catch {
+          shouldFallbackOffline = true;
+        }
+      }
+
+      if (!sentOrQueued && shouldFallbackOffline) {
+        try {
+          const queuedId = await enqueueFn(userId, 'TRACK_HABIT', offlineBody);
+          if (queuedId) {
+            sentOrQueued = true;
+          }
+        } catch (qErr) {
+          console.warn('[NativeNotifications] Offline enqueue failed:', qErr);
+        }
+      }
+
+      if (sentOrQueued) {
+        if (!options.skipCacheUpdate) {
+          await updateOfflineTrackingCaches(userId, habitId, date, isQuantity ? targetQty : undefined);
+        }
+        completedItems.push({ habitId, date });
+        if (act.id) ackIds.push(act.id);
+        if (act.timestamp) ackTimestamps.push(act.timestamp);
+      }
+    }
+  }
+
+  if (ackIds.length > 0 || ackTimestamps.length > 0) {
+    await scheduler.ackPendingAlarmActions({ ids: ackIds, timestamps: ackTimestamps });
+
+    if (typeof window !== 'undefined' && completedItems.length > 0) {
+      window.dispatchEvent(new CustomEvent('habittracker-stats-updated', { detail: { source: 'native-alarm-complete' } }));
+      for (const item of completedItems) {
+        window.dispatchEvent(
+          new CustomEvent('habittracker-entity-completed', {
+            detail: { targetType: 'habit', entityId: item.habitId, date: item.date },
+          })
+        );
+      }
+    }
+  }
+
+  return {
+    processed: ackIds.length,
+    completedHabitIds: completedItems.map((c) => c.habitId),
+    snoozedActions,
+    ackedIds: ackIds,
+  };
+}
+
+/**
+ * Process durable pending native alarm actions (Mark Done / Snooze) with single-flight locking.
+ * APK-only (returns empty no-op on web browsers).
+ */
+export async function processPendingAlarmActions(session, options = {}) {
+  const nativeActive = options.isNativeOverride !== undefined ? options.isNativeOverride : isNative;
+  if (!nativeActive) {
+    return { processed: 0, completedHabitIds: [], snoozedActions: [], ackedIds: [] };
+  }
+  if (pendingActionsInFlight) {
+    return pendingActionsInFlight;
+  }
+  pendingActionsInFlight = runProcessPendingAlarmActions(session, options).finally(() => {
+    pendingActionsInFlight = null;
+  });
+  return pendingActionsInFlight;
+}
+
 /**
  * Listen for notification clicks or action buttons (e.g. "Mark Done", "Snooze", "Dismiss")
  */
@@ -749,6 +1149,14 @@ export function setupNativeNotificationListeners(onAction) {
   // Listen to native AlarmActionReceiver events (from native AlarmActivity or notification action buttons)
   NativeAlarmScheduler.addListener('alarmCompleted', (data) => {
     console.log('[NativeNotifications] ✅ Native alarm completed event:', data);
+    recordNativeHandledAction({
+      type: 'complete',
+      habitId: data.habitId,
+      reminderId: data.reminderId,
+      date: formatLocalYmd(),
+      occurrenceMinute: formatLocalHm(),
+      timestamp: data.timestamp || Date.now(),
+    });
     window.dispatchEvent(new CustomEvent('habittracker-alarm-completed', { detail: data }));
     if (typeof onAction === 'function') {
       onAction({
@@ -757,7 +1165,8 @@ export function setupNativeNotificationListeners(onAction) {
           extra: {
             habitId: data.habitId,
             reminderId: data.reminderId,
-            targetType: data.targetType || 'habit'
+            targetType: data.targetType || 'habit',
+            fromNativeAlarmEvent: true,
           }
         }
       });
@@ -771,6 +1180,14 @@ export function setupNativeNotificationListeners(onAction) {
 
   NativeAlarmScheduler.addListener('alarmSnoozed', (data) => {
     console.log('[NativeNotifications] ⏰ Native alarm snoozed event:', data);
+    recordNativeHandledAction({
+      type: 'snooze',
+      habitId: data.habitId,
+      reminderId: data.reminderId,
+      date: formatLocalYmd(),
+      occurrenceMinute: formatLocalHm(),
+      timestamp: data.timestamp || Date.now(),
+    });
     window.dispatchEvent(new CustomEvent('habittracker-alarm-snoozed', { detail: data }));
   }).then((l) => { snoozedListener = l; }).catch(() => {});
 
