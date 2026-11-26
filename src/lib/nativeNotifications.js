@@ -246,7 +246,7 @@ export function buildNotificationsForReminder(reminder, targetName = '', options
     body = reminder.custom_text || `Time for your study session on "${itemName}"!`;
   }
 
-  const now = new Date();
+  const now = options.now instanceof Date ? options.now : new Date();
   const notifications = [];
   const shortDayNames = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   const longDayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -312,8 +312,9 @@ export function buildNotificationsForReminder(reminder, targetName = '', options
       return [];
     }
 
-    // Schedule occurrences for the next 7 days
-    for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
+    // Schedule occurrences for the next 8 days (0..7) so single-weekday reminders
+    // whose time already passed today still schedule for next week's same day.
+    for (let dayOffset = 0; dayOffset < 8; dayOffset++) {
       const targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset);
       const dayIdx = targetDate.getDay();
       const shortName = shortDayNames[dayIdx];
@@ -372,6 +373,27 @@ export function buildNotificationsForReminder(reminder, targetName = '', options
   }
 
   return notifications;
+}
+
+/**
+ * Compute the earliest upcoming fire Date for a reminder using the exact same
+ * rules as buildNotificationsForReminder (days, times, deadline, completion suppression).
+ * Returns a Date or null if no upcoming time is found within the scheduling window.
+ */
+export function getNextFireTime(reminder, now = new Date(), options = {}) {
+  if (!reminder) return null;
+  const notifications = buildNotificationsForReminder(reminder, '', { ...options, now });
+  if (!notifications || notifications.length === 0) return null;
+  let earliest = null;
+  for (const n of notifications) {
+    const at = n?.schedule?.at ? new Date(n.schedule.at) : null;
+    if (at && !Number.isNaN(at.getTime())) {
+      if (!earliest || at.getTime() < earliest.getTime()) {
+        earliest = at;
+      }
+    }
+  }
+  return earliest;
 }
 
 /**

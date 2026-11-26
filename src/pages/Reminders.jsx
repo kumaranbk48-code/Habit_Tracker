@@ -21,6 +21,7 @@ import {
   cancelNativeReminder,
   checkExactAlarmPermission,
   requestExactAlarmPermission,
+  getNextFireTime,
 } from '../lib/nativeNotifications';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -42,6 +43,70 @@ function format12Hour(time24) {
   return `${h12}:${mm} ${period}`;
 }
 
+function formatFirstRingToast(reminder, now = new Date(), completedHabitIds = new Set()) {
+  const nextFire = getNextFireTime(reminder, now, { completedHabitIds });
+  if (!nextFire) {
+    return {
+      message: 'No upcoming time found. Check the time and selected days.',
+      type: 'error',
+    };
+  }
+
+  const hh = String(nextFire.getHours()).padStart(2, '0');
+  const mm = String(nextFire.getMinutes()).padStart(2, '0');
+  const timeStr = format12Hour(`${hh}:${mm}`);
+
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfFire = new Date(nextFire.getFullYear(), nextFire.getMonth(), nextFire.getDate());
+  const diffDays = Math.round((startOfFire.getTime() - startOfToday.getTime()) / 86400000);
+  const dayLabel =
+    diffDays === 0 ? 'today' :
+    diffDays === 1 ? 'tomorrow' :
+    nextFire.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+
+  const isAlarm = Boolean(
+    reminder?.is_alarm === true ||
+    reminder?.is_alarm === 'true' ||
+    reminder?.is_alarm === 1 ||
+    reminder?.is_alarm === 't' ||
+    reminder?.reminder_mode === 'alarm'
+  );
+
+  let passedToday = false;
+  if (diffDays > 0 && reminder?.reminder_mode !== 'deadline_proximity') {
+    const shortDays = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const longDays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const todayShort = shortDays[now.getDay()];
+    const todayLong = longDays[now.getDay()];
+    const daysRaw = Array.isArray(reminder?.days_of_week) ? reminder.days_of_week : [];
+    const daysNorm = daysRaw.map((d) => String(d).toLowerCase().trim()).filter(Boolean);
+    const isEveryday = daysNorm.length === 0 || daysNorm.some((d) => d === 'everyday' || d === 'daily' || d === 'all');
+    const allowedToday = isEveryday || daysNorm.some((d) => d === todayShort || d === todayLong || d.startsWith(todayShort));
+    const suppressedToday = (reminder?.target_type || 'habit') === 'habit' && reminder?.habit_id && completedHabitIds?.has(reminder.habit_id);
+
+    if (allowedToday && !suppressedToday) {
+      const times = [...(Array.isArray(reminder?.alerts) ? reminder.alerts : []), reminder?.reminder_time].filter(Boolean);
+      passedToday = times.some((t) => {
+        const [th, tm] = String(t).split(':').map(Number);
+        if (Number.isNaN(th) || Number.isNaN(tm)) return false;
+        const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), th, tm, 0, 0);
+        return candidate.getTime() <= now.getTime();
+      });
+    }
+  }
+
+  if (passedToday) {
+    return {
+      message: `That time has passed for today. First ring: ${dayLabel} ${timeStr}.`,
+      type: 'success',
+    };
+  }
+  return {
+    message: `${isAlarm ? 'Alarm' : 'Reminder'} set. First ring: ${dayLabel} ${timeStr}.`,
+    type: 'success',
+  };
+}
+
 export default function Reminders() {
   const { session, user } = useAuth();
   const location = useLocation();
@@ -50,6 +115,7 @@ export default function Reminders() {
   const [habits, setHabits] = useState([]);
   const [goals, setGoals] = useState([]);
   const [journeys, setJourneys] = useState([]);
+  const [completedHabitIds, setCompletedHabitIds] = useState(() => new Set());
 
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState('');
@@ -117,11 +183,14 @@ export default function Reminders() {
     }
     setFetchError('');
     try {
-      const [res, habitsRes, goalsRes, learningRes] = await Promise.all([
+      const nowDate = new Date();
+      const todayStr = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(nowDate.getDate()).padStart(2, '0')}`;
+      const [res, habitsRes, goalsRes, learningRes, trackingRes] = await Promise.all([
         fetch('/api/reminders', { headers: { Authorization: `Bearer ${currentSession.access_token}` } }),
         fetch('/api/habits', { headers: { Authorization: `Bearer ${currentSession.access_token}` } }),
         fetch('/api/goals', { headers: { Authorization: `Bearer ${currentSession.access_token}` } }),
         fetch('/api/learning', { headers: { Authorization: `Bearer ${currentSession.access_token}` } }),
+        fetch(`/api/tracking?date=${todayStr}`, { headers: { Authorization: `Bearer ${currentSession.access_token}` } }).catch(() => null),
       ]);
 
       if (seq !== fetchSeqRef.current) return;
@@ -138,6 +207,7 @@ export default function Reminders() {
       const habitsData = habitsRes.ok ? await habitsRes.json() : [];
       const goalsData = goalsRes.ok ? await goalsRes.json() : [];
       const learningData = learningRes.ok ? await learningRes.json() : {};
+      const trackingData = trackingRes && trackingRes.ok ? await trackingRes.json() : [];
 
       if (seq !== fetchSeqRef.current) return;
 
@@ -145,11 +215,17 @@ export default function Reminders() {
       const h = Array.isArray(habitsData) ? habitsData : [];
       const g = Array.isArray(goalsData) ? goalsData : [];
       const j = learningData?.journeys || (Array.isArray(learningData) ? learningData : []);
+      const completedSet = new Set(
+        (Array.isArray(trackingData) ? trackingData : [])
+          .filter((t) => t.status === true)
+          .map((t) => t.habit_id)
+      );
 
       setReminders(r);
       setHabits(h);
       setGoals(g);
       setJourneys(j);
+      setCompletedHabitIds(completedSet);
 
       if (user?.id) {
         saveCachedData(user.id, 'reminders', r);
@@ -316,10 +392,14 @@ export default function Reminders() {
         body: JSON.stringify({ ...rem, is_alarm: newIsAlarm }),
       });
       if (res.ok) {
-        setToast({
-          message: newIsAlarm ? 'Alarm Mode Enabled 🔔' : 'Alarm Mode Disabled 🔕',
-          type: 'success',
-        });
+        if (newIsAlarm) {
+          setToast(formatFirstRingToast({ ...rem, is_alarm: true }, new Date(), completedHabitIds));
+        } else {
+          setToast({
+            message: 'Alarm Mode Disabled 🔕',
+            type: 'success',
+          });
+        }
         fetchData();
       } else {
         setReminders((current) => current.map((r) => (r.id === rem.id ? { ...r, is_alarm: originalAlarm } : r)));
@@ -463,7 +543,16 @@ export default function Reminders() {
             scheduleSingleNativeReminder({ ...savedData, target_name: targetName }, targetName).catch(() => {});
           }
         }
-        setToast({ message: editing ? 'Reminder updated!' : 'Reminder created! 🔔', type: 'success' });
+        const effectiveReminder = {
+          ...payload,
+          ...(savedData || {}),
+          target_date:
+            savedData?.target_date ||
+            payload?.target_date ||
+            goals.find((g) => g.id === form.goal_id)?.target_date ||
+            journeys.find((j) => j.id === form.journey_id)?.target_date,
+        };
+        setToast(formatFirstRingToast(effectiveReminder, new Date(), completedHabitIds));
         fetchData();
       } else {
         if (editing) {
