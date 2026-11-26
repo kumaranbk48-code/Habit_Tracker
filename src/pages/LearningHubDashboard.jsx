@@ -229,15 +229,7 @@ export default function LearningHubDashboard() {
 
   const { journeys, continueJourney, todaysFocus, stats } = data;
 
-  // Default featured item if no continueJourney exists yet
-  const featuredJourney = continueJourney || (journeys && journeys[0]) || {
-    id: 'demo-dsa',
-    title: 'Data Structures & Algorithms in Java',
-    category: 'Tech & Coding',
-    current_topic: 'Binary Trees & Traversals',
-    completion_progress: 40,
-    understanding_progress: 55,
-  };
+  const featuredJourney = continueJourney || journeys?.[0] || null;
 
   const trimmedSearch = searchTopic.trim().toLowerCase();
   const filteredJourneys = (journeys || []).filter(j => {
@@ -291,59 +283,83 @@ export default function LearningHubDashboard() {
           }}
         />
 
-        <div className="relative z-10 max-w-xl space-y-4">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-teal-400 bg-teal-950/70 border border-teal-500/30 px-2.5 py-0.5 rounded-full">
-              Continue Learning
-            </span>
-            <span className="text-xs text-slate-400">• {featuredJourney.category || 'Development'}</span>
-          </div>
-
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-snug">
-            {featuredJourney.title}
-          </h2>
-
-          <div className="text-xs text-slate-300 flex items-center gap-2">
-            <span className="text-slate-400">Current Focus:</span>
-            <span className="font-semibold text-white bg-white/[0.08] px-2.5 py-1 rounded-lg">
-              {featuredJourney.current_topic || 'Core Foundations'}
-            </span>
-          </div>
-
-          {/* Progress Bar & Continue CTA */}
-          <div className="pt-2 max-w-md space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-400 font-medium">Agile / {featuredJourney.category || 'Self-Paced'}</span>
-              <span className="font-bold text-teal-300">{featuredJourney.completion_progress || 40}%</span>
+        {featuredJourney ? (
+          <div className="relative z-10 max-w-xl space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-teal-400 bg-teal-950/70 border border-teal-500/30 px-2.5 py-0.5 rounded-full">
+                Continue Learning
+              </span>
+              <span className="text-xs text-slate-400">• {featuredJourney.category || 'Self-Paced'}</span>
             </div>
-            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-teal-400 rounded-full transition-all duration-500"
-                style={{ width: `${featuredJourney.completion_progress || 40}%` }}
-              />
+
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-snug">
+              {featuredJourney.title}
+            </h2>
+
+            {featuredJourney.current_topic && featuredJourney.current_topic !== 'No topic added yet' && (
+              <div className="text-xs text-slate-300 flex items-center gap-2">
+                <span className="text-slate-400">Current Focus:</span>
+                <span className="font-semibold text-white bg-white/[0.08] px-2.5 py-1 rounded-lg">
+                  {featuredJourney.current_topic}
+                </span>
+              </div>
+            )}
+
+            {/* Progress Bar & Continue CTA */}
+            <div className="pt-2 max-w-md space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-medium">{featuredJourney.category || 'Self-Paced'}</span>
+                <span className="font-bold text-teal-300">{featuredJourney.completion_progress ?? 0}%</span>
+              </div>
+              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-teal-400 rounded-full transition-all duration-500"
+                  style={{ width: `${featuredJourney.completion_progress ?? 0}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={() => navigate(`/learning/journey/${featuredJourney.id}`)}
+                className="inline-flex items-center gap-2 text-xs font-bold bg-[#178274] hover:bg-[#136c60] text-white px-5 py-2.5 rounded-xl shadow-lg transition-colors cursor-pointer"
+              >
+                <span>Continue</span>
+                <ArrowRight size={14} />
+              </motion.button>
             </div>
           </div>
+        ) : (
+          <div className="relative z-10 max-w-xl space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-teal-400 bg-teal-950/70 border border-teal-500/30 px-2.5 py-0.5 rounded-full">
+                Learning Hub
+              </span>
+            </div>
 
-          <div className="pt-2">
-            <motion.button
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={() => {
-                if (featuredJourney.id && !featuredJourney.id.startsWith('demo-')) {
-                  navigate(`/learning/journey/${featuredJourney.id}`);
-                } else if (journeys?.[0]?.id) {
-                  navigate(`/learning/journey/${journeys[0].id}`);
-                } else {
-                  setCreateModalOpen(true);
-                }
-              }}
-              className="inline-flex items-center gap-2 text-xs font-bold bg-[#178274] hover:bg-[#136c60] text-white px-5 py-2.5 rounded-xl shadow-lg transition-colors cursor-pointer"
-            >
-              <span>Continue</span>
-              <ArrowRight size={14} />
-            </motion.button>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-snug">
+              Start Your Learning Journey
+            </h2>
+
+            <p className="text-xs sm:text-sm text-slate-300">
+              No journeys yet. Start your first learning journey.
+            </p>
+
+            <div className="pt-2">
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={() => setCreateModalOpen(true)}
+                className="inline-flex items-center gap-2 text-xs font-bold bg-[#178274] hover:bg-[#136c60] text-white px-5 py-2.5 rounded-xl shadow-lg transition-colors cursor-pointer"
+              >
+                <span>Create Journey</span>
+                <ArrowRight size={14} />
+              </motion.button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* ── SECTION 3: CATEGORY PILLS & TOPIC SEARCH (Matching Reference) ── */}
@@ -479,13 +495,13 @@ export default function LearningHubDashboard() {
 
                   <div className="space-y-2 pt-2 border-t border-white/[0.04]">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-400">{j.topics_count || 5} topics</span>
-                      <span className="font-bold text-teal-300">{j.completion_progress || 0}%</span>
+                      <span className="text-slate-400">{j.topics_count ?? 0} {(j.topics_count ?? 0) === 1 ? 'topic' : 'topics'}</span>
+                      <span className="font-bold text-teal-300">{j.completion_progress ?? 0}%</span>
                     </div>
                     <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-teal-400 rounded-full transition-all duration-300"
-                        style={{ width: `${j.completion_progress || 0}%` }}
+                        style={{ width: `${j.completion_progress ?? 0}%` }}
                       />
                     </div>
                   </div>
@@ -516,19 +532,19 @@ export default function LearningHubDashboard() {
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-center">
-            <div className="text-2xl font-black text-amber-300">{stats.streak}</div>
+            <div className="text-2xl font-black text-amber-300">{stats?.streak ?? 0}</div>
             <div className="text-xs text-slate-400 mt-0.5">Day Streak</div>
           </div>
           <div className="p-3.5 bg-sky-500/10 border border-sky-500/20 rounded-2xl text-center">
-            <div className="text-2xl font-black text-sky-300">{stats.totalActiveDays}</div>
+            <div className="text-2xl font-black text-sky-300">{stats?.totalActiveDays ?? 0}</div>
             <div className="text-xs text-slate-400 mt-0.5">Active Days</div>
           </div>
           <div className="p-3.5 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl text-center">
-            <div className="text-2xl font-black text-indigo-300">{stats.topicsCompleted}</div>
+            <div className="text-2xl font-black text-indigo-300">{stats?.topicsCompleted ?? 0}</div>
             <div className="text-xs text-slate-400 mt-0.5">Topics Completed</div>
           </div>
           <div className="p-3.5 bg-teal-500/10 border border-teal-500/20 rounded-2xl text-center">
-            <div className="text-2xl font-black text-teal-300">{stats.tasksCompleted}</div>
+            <div className="text-2xl font-black text-teal-300">{stats?.tasksCompleted ?? 0}</div>
             <div className="text-xs text-slate-400 mt-0.5">Tasks Completed</div>
           </div>
         </div>
