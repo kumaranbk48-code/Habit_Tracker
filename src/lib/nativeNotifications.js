@@ -182,6 +182,20 @@ export async function requestExactAlarmPermission() {
 }
 
 /**
+ * Direct user to the Android 14+ settings screen to allow full-screen alarm intents
+ */
+export async function requestFullScreenIntentPermission() {
+  if (!isNative) return true;
+  try {
+    await NativeAlarmScheduler.openFullScreenIntentSettings();
+    return await checkFullScreenIntentPermission();
+  } catch (err) {
+    console.warn('[NativeNotifications] openFullScreenIntentSettings error:', err);
+    return false;
+  }
+}
+
+/**
  * Build notification schemas for a reminder over the upcoming week or on a deadline date.
  */
 export function buildNotificationsForReminder(reminder, targetName = '', options = {}) {
@@ -486,7 +500,12 @@ export async function scheduleSingleNativeReminder(reminder, targetName = '') {
       console.log(`[NativeNotifications] ⏰ Scheduling ${alarms.length} alarm(s) with NativeAlarmScheduler.setAlarmClock:`, alarms);
       const res = await NativeAlarmScheduler.schedule({ alarms });
       console.log(`[NativeNotifications] ⚡ Instantly scheduled ${res?.scheduledCount || alarms.length} native alarms for "${targetName}" with AlarmManager.setAlarmClock()`);
-      return { success: true, count: res?.scheduledCount || alarms.length };
+      const fsiAllowed = await checkFullScreenIntentPermission();
+      return {
+        success: true,
+        count: res?.scheduledCount || alarms.length,
+        ...(fsiAllowed ? {} : { fullScreenIntentDenied: true }),
+      };
     } else {
       // 3b. Standard passive reminders go through LocalNotifications
       await LocalNotifications.schedule({ notifications });

@@ -1,6 +1,9 @@
 package com.habiz.app.alarm
 
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
@@ -244,6 +247,34 @@ class NativeAlarmSchedulerPlugin : Plugin() {
         val ret = JSObject()
         ret.put("full_screen_intent", if (granted) "granted" else "denied")
         call.resolve(ret)
+    }
+
+    @PluginMethod
+    fun openFullScreenIntentSettings(call: PluginCall) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            call.resolve()
+            return
+        }
+        val packageUri = Uri.parse("package:" + context.packageName)
+        try {
+            val intent = Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                data = packageUri
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.w(TAG, "[PLUGIN] Failed to open ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, falling back to app details: ${e.message}")
+            try {
+                val fallbackIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = packageUri
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(fallbackIntent)
+            } catch (fallbackErr: Exception) {
+                Log.w(TAG, "[PLUGIN] Failed to open application details settings: ${fallbackErr.message}")
+            }
+        }
+        call.resolve()
     }
 
     @PluginMethod

@@ -21,6 +21,8 @@ import {
   cancelNativeReminder,
   checkExactAlarmPermission,
   requestExactAlarmPermission,
+  checkFullScreenIntentPermission,
+  requestFullScreenIntentPermission,
   getNextFireTime,
 } from '../lib/nativeNotifications';
 
@@ -123,7 +125,19 @@ export default function Reminders() {
   const [editing, setEditing] = useState(null);
   const [toast, setToast] = useState(null);
   const [formLoading, setFormLoading] = useState(false);
+  const [fsiPromptOpen, setFsiPromptOpen] = useState(false);
   const fetchSeqRef = useRef(0);
+
+  const maybePromptFullScreenIntent = useCallback(async (scheduleResult) => {
+    if (!isNative) return;
+    try {
+      if (localStorage.getItem('habiz_fsi_prompted') === '1') return;
+    } catch {}
+    const denied = scheduleResult?.fullScreenIntentDenied === true || !(await checkFullScreenIntentPermission());
+    if (denied) {
+      setFsiPromptOpen(true);
+    }
+  }, []);
 
   // Filters
   const [categoryFilter, setCategoryFilter] = useState('All'); // 'All' | 'habit' | 'goal' | 'learning'
@@ -382,7 +396,13 @@ export default function Reminders() {
         });
       }
       const targetName = rem.habits?.habit_name || rem.goals?.goal_name || rem.learning_journeys?.title || 'Reminder';
-      scheduleSingleNativeReminder({ ...rem, is_alarm: newIsAlarm }, targetName).catch(() => {});
+      scheduleSingleNativeReminder({ ...rem, is_alarm: newIsAlarm }, targetName)
+        .then((schedRes) => {
+          if (newIsAlarm) {
+            maybePromptFullScreenIntent(schedRes);
+          }
+        })
+        .catch(() => {});
     }
 
     try {
@@ -494,7 +514,10 @@ export default function Reminders() {
             ...payload,
             id: editing ? editing.id : `client_${form.habit_id || form.goal_id || Date.now()}`,
           };
-          await scheduleSingleNativeReminder(clientReminder, targetName || 'Habit');
+          const schedRes = await scheduleSingleNativeReminder(clientReminder, targetName || 'Habit');
+          if (payload.is_alarm) {
+            await maybePromptFullScreenIntent(schedRes);
+          }
         } catch (nativeErr) {
           console.warn('[Reminders] Immediate native schedule warning:', nativeErr);
         }
@@ -592,7 +615,14 @@ export default function Reminders() {
     if (isNative) {
       if (newStatus === 'Active') {
         const targetName = reminder.habits?.habit_name || reminder.goals?.goal_name || reminder.learning_journeys?.title || 'Reminder';
-        scheduleSingleNativeReminder({ ...reminder, notification_status: 'Active' }, targetName).catch(() => {});
+        const isAlarmRem = Boolean(reminder.is_alarm || reminder.reminder_mode === 'alarm');
+        scheduleSingleNativeReminder({ ...reminder, notification_status: 'Active' }, targetName)
+          .then((schedRes) => {
+            if (isAlarmRem) {
+              maybePromptFullScreenIntent(schedRes);
+            }
+          })
+          .catch(() => {});
       } else {
         cancelNativeReminder(reminder.id).catch(() => {});
       }
@@ -1350,6 +1380,50 @@ export default function Reminders() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        isOpen={fsiPromptOpen}
+        onClose={() => {
+          try {
+            localStorage.setItem('habiz_fsi_prompted', '1');
+          } catch {}
+          setFsiPromptOpen(false);
+        }}
+        title="Full-Screen Alarms"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-300">
+            To show the full-screen alarm on your phone, allow &apos;Full-screen notifications&apos; for HabiZ.
+          </p>
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  localStorage.setItem('habiz_fsi_prompted', '1');
+                } catch {}
+                setFsiPromptOpen(false);
+              }}
+              className="px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+            >
+              Later
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  localStorage.setItem('habiz_fsi_prompted', '1');
+                } catch {}
+                setFsiPromptOpen(false);
+                requestFullScreenIntentPermission();
+              }}
+              className="px-5 py-2 text-sm font-bold text-white bg-[#178274] hover:bg-[#136c60] rounded-xl transition-all shadow-md shadow-teal-950/40 active:scale-95 cursor-pointer"
+            >
+              Open settings
+            </button>
+          </div>
+        </div>
       </Modal>
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}

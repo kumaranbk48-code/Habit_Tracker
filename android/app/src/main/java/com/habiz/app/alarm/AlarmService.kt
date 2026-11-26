@@ -258,11 +258,10 @@ class AlarmService : Service() {
             .addAction(0, "+10 min", snoozePendingIntent)
             .addAction(0, "✓ Mark Done", dismissPendingIntent)
 
-        if (NativeAlarmScheduler.canUseFullScreenIntent(this)) {
-            builder.setFullScreenIntent(fullScreenPendingIntent, true)
-        } else {
-            Log.w(TAG, "[SERVICE] USE_FULL_SCREEN_INTENT permission denied on Android 14+; posting notification without full-screen takeover.")
+        if (!NativeAlarmScheduler.canUseFullScreenIntent(this)) {
+            Log.w(TAG, "[SERVICE] USE_FULL_SCREEN_INTENT permission denied on Android 14+; attaching fullScreenIntent anyway.")
         }
+        builder.setFullScreenIntent(fullScreenPendingIntent, true)
 
         return builder.build()
     }

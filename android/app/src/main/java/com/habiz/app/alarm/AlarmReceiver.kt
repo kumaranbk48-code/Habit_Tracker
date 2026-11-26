@@ -47,22 +47,7 @@ class AlarmReceiver : BroadcastReceiver() {
         val triggerTime = if (scheduledTime > 0) scheduledTime else now
         val occurrenceDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(triggerTime))
 
-        // 2. Schedule next occurrence ONLY for recurring reminders (one-time reminders never get a next occurrence)
-        if (!isSnooze && isRecurring && reminderId.isNotEmpty()) {
-            NativeAlarmScheduler.scheduleNextOccurrence(
-                context = context,
-                reminderId = reminderId,
-                habitId = habitId,
-                targetType = targetType,
-                title = title,
-                body = body,
-                lastScheduledTime = triggerTime,
-                timeStr = timeStr,
-                daysOfWeek = daysOfWeek
-            )
-        }
-
-        // 3. CHECK A: Check completion status BEFORE starting sound, vibration, or full-screen takeover
+        // 2. CHECK A: Check completion status BEFORE starting sound, vibration, or full-screen takeover
         val isCompleted = NativeAlarmScheduler.isEntityCompleted(
             context = context,
             targetType = targetType,
@@ -80,11 +65,25 @@ class AlarmReceiver : BroadcastReceiver() {
             if (isSnooze) {
                 NativeAlarmScheduler.removePersistedAlarmId(context, id)
             }
+            // Still schedule next occurrence for recurring reminders so future days continue
+            if (!isSnooze && isRecurring && reminderId.isNotEmpty()) {
+                NativeAlarmScheduler.scheduleNextOccurrence(
+                    context = context,
+                    reminderId = reminderId,
+                    habitId = habitId,
+                    targetType = targetType,
+                    title = title,
+                    body = body,
+                    lastScheduledTime = triggerTime,
+                    timeStr = timeStr,
+                    daysOfWeek = daysOfWeek
+                )
+            }
             return
         }
 
         try {
-            // 4. Start foreground AlarmService for continuous audio, vibration, and persistent notification
+            // 3. Start foreground AlarmService for continuous audio, vibration, and persistent notification
             val serviceIntent = Intent(context, AlarmService::class.java).apply {
                 action = AlarmService.ACTION_START
                 putExtra("id", id)
@@ -99,7 +98,7 @@ class AlarmReceiver : BroadcastReceiver() {
             ContextCompat.startForegroundService(context, serviceIntent)
             Log.i(TAG, "[RECEIVER] Started AlarmService as ForegroundService for id=$id")
 
-            // 5. Launch full-screen AlarmActivity over lock screen
+            // 4. Launch full-screen AlarmActivity over lock screen
             val activityIntent = Intent(context, AlarmActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 putExtra("id", id)
@@ -119,6 +118,21 @@ class AlarmReceiver : BroadcastReceiver() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "[RECEIVER_ERROR] Failed to launch alarm service/activity for id=$id", e)
+        }
+
+        // 5. Schedule next occurrence ONLY for recurring reminders AFTER starting service/activity
+        if (!isSnooze && isRecurring && reminderId.isNotEmpty()) {
+            NativeAlarmScheduler.scheduleNextOccurrence(
+                context = context,
+                reminderId = reminderId,
+                habitId = habitId,
+                targetType = targetType,
+                title = title,
+                body = body,
+                lastScheduledTime = triggerTime,
+                timeStr = timeStr,
+                daysOfWeek = daysOfWeek
+            )
         }
     }
 }
