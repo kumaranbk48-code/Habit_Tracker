@@ -21,6 +21,7 @@ import HabizLoader from '../components/HabizLoader';
 import { saveCachedData, getCachedData, enqueueOfflineAction } from '../lib/offlineDb';
 import { Capacitor } from '@capacitor/core';
 import { getOnlineStatus } from '../lib/networkStatus';
+import { useRefreshOnConnectivity } from '../hooks/useNetworkStatus';
 
 const PRESET_COLORS = ['#3d7a75', '#6b8e6a', '#c99a52', '#b3574f', '#7570ab', '#b6708f', '#4a95a3', '#6b7785'];
 
@@ -246,14 +247,7 @@ export default function Habits() {
     if (session) fetchData();
   }, [session, fetchData]);
 
-  useEffect(() => {
-    const handleStatsUpdated = (e) => {
-      if (e?.detail?.source === 'habits') return;
-      if (session) fetchData();
-    };
-    window.addEventListener('habittracker-stats-updated', handleStatsUpdated);
-    return () => window.removeEventListener('habittracker-stats-updated', handleStatsUpdated);
-  }, [session, fetchData]);
+  useRefreshOnConnectivity(fetchData, { enabled: Boolean(session), ignoreSource: 'habits', delayMs: 150 });
 
   const openAdd = () => {
     setEditing(null);

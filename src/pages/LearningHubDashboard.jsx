@@ -13,6 +13,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import HabizLoader from '../components/HabizLoader';
 import { saveCachedData, getCachedData } from '../lib/offlineDb';
+import { useRefreshOnConnectivity } from '../hooks/useNetworkStatus';
 import { LEARNING_FILTER_CATEGORIES, matchesLearningCategory } from '../constants/learningCategories';
 
 export default function LearningHubDashboard() {
@@ -102,6 +103,8 @@ export default function LearningHubDashboard() {
       setLoading(false);
     }
   }, [session, fetchDashboardData]);
+
+  useRefreshOnConnectivity(fetchDashboardData, { enabled: Boolean(session), delayMs: 250 });
 
   const handleCreateJourney = async (journeyData) => {
     if (!session) return;

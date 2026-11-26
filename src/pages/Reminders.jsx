@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { useRefreshOnConnectivity } from '../hooks/useNetworkStatus';
 import HabizLoader from '../components/HabizLoader';
 import { saveCachedData, getCachedData } from '../lib/offlineDb';
 import {
@@ -296,6 +297,8 @@ export default function Reminders() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useRefreshOnConnectivity(fetchData, { enabled: Boolean(session), ignoreSource: 'reminders', delayMs: 200 });
 
   const openAdd = (preferredType = 'habit', preferredId = '') => {
     setEditing(null);

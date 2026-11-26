@@ -13,6 +13,7 @@ import {
   Sliders, Trash2, Edit3, Layers, BookOpen, Sparkles, MoreVertical, Bell
 } from 'lucide-react';
 import HabizLoader from '../components/HabizLoader';
+import { useRefreshOnConnectivity } from '../hooks/useNetworkStatus';
 
 export default function LearningJourneyDetail() {
   const { id } = useParams();
@@ -76,6 +77,9 @@ export default function LearningJourneyDetail() {
       setLoading(false);
     }
   }, [id, session, fetchJourneyDetail]);
+
+  const refreshJourneySilent = useCallback(() => fetchJourneyDetail(true), [fetchJourneyDetail]);
+  useRefreshOnConnectivity(refreshJourneySilent, { enabled: Boolean(session), delayMs: 250 });
   
   // Close actions dropdown when clicking outside
   useEffect(() => {

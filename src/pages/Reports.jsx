@@ -13,6 +13,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { motion, AnimatePresence } from 'framer-motion';
 import HabizLoader from '../components/HabizLoader';
+import { useRefreshOnConnectivity } from '../hooks/useNetworkStatus';
 
 function formatLocalYMD(d) {
   const year = d.getFullYear();
@@ -176,6 +177,8 @@ export default function Reports() {
   useEffect(() => {
     if (session) fetchReport();
   }, [session, fetchReport]);
+
+  useRefreshOnConnectivity(fetchReport, { enabled: Boolean(session), delayMs: 250 });
 
   // Next / Prev navigation handlers
   const handlePrevPeriod = () => {

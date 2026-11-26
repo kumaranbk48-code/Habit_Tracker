@@ -3,6 +3,7 @@ import { WifiOff, RefreshCw, CheckCircle2, AlertTriangle, CloudOff } from 'lucid
 import { Capacitor } from '@capacitor/core';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useSyncManager } from '../hooks/useSyncManager';
+import { getConnectionDetail } from '../lib/networkStatus';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function OfflineStatusBanner() {
@@ -20,9 +21,13 @@ export default function OfflineStatusBanner() {
   const [showSyncedSuccess, setShowSyncedSuccess] = useState(false);
   const [prevSyncing, setPrevSyncing] = useState(false);
   const [offlineToast, setOfflineToast] = useState(null);
+  const [checkFeedback, setCheckFeedback] = useState(null);
   const toastTimeoutRef = useRef(null);
+  const feedbackTimeoutRef = useRef(null);
+  const prevOnlineRef = useRef(isOnline);
 
   const isNative = Capacitor.isNativePlatform();
+  const connectionDetail = getConnectionDetail();
 
   const handleSyncClick = () => {
     if (!isOnline) {
@@ -33,6 +38,54 @@ export default function OfflineStatusBanner() {
     }
     triggerSync();
   };
+
+  const handleCheckConnection = async () => {
+    if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+    setCheckFeedback(null);
+
+    const reachable = await checkNow();
+    if (reachable) {
+      setCheckFeedback({ type: 'success', text: 'Connected' });
+      feedbackTimeoutRef.current = setTimeout(() => setCheckFeedback(null), 3000);
+    } else {
+      const detail = getConnectionDetail();
+      const text = detail === 'device_offline'
+        ? 'No internet connection'
+        : 'Server unreachable right now';
+      setCheckFeedback({ type: 'error', text });
+      feedbackTimeoutRef.current = setTimeout(() => setCheckFeedback(null), 4000);
+    }
+  };
+
+  // Automatically sync pending native actions and refetch visible page data when returning online
+  useEffect(() => {
+    const wasOffline = prevOnlineRef.current === false;
+    prevOnlineRef.current = isOnline;
+
+    if (wasOffline && isOnline) {
+      const dispatchRefetch = () => {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('habittracker-stats-updated', { detail: { source: 'connectivity-restored' } })
+          );
+        }
+      };
+
+      if (isNative) {
+        Promise.resolve(triggerSync()).finally(dispatchRefetch);
+      } else {
+        dispatchRefetch();
+      }
+    }
+  }, [isOnline, isNative, triggerSync]);
+
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+    };
+  }, []);
 
   // Track completion transition to display temporary success check
   useEffect(() => {
@@ -51,10 +104,14 @@ export default function OfflineStatusBanner() {
     setPrevSyncing(isSyncing);
   }, [isSyncing, prevSyncing, lastCycleSyncedCount, failedCount, stuckCount, totalQueued]);
 
-  // If online, not syncing, no failed/stuck items, and not showing success, stay hidden
-  if (isOnline && !isSyncing && failedCount === 0 && stuckCount === 0 && !showSyncedSuccess) {
+  const showConnectedBanner = isOnline && checkFeedback?.type === 'success';
+
+  // If online, not syncing, no failed/stuck items, and no status banner active, stay hidden
+  if (isOnline && !isSyncing && failedCount === 0 && stuckCount === 0 && !showSyncedSuccess && !showConnectedBanner) {
     return null;
   }
+
+  const inlineFailureText = offlineToast || (checkFeedback?.type === 'error' ? checkFeedback.text : null);
 
   return (
     <AnimatePresence>
@@ -74,7 +131,9 @@ export default function OfflineStatusBanner() {
               </span>
               <span className="text-slate-300">
                 {isNative
-                  ? 'No internet connection. Your changes are saved on this phone and will be updated to the cloud when the network is available.'
+                  ? (connectionDetail === 'server_unavailable'
+                    ? 'Cannot reach server right now. Your changes are saved on this phone and will sync when the server is reachable.'
+                    : 'No internet connection. Your changes are saved on this phone and will be updated to the cloud when the network is available.')
                   : 'You are offline. Connect to the internet to use HabiZ in the browser. Install the Android app to use it offline.'}
               </span>
               {pendingCount > 0 && (
@@ -84,11 +143,11 @@ export default function OfflineStatusBanner() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {offlineToast && (
-                <span className="text-[11px] text-amber-300/90 animate-fadeIn">{offlineToast}</span>
+              {inlineFailureText && (
+                <span className="text-[11px] text-amber-300/90 animate-fadeIn">{inlineFailureText}</span>
               )}
               <button
-                onClick={checkNow}
+                onClick={handleCheckConnection}
                 disabled={isChecking}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 border border-amber-500/30 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
               >
@@ -145,9 +204,14 @@ export default function OfflineStatusBanner() {
             <span className="font-semibold text-emerald-300">All changes synced</span>
             <span className="text-slate-300">Your cloud backup is up to date.</span>
           </div>
+        ) : showConnectedBanner ? (
+          <div className="bg-[#0e211a] border border-emerald-500/30 text-emerald-200 rounded-xl px-3.5 py-2 flex items-center gap-2 shadow-sm text-xs">
+            <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
+            <span className="font-semibold text-emerald-300">{checkFeedback.text}</span>
+            <span className="text-slate-300">Your connection to HabiZ is active.</span>
+          </div>
         ) : null}
       </motion.div>
     </AnimatePresence>
   );
 }
-

@@ -29,6 +29,7 @@ import { fetchAllPaginated } from '../lib/fetchAllPages';
 import { saveCachedData, getCachedData, enqueueOfflineAction } from '../lib/offlineDb';
 import { Capacitor } from '@capacitor/core';
 import { getOnlineStatus } from '../lib/networkStatus';
+import { useRefreshOnConnectivity } from '../hooks/useNetworkStatus';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const StatCard = ({ label, value, icon: Icon, colorClass, bgClass, children, onClick }) => (
@@ -237,22 +238,7 @@ export default function Dashboard() {
     if (session) fetchAll();
   }, [session, fetchAll]);
 
-  useEffect(() => {
-    let timer = null;
-    const handleUpdate = (e) => {
-      if (e?.detail?.source === 'dashboard') return;
-      if (!session) return;
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        fetchAll();
-      }, 250);
-    };
-    window.addEventListener('habittracker-stats-updated', handleUpdate);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('habittracker-stats-updated', handleUpdate);
-    };
-  }, [session, fetchAll]);
+  useRefreshOnConnectivity(fetchAll, { enabled: Boolean(session), ignoreSource: 'dashboard', delayMs: 250 });
 
   const lastCelebrationRef = useRef(0);
 
