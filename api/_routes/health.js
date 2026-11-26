@@ -1,6 +1,9 @@
 import supabase from './db-client.js';
+import { applyCors } from './cors.js';
 
 export default async function handler(req, res) {
+  if (applyCors(req, res)) return;
+
   if (typeof res.setHeader === 'function') {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   }

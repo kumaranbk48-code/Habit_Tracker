@@ -26,20 +26,27 @@ export function isOriginAllowed(origin) {
 }
 
 export function applyCors(req, res) {
-  const origin = req.headers.origin;
-  res.setHeader('Vary', 'Origin');
+  const origin = req?.headers?.origin;
+  if (typeof res?.setHeader === 'function') {
+    res.setHeader('Vary', 'Origin');
 
-  if (origin && isOriginAllowed(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
+    if (origin && isOriginAllowed(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    }
+
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-cron-secret, x-timezone, X-Client-Idempotency-Key');
+    res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count, X-Limit, X-Offset');
+    res.setHeader('Access-Control-Max-Age', '86400');
   }
 
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-cron-secret, x-timezone');
-  res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count, X-Limit, X-Offset');
-  res.setHeader('Access-Control-Max-Age', '86400');
-
-  if (req.method === 'OPTIONS') {
-    res.status(204).end();
+  if (req?.method === 'OPTIONS') {
+    const statusRes = res.status(204);
+    if (typeof statusRes?.end === 'function') {
+      statusRes.end();
+    } else if (typeof statusRes?.json === 'function') {
+      statusRes.json({});
+    }
     return true; // Request handled as preflight
   }
   return false;

@@ -15,6 +15,7 @@ import accountHandler from './_routes/account.js';
 import seasonsHandler from './_routes/seasons.js';
 import aiHandler from './_routes/ai.js';
 import healthHandler from './_routes/health.js';
+import { applyCors } from './_routes/cors.js';
 
 const ROUTE_MAP = {
   habits: habitsHandler,
@@ -64,6 +65,9 @@ function checkRateLimit(ip, isSensitive) {
 
 export default async function handler(req, res) {
   try {
+    // Apply CORS and preflight handling across every gateway route before routing or rate limiting
+    if (applyCors(req, res)) return;
+
     // 1. Parse route from request URL
     const urlObj = new URL(req.url, 'http://localhost');
     const pathSegments = urlObj.pathname.replace(/^\/api\/?/, '').split('/');
