@@ -6,30 +6,25 @@
  * positives behind captive portals, dead routers, or offline proxies).
  */
 
+export const DEFAULT_HEALTH_TIMEOUT_MS = 6000;
+export const DEFAULT_RETRY_DELAY_MS = 1000;
+
 let currentOnlineState = typeof navigator !== 'undefined' ? navigator.onLine : true;
 let connectionDetail = typeof navigator !== 'undefined' && !navigator.onLine ? 'device_offline' : 'online';
 let isCheckingHealth = false;
 let checkTimer = null;
+let inFlightCheck = null;
 const listeners = new Set();
 
-/**
- * Pings the lightweight /api/health?lite=1 endpoint with a strict timeout.
- * Separates device offline vs server unavailable.
- * @param {number} timeoutMs
- * @returns {Promise<boolean>}
- */
-export async function verifyServerReachability(timeoutMs = 3500) {
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    connectionDetail = 'device_offline';
-    setOnlineState(false);
-    return false;
-  }
+function sleep(ms) {
+  if (!ms || ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  isCheckingHealth = true;
-  notifyListeners();
-
+async function pingHealthOnce(timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  if (typeof timer?.unref === 'function') timer.unref();
 
   try {
     const res = await fetch(`/api/health?lite=1&_t=${Date.now()}`, {
@@ -39,20 +34,86 @@ export async function verifyServerReachability(timeoutMs = 3500) {
       signal: controller.signal,
     });
     clearTimeout(timer);
-
-    const reachable = res.ok && res.status === 200;
-    connectionDetail = reachable ? 'online' : 'server_unavailable';
-    setOnlineState(reachable);
-    return reachable;
-  } catch {
+    return { responded: true, status: res.status };
+  } catch (err) {
     clearTimeout(timer);
-    connectionDetail = 'server_unavailable';
+    return { responded: false, error: err };
+  }
+}
+
+/**
+ * Pings the lightweight /api/health?lite=1 endpoint with a strict timeout.
+ * Retries once on network failure before declaring offline, and treats any HTTP
+ * response (including 5xx) as proof the network itself works.
+ * @param {number|{timeoutMs?: number, retryDelayMs?: number}} [timeoutOrOptions]
+ * @returns {Promise<boolean>}
+ */
+export async function verifyServerReachability(timeoutOrOptions = DEFAULT_HEALTH_TIMEOUT_MS) {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    connectionDetail = 'device_offline';
     setOnlineState(false);
     return false;
-  } finally {
-    isCheckingHealth = false;
-    notifyListeners();
   }
+
+  if (inFlightCheck) {
+    return inFlightCheck;
+  }
+
+  const timeoutMs =
+    typeof timeoutOrOptions === 'number'
+      ? timeoutOrOptions
+      : (timeoutOrOptions?.timeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS);
+  const retryDelayMs =
+    typeof timeoutOrOptions === 'object' && timeoutOrOptions !== null
+      ? (timeoutOrOptions.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS)
+      : DEFAULT_RETRY_DELAY_MS;
+
+  inFlightCheck = (async () => {
+    isCheckingHealth = true;
+    notifyListeners();
+
+    try {
+      let result = await pingHealthOnce(timeoutMs);
+
+      if (!result.responded) {
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          connectionDetail = 'device_offline';
+          setOnlineState(false);
+          return false;
+        }
+
+        await sleep(retryDelayMs);
+
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          connectionDetail = 'device_offline';
+          setOnlineState(false);
+          return false;
+        }
+
+        result = await pingHealthOnce(timeoutMs);
+      }
+
+      if (result.responded) {
+        // Any HTTP response proves connectivity; 5xx sets detail without blocking sync
+        connectionDetail = result.status >= 500 ? 'server_unavailable' : 'online';
+        setOnlineState(true);
+        return true;
+      }
+
+      connectionDetail =
+        typeof navigator !== 'undefined' && !navigator.onLine
+          ? 'device_offline'
+          : 'server_unavailable';
+      setOnlineState(false);
+      return false;
+    } finally {
+      isCheckingHealth = false;
+      inFlightCheck = null;
+      notifyListeners();
+    }
+  })();
+
+  return inFlightCheck;
 }
 
 /**
@@ -70,7 +131,7 @@ function setOnlineState(newState) {
   if (changed && typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent('habiz-connectivity-status', {
-        detail: { isOnline: newState, timestamp: Date.now() },
+        detail: { isOnline: newState, timestamp: Date.now(), detail: connectionDetail },
       })
     );
   }
@@ -108,18 +169,26 @@ export function subscribeConnectivity(callback) {
 // ── Event Setup ──────────────────────────────────────────────────────────────
 if (typeof window !== 'undefined') {
   window.addEventListener('offline', () => {
+    connectionDetail = 'device_offline';
     setOnlineState(false);
   });
 
   window.addEventListener('online', () => {
     // When browser announces connection, verify actual server reachability
-    verifyServerReachability(3000);
+    verifyServerReachability(DEFAULT_HEALTH_TIMEOUT_MS);
   });
 
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      verifyServerReachability(3000);
-    }
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        verifyServerReachability(DEFAULT_HEALTH_TIMEOUT_MS);
+      }
+    });
+  }
+
+  // Verify reachability right at app startup after initial module graph setup
+  queueMicrotask(() => {
+    verifyServerReachability(DEFAULT_HEALTH_TIMEOUT_MS);
   });
 
   // Background heartbeat every 60s while online, 20s if offline
@@ -127,11 +196,11 @@ if (typeof window !== 'undefined') {
     if (checkTimer) clearTimeout(checkTimer);
     const interval = currentOnlineState ? 60000 : 20000;
     checkTimer = setTimeout(async () => {
-      await verifyServerReachability(3500);
+      await verifyServerReachability(DEFAULT_HEALTH_TIMEOUT_MS);
       scheduleHeartbeat();
     }, interval);
+    if (typeof checkTimer?.unref === 'function') checkTimer.unref();
   };
 
   scheduleHeartbeat();
 }
-

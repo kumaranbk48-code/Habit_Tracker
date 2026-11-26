@@ -17,7 +17,7 @@ export function useNetworkStatus() {
   }, []);
 
   const checkNow = useCallback(async () => {
-    return await verifyServerReachability(3000);
+    return await verifyServerReachability(6000);
   }, []);
 
   return {
@@ -27,3 +27,33 @@ export function useNetworkStatus() {
   };
 }
 
+/**
+ * Refetches current page data when offline-sync / stats-updated events fire
+ * or when connectivity transitions back online.
+ */
+export function useRefreshOnConnectivity(
+  refreshFn,
+  { enabled = true, ignoreSource = null, delayMs = 200 } = {}
+) {
+  useEffect(() => {
+    if (!enabled || typeof window === 'undefined') return undefined;
+    let timer = null;
+    const schedule = (e) => {
+      if (ignoreSource && e?.detail?.source === ignoreSource) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        refreshFn();
+      }, delayMs);
+    };
+    const handleConnectivity = (e) => {
+      if (e?.detail?.isOnline) schedule(e);
+    };
+    window.addEventListener('habittracker-stats-updated', schedule);
+    window.addEventListener('habiz-connectivity-status', handleConnectivity);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('habittracker-stats-updated', schedule);
+      window.removeEventListener('habiz-connectivity-status', handleConnectivity);
+    };
+  }, [enabled, refreshFn, ignoreSource, delayMs]);
+}

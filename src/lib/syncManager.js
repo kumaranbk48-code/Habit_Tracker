@@ -132,7 +132,7 @@ export async function syncOfflineQueue(userId, accessToken) {
 
   // Ensure network is genuinely reachable before attempting sync
   if (!getOnlineStatus()) {
-    const reachable = await verifyServerReachability(2500);
+    const reachable = await verifyServerReachability(6000);
     if (!reachable) {
       console.log('[SyncManager] Cannot sync: offline.');
       return { success: false, syncedCount: 0, errorCount: 0 };
