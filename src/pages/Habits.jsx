@@ -1103,7 +1103,7 @@ export default function Habits() {
                       {/* Completion Action */}
                       <div className="pt-3 border-t border-white/[0.05] flex flex-wrap items-center justify-between gap-2 min-w-0">
                         {habit.tracking_type === 'quantity' ? (
-                          <div className="min-w-0 flex-1">
+                          <div className="min-w-[104px] flex-1 max-w-full">
                             <QuantityTracker
                               current={quantityDone}
                               target={habit.target_quantity}
