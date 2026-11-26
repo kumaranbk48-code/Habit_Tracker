@@ -1040,7 +1040,7 @@ export default function Habits() {
             </div>
           ) : viewMode === 'grid' ? (
             /* Visual Card Grid View */
-            <motion.div layout className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            <motion.div layout className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 min-w-0">
               <AnimatePresence mode="popLayout">
                 {filteredHabits.map((habit) => {
                   const done = isCompleted(habit.id);
@@ -1055,20 +1055,20 @@ export default function Habits() {
                       whileHover={{ y: -3 }}
                       transition={{ duration: 0.2 }}
                       key={habit.id}
-                      className={`habiz-panel p-5 rounded-2xl transition-colors duration-200 flex flex-col justify-between group ${
+                      className={`habiz-panel p-5 rounded-2xl transition-colors duration-200 flex flex-col justify-between group min-w-0 overflow-hidden ${
                         done
                           ? 'border-teal-500/30 bg-gradient-to-b from-teal-950/20 to-transparent'
                           : 'hover:border-white/15'
                       } ${poppingHabit === habit.id ? 'habit-pop' : ''}`}
                     >
-                      <div>
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex items-center gap-2.5">
+                      <div className="min-w-0">
+                        <div className="flex items-start justify-between gap-2 mb-3 min-w-0">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
                             <div
                               className="w-3.5 h-3.5 rounded-full flex-shrink-0"
                               style={{ backgroundColor: getHabitColor(habit) }}
                             />
-                            <div>
+                            <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-1.5 flex-wrap mb-1">
                                 <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-white/[0.04] text-slate-300 border border-white/[0.06]">
                                   {habit.category}
@@ -1079,14 +1079,14 @@ export default function Habits() {
                                   </span>
                                 )}
                               </div>
-                              <h3 className="font-bold text-white text-base leading-tight">
+                              <h3 className="font-bold text-white text-base leading-tight break-words">
                                 {habit.habit_name}
                               </h3>
                             </div>
                           </div>
 
                           {habit.time_of_day && habit.time_of_day !== 'anytime' && (
-                            <span className="px-2 py-0.5 rounded-md text-[10px] uppercase font-bold bg-white/[0.04] text-slate-400 border border-white/[0.04]">
+                            <span className="px-2 py-0.5 rounded-md text-[10px] uppercase font-bold bg-white/[0.04] text-slate-400 border border-white/[0.04] flex-shrink-0">
                               {habit.time_of_day}
                             </span>
                           )}
@@ -1107,31 +1107,33 @@ export default function Habits() {
                       </div>
 
                       {/* Completion Action */}
-                      <div className="pt-3 border-t border-white/[0.05] flex items-center justify-between">
+                      <div className="pt-3 border-t border-white/[0.05] flex flex-wrap items-center justify-between gap-2 min-w-0">
                         {habit.tracking_type === 'quantity' ? (
-                          <QuantityTracker
-                            current={quantityDone}
-                            target={habit.target_quantity}
-                            unit={habit.unit}
-                            onAdd={(amt) => handleLogQuantity(habit.id, amt)}
-                            onReset={() => handleLogQuantity(habit.id, null, true)}
-                          />
+                          <div className="min-w-0 flex-1">
+                            <QuantityTracker
+                              current={quantityDone}
+                              target={habit.target_quantity}
+                              unit={habit.unit}
+                              onAdd={(amt) => handleLogQuantity(habit.id, amt)}
+                              onReset={() => handleLogQuantity(habit.id, null, true)}
+                            />
+                          </div>
                         ) : (
                           <motion.button
                             whileTap={{ scale: 0.92 }}
                             onClick={() => toggleHabit(habit.id)}
-                            className={`flex items-center justify-center gap-2 min-h-[40px] px-4 py-2 rounded-xl text-xs font-bold transition-colors duration-200 border cursor-pointer ${
+                            className={`flex items-center justify-center gap-2 min-h-[40px] px-4 py-2 rounded-xl text-xs font-bold transition-colors duration-200 border cursor-pointer min-w-0 max-w-full ${
                               done
                                 ? 'bg-[#178274] border-teal-500 text-white shadow-md shadow-teal-950/40'
                                 : 'bg-white/[0.03] hover:bg-[#178274]/20 border-white/[0.08] text-slate-300 hover:text-white hover:border-teal-500/40'
                             }`}
                           >
-                            <Check size={15} className={done ? 'text-white' : 'text-slate-400'} />
-                            {done ? 'Completed ✓' : 'Mark Done'}
+                            <Check size={15} className={`flex-shrink-0 ${done ? 'text-white' : 'text-slate-400'}`} />
+                            <span className="truncate">{done ? 'Completed ✓' : 'Mark Done'}</span>
                           </motion.button>
                         )}
 
-                        <div className="flex items-center gap-1">
+                        <div className="flex flex-wrap items-center justify-end gap-1 ml-auto">
                           <button
                             type="button"
                             onClick={() => handleTogglePause(habit)}

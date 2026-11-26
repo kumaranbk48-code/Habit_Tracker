@@ -26,12 +26,12 @@ export default function QuantityTracker({ current = 0, target = 0, unit = '', on
   };
 
   return (
-    <div className="min-w-[170px]">
-      <div className="flex items-center justify-between mb-1">
-        <span className={`text-xs font-semibold ${done ? 'text-[#2f6b5c] dark:text-[#7fd1b9]' : 'text-gray-700 dark:text-gray-300'}`}>
+    <div className="min-w-0 max-w-full">
+      <div className="flex items-center justify-between gap-1 mb-1 min-w-0">
+        <span className={`text-xs font-semibold truncate ${done ? 'text-[#2f6b5c] dark:text-[#7fd1b9]' : 'text-gray-700 dark:text-gray-300'}`}>
           {displayNum(safeCurrent)} / {displayNum(safeTarget)} {unit}
         </span>
-        {done && <span className="text-xs">✅</span>}
+        {done && <span className="text-xs flex-shrink-0">✅</span>}
       </div>
       <div className="h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden mb-2">
         <div
@@ -39,7 +39,7 @@ export default function QuantityTracker({ current = 0, target = 0, unit = '', on
           style={{ width: `${pct}%` }}
         />
       </div>
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1 min-w-0">
         <input
           type="number"
           step="any"
@@ -48,7 +48,7 @@ export default function QuantityTracker({ current = 0, target = 0, unit = '', on
           onChange={(e) => setAmount(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAdd(); } }}
           placeholder="Amount"
-          className="w-16 px-2 py-1 text-xs border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-[#3d7a75] outline-none dark:text-gray-100 dark:bg-gray-800"
+          className="w-16 min-w-0 px-2 py-1 text-xs border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-[#3d7a75] outline-none dark:text-gray-100 dark:bg-gray-800"
         />
         <button
           onClick={handleAdd}
