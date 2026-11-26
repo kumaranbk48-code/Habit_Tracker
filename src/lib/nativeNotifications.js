@@ -2,6 +2,14 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { enqueueOfflineAction, getCachedData, saveCachedData } from './offlineDb.js';
 import { getOnlineStatus } from './networkStatus.js';
+import {
+  buildReminderDisplayCopy,
+  getDeadlineFireDateYMD,
+  getReminderActionMode,
+  isReminderTargetCompleted,
+  parseLocalYMD,
+} from './goalReminderUtils.js';
+import { executeReminderDone } from './goalReminderActions.js';
 
 export const isNative = Capacitor.isNativePlatform();
 export const NativeAlarmScheduler = registerPlugin('NativeAlarmScheduler');
@@ -166,8 +174,10 @@ export function shouldSkipInAppAlarmFire(reminder, params = {}) {
     nowMs = Date.now(),
     completedHabits = new Set(),
     completedGoals = new Set(),
+    completedMilestones = new Set(),
     completedLearning = new Set(),
     handledHabitDates = new Set(),
+    ackedReminderDates = new Set(),
     recentSnoozes = new Map(),
     firedKeys = new Set(),
   } = params;
@@ -175,6 +185,9 @@ export function shouldSkipInAppAlarmFire(reminder, params = {}) {
   const triggerKey = `${reminder.id}_${todayYMD}_${currentTime}`;
   if (firedKeys?.has(triggerKey)) {
     return { skip: true, reason: 'already_fired_or_handled_minute' };
+  }
+  if (reminder.id && ackedReminderDates?.has(`${reminder.id}:${todayYMD}`)) {
+    return { skip: true, reason: 'acked_today' };
   }
 
   const type = (reminder.target_type || 'habit').toLowerCase();
@@ -190,10 +203,24 @@ export function shouldSkipInAppAlarmFire(reminder, params = {}) {
     if (typeof snoozedAt === 'number' && (nowMs - snoozedAt) >= 0 && (nowMs - snoozedAt) < SNOOZE_COOLDOWN_MS) {
       return { skip: true, reason: 'recent_native_snooze' };
     }
-  } else if (type === 'goal' && reminder.goal_id && completedGoals?.has(reminder.goal_id)) {
-    return { skip: true, reason: 'completed_goal' };
-  } else if ((type === 'learning_journey' || type === 'learning_topic' || type === 'learning') && completedLearning?.has(reminder.journey_id || reminder.topic_id)) {
-    return { skip: true, reason: 'completed_learning' };
+  } else if (type === 'goal') {
+    if (reminder.milestone_id && (completedMilestones?.has(reminder.milestone_id) || reminder.goal_milestones?.completed === true)) {
+      return { skip: true, reason: 'completed_milestone' };
+    }
+    if (reminder.goal_id && (completedGoals?.has(reminder.goal_id) || reminder.goals?.status === 'Completed')) {
+      return { skip: true, reason: 'completed_goal' };
+    }
+  } else if (type === 'learning_topic' || (type === 'learning_journey' && reminder.topic_id)) {
+    if (
+      (reminder.topic_id && (completedLearning?.has(reminder.topic_id) || reminder.learning_topics?.status === 'Completed')) ||
+      (reminder.journey_id && (completedLearning?.has(reminder.journey_id) || reminder.learning_journeys?.status === 'Completed'))
+    ) {
+      return { skip: true, reason: 'completed_learning' };
+    }
+  } else if (type === 'learning_journey' || type === 'learning') {
+    if (reminder.journey_id && (completedLearning?.has(reminder.journey_id) || reminder.learning_journeys?.status === 'Completed')) {
+      return { skip: true, reason: 'completed_learning' };
+    }
   }
 
   return { skip: false };
@@ -275,6 +302,14 @@ export async function initNativeNotifications() {
           id: 'HABIT_REMINDER_ACTIONS',
           actions: [
             { id: 'complete', title: '✅ Mark Done' },
+            { id: 'snooze', title: '⏰ Snooze 10m' },
+            { id: 'dismiss', title: '❌ Dismiss', destructive: true },
+          ],
+        },
+        {
+          id: 'GOAL_OPEN_REMINDER_ACTIONS',
+          actions: [
+            { id: 'open', title: 'Open' },
             { id: 'snooze', title: '⏰ Snooze 10m' },
             { id: 'dismiss', title: '❌ Dismiss', destructive: true },
           ],
@@ -392,16 +427,22 @@ export async function requestFullScreenIntentPermission() {
  * Build notification schemas for a reminder over the upcoming week or on a deadline date.
  */
 export function buildNotificationsForReminder(reminder, targetName = '', options = {}) {
-  const isAlarmEvent = Boolean(
+  const type = reminder.target_type || 'habit';
+  const rawIsAlarm = Boolean(
     reminder.is_alarm === true ||
     reminder.is_alarm === 'true' ||
     reminder.is_alarm === 1 ||
     reminder.is_alarm === 't' ||
     reminder.reminder_mode === 'alarm'
   );
-
-  const type = reminder.target_type || 'habit';
+  // Keep alarm takeover strictly for habits; goal & learning reminders use normal notifications
+  const isAlarmEvent = type === 'habit' && rawIsAlarm;
   const isDeadlineMode = reminder.reminder_mode === 'deadline_proximity';
+
+  // Skip completed goals, milestones, learning topics, or learning journeys
+  if (isReminderTargetCompleted(reminder, options)) {
+    return [];
+  }
 
   // Parse alert times
   let rawAlerts = reminder.alerts;
@@ -431,27 +472,37 @@ export function buildNotificationsForReminder(reminder, targetName = '', options
   }
   const isEveryday = !Array.isArray(daysList) || daysList.length === 0 || daysList.some((d) => d === 'everyday' || d === 'daily' || d === 'all');
 
-  const itemName = targetName || (
-    type === 'habit' ? (reminder.habits?.habit_name || reminder.habit_name || 'Daily Habit')
-    : type === 'goal' ? (reminder.goals?.goal_name || reminder.goal_name || 'Goal')
-    : (reminder.learning_topics?.title || reminder.learning_journeys?.title || reminder.topic_title || 'Study Session')
-  );
-
+  let itemName = targetName;
   let title = '🔔 HabiZ Reminder';
-  let body = reminder.custom_text || `Time for ${itemName}!`;
+  let body = reminder.custom_text || 'Time for your reminder!';
+  let milestoneTitle = '';
 
   if (type === 'habit') {
+    itemName = targetName || reminder.habits?.habit_name || reminder.habit_name || 'Daily Habit';
     title = isAlarmEvent ? `🚨 ALARM: ${itemName}` : `🔥 Habit: ${itemName}`;
     body = reminder.custom_text
       ? `${reminder.custom_text} • Habit: ${itemName}`
       : (isAlarmEvent ? `Urgent: Time to complete "${itemName}"! Protect your streak.` : `Time to complete "${itemName}"! Protect your streak now.`);
-  } else if (type === 'goal') {
-    title = isAlarmEvent ? `🚨 ALARM: ${itemName}` : `🎯 Goal: ${itemName}`;
-    body = reminder.custom_text || `Time to log progress for Goal: "${itemName}"!`;
-  } else if (type === 'learning_journey' || type === 'learning_topic') {
-    title = isAlarmEvent ? `🚨 ALARM: ${itemName}` : `📚 Learning: ${itemName}`;
-    body = reminder.custom_text || `Time for your study session on "${itemName}"!`;
+  } else {
+    const copy = buildReminderDisplayCopy(reminder, targetName);
+    itemName = copy.itemName;
+    title = copy.title;
+    body = copy.body;
+    milestoneTitle = copy.milestoneTitle || '';
   }
+
+  const hasMilestones = Boolean(
+    reminder.goal_has_milestones ||
+    reminder.hasMilestones ||
+    reminder.milestone_id ||
+    (reminder.goal_id && options.goalMilestonesMap?.get?.(reminder.goal_id)?.length > 0)
+  );
+  const actionMode = getReminderActionMode(reminder, hasMilestones);
+  const actionTypeId = isAlarmEvent
+    ? 'HABIT_ALARM_ACTIONS'
+    : (actionMode === 'confirm_goal' || actionMode === 'confirm_journey')
+    ? 'GOAL_OPEN_REMINDER_ACTIONS'
+    : 'HABIT_REMINDER_ACTIONS';
 
   const now = options.now instanceof Date ? options.now : new Date();
   const notifications = [];
@@ -459,66 +510,52 @@ export function buildNotificationsForReminder(reminder, targetName = '', options
   const longDayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const reminderId = reminder.id || `rem_${reminder.habit_id || reminder.goal_id || Date.now()}`;
 
-  if (isDeadlineMode) {
-    // If goal or learning activity is already completed, do not schedule
-    if (type === 'goal' && reminder.goal_id && options.completedGoalIds?.has(reminder.goal_id)) {
-      return [];
-    }
-    if ((type === 'learning_journey' || type === 'learning_topic') && options.completedLearningIds?.has(reminder.journey_id || reminder.topic_id)) {
-      return [];
-    }
+  const sharedExtra = {
+    reminderId,
+    habitId: reminder.habit_id || null,
+    goalId: reminder.goal_id || null,
+    milestoneId: reminder.milestone_id || null,
+    journeyId: reminder.journey_id || null,
+    topicId: reminder.topic_id || null,
+    hasMilestones,
+    milestoneTitle,
+    reminderMode: reminder.reminder_mode || 'scheduled',
+    isAlarm: isAlarmEvent,
+    targetType: type,
+    itemName,
+    customText: reminder.custom_text || '',
+  };
 
-    const targetDateStr = reminder.target_date || reminder.goals?.target_date || reminder.learning_topics?.target_date || reminder.learning_journeys?.target_date;
-    if (targetDateStr) {
-      const daysBefore = Number(reminder.days_before_deadline) || 0;
-      const targetParts = targetDateStr.split('-').map((n) => parseInt(n, 10));
-      if (targetParts.length === 3) {
-        const fireDate = new Date(targetParts[0], targetParts[1] - 1, targetParts[2] - daysBefore);
-        for (const timeStr of timeList) {
-          const [hh, mm] = timeStr.split(':').map((n) => parseInt(n, 10));
-          const scheduleAt = new Date(fireDate.getFullYear(), fireDate.getMonth(), fireDate.getDate(), hh, mm, 0, 0);
-          if (scheduleAt.getTime() > now.getTime()) {
-            const uniqueKey = `${reminderId}_${scheduleAt.getTime()}`;
-            notifications.push({
-              id: hashStringToId(uniqueKey),
-              title,
-              body,
-              schedule: {
-                at: scheduleAt,
-                allowWhileIdle: true,
-              },
-              channelId: isAlarmEvent ? 'habiz_alarm_channel' : 'habiz_reminder_channel',
-              actionTypeId: isAlarmEvent ? 'HABIT_ALARM_ACTIONS' : 'HABIT_REMINDER_ACTIONS',
-              sound: isAlarmEvent ? 'alarm.wav' : undefined,
-              isExactNotification: true,
-              isExactMandatory: false,
-              foreground: true,
-              isRecurring: false,
-              extra: {
-                reminderId,
-                habitId: reminder.habit_id,
-                goalId: reminder.goal_id,
-                journeyId: reminder.journey_id,
-                topicId: reminder.topic_id,
-                isAlarm: isAlarmEvent,
-                targetType: type,
-                itemName,
-                customText: reminder.custom_text || '',
-              },
-            });
-          }
+  if (isDeadlineMode) {
+    const fireYMD = getDeadlineFireDateYMD(reminder);
+    const fireDate = fireYMD ? parseLocalYMD(fireYMD) : null;
+    if (fireDate) {
+      for (const timeStr of timeList) {
+        const [hh, mm] = timeStr.split(':').map((n) => parseInt(n, 10));
+        const scheduleAt = new Date(fireDate.getFullYear(), fireDate.getMonth(), fireDate.getDate(), hh, mm, 0, 0);
+        if (scheduleAt.getTime() > now.getTime()) {
+          const uniqueKey = `${reminderId}_${scheduleAt.getTime()}`;
+          notifications.push({
+            id: hashStringToId(uniqueKey),
+            title,
+            body,
+            schedule: {
+              at: scheduleAt,
+              allowWhileIdle: true,
+            },
+            channelId: isAlarmEvent ? 'habiz_alarm_channel' : 'habiz_reminder_channel',
+            actionTypeId,
+            sound: isAlarmEvent ? 'alarm.wav' : undefined,
+            isExactNotification: true,
+            isExactMandatory: false,
+            foreground: true,
+            isRecurring: false,
+            extra: sharedExtra,
+          });
         }
       }
     }
   } else {
-    // If goal or learning activity is already completed globally, do not schedule
-    if (type === 'goal' && reminder.goal_id && options.completedGoalIds?.has(reminder.goal_id)) {
-      return [];
-    }
-    if ((type === 'learning_journey' || type === 'learning_topic') && options.completedLearningIds?.has(reminder.journey_id || reminder.topic_id)) {
-      return [];
-    }
-
     // Schedule occurrences for the next 8 days (0..7) so single-weekday reminders
     // whose time already passed today still schedule for next week's same day.
     for (let dayOffset = 0; dayOffset < 8; dayOffset++) {
@@ -555,7 +592,7 @@ export function buildNotificationsForReminder(reminder, targetName = '', options
             allowWhileIdle: true,
           },
           channelId: isAlarmEvent ? 'habiz_alarm_channel' : 'habiz_reminder_channel',
-          actionTypeId: isAlarmEvent ? 'HABIT_ALARM_ACTIONS' : 'HABIT_REMINDER_ACTIONS',
+          actionTypeId,
           sound: isAlarmEvent ? 'alarm.wav' : undefined,
           isExactNotification: true,
           isExactMandatory: false,
@@ -563,17 +600,7 @@ export function buildNotificationsForReminder(reminder, targetName = '', options
           isRecurring: true,
           timeStr,
           daysOfWeek: Array.isArray(daysList) ? daysList.join(',') : '',
-          extra: {
-            reminderId,
-            habitId: reminder.habit_id,
-            goalId: reminder.goal_id,
-            journeyId: reminder.journey_id,
-            topicId: reminder.topic_id,
-            isAlarm: isAlarmEvent,
-            targetType: type,
-            itemName,
-            customText: reminder.custom_text || '',
-          },
+          extra: sharedExtra,
         });
       }
     }
@@ -670,13 +697,14 @@ export async function scheduleSingleNativeReminder(reminder, targetName = '') {
       return { success: true, count: 0 };
     }
 
-    const isAlarmEvent = Boolean(
+    const rawIsAlarm = Boolean(
       reminder.is_alarm === true ||
       reminder.is_alarm === 'true' ||
       reminder.is_alarm === 1 ||
       reminder.is_alarm === 't' ||
       reminder.reminder_mode === 'alarm'
     );
+    const isAlarmEvent = (reminder.target_type || 'habit') === 'habit' && rawIsAlarm;
 
     if (isAlarmEvent) {
       // 3a. User-facing Alarm: schedule with dedicated native AlarmManager.setAlarmClock()
@@ -731,8 +759,10 @@ export async function syncNativeReminders(
     ? completionData
     : (completionData?.completedHabitIds || new Set());
   const completedGoalIds = completionData?.completedGoalIds || new Set();
+  const completedMilestoneIds = completionData?.completedMilestoneIds || new Set();
   const completedLearningIds = completionData?.completedLearningIds || new Set();
-  const today = completionData?.today || new Date().toISOString().split('T')[0];
+  const goalMilestonesMap = completionData?.goalMilestonesMap || null;
+  const today = completionData?.today || formatLocalYmd();
 
   if (isSyncingNative) {
     console.log(`[NativeSync] Native synchronization already in flight. Queuing follow-up sync (reason: '${reason}')`);
@@ -765,18 +795,21 @@ export async function syncNativeReminders(
       const status = (reminder.notification_status || 'active').toLowerCase();
       if (status !== 'active') continue;
 
-      const isAlarmEvent = Boolean(
+      const rawIsAlarm = Boolean(
         reminder.is_alarm === true ||
         reminder.is_alarm === 'true' ||
         reminder.is_alarm === 1 ||
         reminder.is_alarm === 't' ||
         reminder.reminder_mode === 'alarm'
       );
+      const isAlarmEvent = (reminder.target_type || 'habit') === 'habit' && rawIsAlarm;
 
       const notifs = buildNotificationsForReminder(reminder, '', {
         completedHabitIds,
         completedGoalIds,
+        completedMilestoneIds,
         completedLearningIds,
+        goalMilestonesMap,
       });
       if (isAlarmEvent) {
         for (const n of notifs) {
@@ -1088,6 +1121,31 @@ async function runProcessPendingAlarmActions(session, options = {}) {
           await updateOfflineTrackingCaches(userId, habitId, date, isQuantity ? targetQty : undefined);
         }
         completedItems.push({ habitId, date });
+        if (act.id) ackIds.push(act.id);
+        if (act.timestamp) ackTimestamps.push(act.timestamp);
+      }
+    } else if (type === 'complete' && (targetType === 'goal' || targetType === 'learning_topic' || targetType === 'learning_journey')) {
+      const doneResult = await executeReminderDone({
+        reminder: {
+          id: act.reminderId || null,
+          target_type: targetType,
+          goal_id: act.goalId || null,
+          milestone_id: act.milestoneId || null,
+          journey_id: act.journeyId || null,
+          topic_id: act.topicId || null,
+          hasMilestones: Boolean(act.hasMilestones),
+          reminder_mode: act.reminderMode || 'scheduled',
+        },
+        session,
+        isNativePlatform: true,
+        isOnline: Boolean(getOnlineFn()),
+        hasMilestones: Boolean(act.hasMilestones),
+        fetchImpl: fetchFn,
+        enqueueAction: enqueueFn,
+        storage,
+        todayYMD: act.date || formatLocalYmd(),
+      });
+      if (doneResult?.ok) {
         if (act.id) ackIds.push(act.id);
         if (act.timestamp) ackTimestamps.push(act.timestamp);
       }

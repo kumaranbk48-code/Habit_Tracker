@@ -4,6 +4,7 @@ import { Menu } from 'lucide-react';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import AlarmTakeoverModal from './AlarmTakeoverModal';
+import GoalLearningReminderPrompt from './GoalLearningReminderPrompt';
 import OfflineStatusBanner from './OfflineStatusBanner';
 import { useReminderScheduler } from '../hooks/useReminderScheduler';
 
@@ -90,6 +91,8 @@ export default function Layout({ children } = {}) {
 
       {/* Full-Screen Unskippable Alarm Takeover Overlay */}
       <AlarmTakeoverModal />
+      {/* Interactive Goal & Learning Reminder Confirm / Prompt Card */}
+      <GoalLearningReminderPrompt />
     </div>
   );
 }

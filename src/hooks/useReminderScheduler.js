@@ -4,7 +4,6 @@ import {
   isNative,
   syncNativeReminders,
   setupNativeNotificationListeners,
-  hashStringToId,
   recordNativeCompletion,
   recordNativeUncompletion,
   processPendingAlarmActions,
@@ -13,8 +12,22 @@ import {
   markFiredAlarmKey,
   shouldSkipInAppAlarmFire,
 } from '../lib/nativeNotifications';
+import {
+  buildReminderDisplayCopy,
+  formatLocalYMD,
+  getDeadlineFireDateYMD,
+  getReminderActionMode,
+  isReminderTargetCompleted,
+} from '../lib/goalReminderUtils';
+import {
+  executeReminderDone,
+  getAckedReminderDates,
+  hasShownCatchUpToday,
+  isReminderAckedForDate,
+  markCatchUpShownToday,
+} from '../lib/goalReminderActions';
+import { getOnlineStatus } from '../lib/networkStatus';
 import { getCachedData } from '../lib/offlineDb';
-import { LocalNotifications } from '@capacitor/local-notifications';
 
 function getTimeValue(val) {
   if (!val) return '';
@@ -29,6 +42,20 @@ function getTimeValue(val) {
     return `${cleanH}:${cleanM}`;
   }
   return '';
+}
+
+function getReminderAlertsList(reminder) {
+  let rawAlerts = reminder.alerts;
+  if (typeof rawAlerts === 'string') {
+    try {
+      rawAlerts = JSON.parse(rawAlerts);
+    } catch {
+      rawAlerts = rawAlerts.replace(/[{}"']/g, '').split(',').map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  const alertsArr = Array.isArray(rawAlerts) ? rawAlerts : (rawAlerts ? [rawAlerts] : []);
+  const allTimes = [...alertsArr, reminder.reminder_time];
+  return Array.from(new Set(allTimes.map(getTimeValue).filter(Boolean)));
 }
 
 export function useReminderScheduler() {
@@ -48,12 +75,78 @@ export function useReminderScheduler() {
 
   const completedHabitsRef = useRef(new Set());
   const completedGoalsRef = useRef(new Set());
+  const completedMilestonesRef = useRef(new Set());
   const completedLearningRef = useRef(new Set());
+  const goalMilestonesMapRef = useRef(new Map());
   const repingEventsRef = useRef([]);
   const statsRef = useRef(null);
   const lastMinuteLoggedRef = useRef('');
   const isRefreshingRef = useRef(false);
   const pendingRefreshReasonRef = useRef(null);
+
+  const runDeadlineCatchUps = useCallback((activeReminders, now = new Date()) => {
+    if (!Array.isArray(activeReminders) || activeReminders.length === 0) return;
+    const todayYMD = formatLocalYMD(now);
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const nativeState = getHandledNativeState(now.getTime());
+
+    for (const rem of activeReminders) {
+      if ((rem.notification_status || 'Active').toLowerCase() !== 'active') continue;
+      if (rem.reminder_mode !== 'deadline_proximity') continue;
+      const type = (rem.target_type || 'habit').toLowerCase();
+      if (type === 'habit') continue;
+
+      if (
+        isReminderTargetCompleted(rem, {
+          completedGoalIds: completedGoalsRef.current,
+          completedMilestoneIds: completedMilestonesRef.current,
+          completedLearningIds: completedLearningRef.current,
+        })
+      ) {
+        continue;
+      }
+
+      const fireYMD = getDeadlineFireDateYMD(rem);
+      if (fireYMD !== todayYMD) continue;
+
+      if (isReminderAckedForDate(rem.id, todayYMD)) continue;
+      if (hasShownCatchUpToday(rem.id, todayYMD)) continue;
+
+      const alertsList = getReminderAlertsList(rem);
+      const passedTime = alertsList.find((t) => t < currentTime);
+      const dueNow = alertsList.includes(currentTime);
+      // Only trigger catch-up for alerts that already passed earlier today (not already fired while open)
+      if (!passedTime || dueNow) continue;
+
+      const alreadyFiredEarlier = alertsList.some((t) => {
+        const k = `${rem.id}_${todayYMD}_${t}`;
+        return firedRef.current.has(k) || nativeState.firedKeys.has(k);
+      });
+      if (alreadyFiredEarlier) continue;
+
+      markCatchUpShownToday(rem.id, todayYMD);
+
+      const copy = buildReminderDisplayCopy(rem);
+      const hasMilestones = Boolean(
+        rem.goal_has_milestones ||
+        rem.milestone_id ||
+        (rem.goal_id && goalMilestonesMapRef.current.get(rem.goal_id)?.length > 0)
+      );
+
+      window.dispatchEvent(
+        new CustomEvent('habittracker-reminder-fired', {
+          detail: {
+            reminder: rem,
+            title: copy.title,
+            body: copy.body,
+            url: copy.url,
+            hasMilestones,
+            isCatchUp: true,
+          },
+        })
+      );
+    }
+  }, []);
 
   // Fetch and cache active reminders, today's completions, and reping statuses
   const refreshReminders = useCallback(async (reason = 'manual') => {
@@ -69,7 +162,7 @@ export function useReminderScheduler() {
     console.log(`[ReminderScheduler] Starting refresh (reason: '${reason}')`);
 
     const d = new Date();
-    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const today = formatLocalYMD(d);
 
     try {
       // Process durable native alarm actions FIRST and wait before server fetch / syncNativeCompletions
@@ -84,7 +177,7 @@ export function useReminderScheduler() {
         }
       }
 
-      const [remRes, trackRes, repingRes, dashRes, goalsRes] = await Promise.all([
+      const [remRes, trackRes, repingRes, dashRes, goalsRes, milestonesRes] = await Promise.all([
         fetch('/api/reminders', {
           headers: { Authorization: `Bearer ${session.access_token}` },
         }),
@@ -100,7 +193,12 @@ export function useReminderScheduler() {
         fetch('/api/goals', {
           headers: { Authorization: `Bearer ${session.access_token}` },
         }),
+        fetch('/api/milestones', {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }).catch(() => null),
       ]);
+
+      let activeRemindersList = remindersRef.current || [];
 
       if (remRes.ok) {
         const data = await remRes.json();
@@ -110,9 +208,10 @@ export function useReminderScheduler() {
             return s === 'active';
           });
           remindersRef.current = activeOnly;
+          activeRemindersList = activeOnly;
 
-          // Extract completed learning journeys and topics
           const completedLearning = new Set();
+          const completedMsFromReminders = new Set();
           for (const r of activeOnly) {
             if (r.learning_journeys?.status === 'Completed' && r.journey_id) {
               completedLearning.add(r.journey_id);
@@ -120,8 +219,14 @@ export function useReminderScheduler() {
             if (r.learning_topics?.status === 'Completed' && r.topic_id) {
               completedLearning.add(r.topic_id);
             }
+            if (r.goal_milestones?.completed === true && r.milestone_id) {
+              completedMsFromReminders.add(r.milestone_id);
+            }
           }
           completedLearningRef.current = completedLearning;
+          for (const msId of completedMsFromReminders) {
+            completedMilestonesRef.current.add(msId);
+          }
 
           // Also post to SW as fallback
           if ('serviceWorker' in navigator && swRegRef.current) {
@@ -158,6 +263,24 @@ export function useReminderScheduler() {
         }
       }
 
+      if (milestonesRes && milestonesRes.ok) {
+        const milestonesData = await milestonesRes.json().catch(() => []);
+        if (Array.isArray(milestonesData)) {
+          const completedMs = new Set();
+          const byGoal = new Map();
+          for (const m of milestonesData) {
+            if (m.completed === true && m.id) completedMs.add(m.id);
+            if (m.goal_id) {
+              const list = byGoal.get(m.goal_id) || [];
+              list.push(m);
+              byGoal.set(m.goal_id, list);
+            }
+          }
+          completedMilestonesRef.current = completedMs;
+          goalMilestonesMapRef.current = byGoal;
+        }
+      }
+
       if (repingRes.ok) {
         const repings = await repingRes.json();
         if (Array.isArray(repings)) {
@@ -172,31 +295,57 @@ export function useReminderScheduler() {
         statsRef.current = await dashRes.json();
       }
 
-      // Synchronize native Android AlarmManager schedules with reason and complete completion sets
-      if (isNative && Array.isArray(remindersRef.current)) {
+      // Synchronize native Android AlarmManager & LocalNotifications schedules
+      if (isNative && Array.isArray(activeRemindersList)) {
         await syncNativeReminders(
-          remindersRef.current,
+          activeRemindersList,
           {
             completedHabitIds: completedHabitsRef.current,
             completedGoalIds: completedGoalsRef.current,
+            completedMilestoneIds: completedMilestonesRef.current,
             completedLearningIds: completedLearningRef.current,
+            goalMilestonesMap: goalMilestonesMapRef.current,
             today,
           },
           false,
           reason
         );
       }
+
+      // Missed-day catch-up safety for deadline / remind-on-date reminders scheduled for earlier today
+      runDeadlineCatchUps(activeRemindersList, new Date());
     } catch (err) {
       console.warn('[ReminderScheduler] Failed to refresh scheduler data:', err);
-      // When offline, still populate completedHabitsRef from local cached tracking so ticker suppresses handled habits
+      // When offline, populate completions from local cached IndexedDB
       if (session?.user?.id) {
         try {
-          const cachedTrack = await getCachedData(session.user.id, 'tracking', today);
+          const [cachedTrack, cachedMilestones, cachedGoals] = await Promise.all([
+            getCachedData(session.user.id, 'tracking', today),
+            getCachedData(session.user.id, 'milestones'),
+            getCachedData(session.user.id, 'goals'),
+          ]);
           if (Array.isArray(cachedTrack)) {
             for (const row of cachedTrack) {
               if (row?.status === true && row?.habit_id) {
                 completedHabitsRef.current.add(row.habit_id);
               }
+            }
+          }
+          if (Array.isArray(cachedMilestones)) {
+            const byGoal = new Map();
+            for (const m of cachedMilestones) {
+              if (m?.completed && m?.id) completedMilestonesRef.current.add(m.id);
+              if (m?.goal_id) {
+                const arr = byGoal.get(m.goal_id) || [];
+                arr.push(m);
+                byGoal.set(m.goal_id, arr);
+              }
+            }
+            goalMilestonesMapRef.current = byGoal;
+          }
+          if (Array.isArray(cachedGoals)) {
+            for (const g of cachedGoals) {
+              if (g?.status === 'Completed' && g?.id) completedGoalsRef.current.add(g.id);
             }
           }
         } catch {}
@@ -210,7 +359,7 @@ export function useReminderScheduler() {
         refreshReminders(nextReason);
       }
     }
-  }, [session]);
+  }, [session, runDeadlineCatchUps]);
 
   // Listen to custom update events across the app
   useEffect(() => {
@@ -250,6 +399,7 @@ export function useReminderScheduler() {
           completedHabitsRef.current.add(entityId);
         } else if (type === 'goal') {
           completedGoalsRef.current.add(entityId);
+          completedMilestonesRef.current.add(entityId);
         } else if (type === 'learning_journey' || type === 'learning_topic' || type === 'learning') {
           completedLearningRef.current.add(entityId);
         }
@@ -266,6 +416,7 @@ export function useReminderScheduler() {
           completedHabitsRef.current.delete(entityId);
         } else if (type === 'goal') {
           completedGoalsRef.current.delete(entityId);
+          completedMilestonesRef.current.delete(entityId);
         } else if (type === 'learning_journey' || type === 'learning_topic' || type === 'learning') {
           completedLearningRef.current.delete(entityId);
         }
@@ -283,7 +434,7 @@ export function useReminderScheduler() {
     const handleNativeAlarmHandled = (e) => {
       const { reminderId, habitId, timestamp } = e.detail || {};
       const nowD = new Date();
-      const todayYmd = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, '0')}-${String(nowD.getDate()).padStart(2, '0')}`;
+      const todayYmd = formatLocalYMD(nowD);
       const currentTime = lastMinuteLoggedRef.current || `${String(nowD.getHours()).padStart(2, '0')}:${String(nowD.getMinutes()).padStart(2, '0')}`;
       const type = e.type === 'habittracker-alarm-snoozed' ? 'snooze' : 'complete';
 
@@ -345,13 +496,62 @@ export function useReminderScheduler() {
     };
   }, [refreshReminders]);
 
+  const handleNonHabitCompleteAction = useCallback(async (rawData) => {
+    if (!session?.access_token && !isNative) return;
+    const matchedReminder = remindersRef.current?.find((r) => r.id === rawData?.reminderId) || null;
+    const reminderObj = matchedReminder || {
+      id: rawData?.reminderId || null,
+      target_type: rawData?.targetType || 'goal',
+      goal_id: rawData?.goalId || null,
+      milestone_id: rawData?.milestoneId || null,
+      journey_id: rawData?.journeyId || null,
+      topic_id: rawData?.topicId || null,
+      reminder_mode: rawData?.reminderMode || 'scheduled',
+      hasMilestones: Boolean(rawData?.hasMilestones),
+    };
+    const hasMs = Boolean(
+      rawData?.hasMilestones ||
+      reminderObj.goal_has_milestones ||
+      reminderObj.milestone_id ||
+      (reminderObj.goal_id && goalMilestonesMapRef.current.get(reminderObj.goal_id)?.length > 0)
+    );
+
+    const result = await executeReminderDone({
+      reminder: reminderObj,
+      session,
+      isNativePlatform: isNative,
+      isOnline: getOnlineStatus(),
+      hasMilestones: hasMs,
+    });
+
+    if (result?.ok) {
+      if (result.toast) {
+        window.dispatchEvent(
+          new CustomEvent('habittracker-reminder-toast', {
+            detail: { toast: result.toast, undoData: result.undoData || null },
+          })
+        );
+      }
+      if (result.navigateTo) {
+        window.dispatchEvent(new CustomEvent('habittracker-navigate', { detail: { path: result.navigateTo } }));
+      }
+      refreshReminders('reminder_done');
+    } else if (result?.error) {
+      window.dispatchEvent(
+        new CustomEvent('habittracker-reminder-toast', {
+          detail: { toast: { message: result.error, type: 'error' } },
+        })
+      );
+    }
+  }, [session, refreshReminders]);
+
   // Listen to messages from Service Worker (e.g. notification action buttons)
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
 
     const handleSwMessage = async (event) => {
       if (event.data?.type === 'HABIT_MARK_COMPLETE' && event.data?.habitId && session?.access_token) {
-        const today = event.data.today || new Date().toISOString().split('T')[0];
+        const today = event.data.today || formatLocalYMD();
         try {
           await fetch('/api/tracking', {
             method: 'POST',
@@ -369,6 +569,33 @@ export function useReminderScheduler() {
         } catch (err) {
           console.warn('[ReminderScheduler] SW HABIT_MARK_COMPLETE error:', err);
         }
+        return;
+      }
+
+      if (event.data?.type === 'REMINDER_MARK_COMPLETE' && event.data?.data) {
+        await handleNonHabitCompleteAction(event.data.data);
+        return;
+      }
+
+      if (event.data?.type === 'OPEN_REMINDER_CONFIRM' && event.data?.data) {
+        const data = event.data.data;
+        const matchedReminder = remindersRef.current?.find((r) => r.id === data.reminderId) || {
+          id: data.reminderId,
+          target_type: data.targetType || 'goal',
+          goal_id: data.goalId || null,
+          milestone_id: data.milestoneId || null,
+          journey_id: data.journeyId || null,
+          topic_id: data.topicId || null,
+          goal_name: data.itemName || '',
+          journey_title: data.itemName || '',
+          reminder_mode: data.reminderMode || 'scheduled',
+        };
+        window.dispatchEvent(
+          new CustomEvent('habittracker-goal-confirm-open', {
+            detail: { reminder: matchedReminder },
+          })
+        );
+        return;
       }
 
       if (event.data?.type === 'HABIT_ALARM_SKIPPED' && event.data?.habitId && session?.access_token) {
@@ -394,9 +621,9 @@ export function useReminderScheduler() {
 
     navigator.serviceWorker.addEventListener('message', handleSwMessage);
     return () => navigator.serviceWorker.removeEventListener('message', handleSwMessage);
-  }, [session, refreshReminders]);
+  }, [session, refreshReminders, handleNonHabitCompleteAction]);
 
-  // Listen to native Android notification actions (Mark Done, Snooze, Tap)
+  // Listen to native Android notification actions (Mark Done, Open, Snooze, Tap)
   useEffect(() => {
     if (!isNative) return;
 
@@ -414,8 +641,7 @@ export function useReminderScheduler() {
           refreshReminders('alarm_completed');
           return;
         }
-        const dNow = new Date();
-        const today = `${dNow.getFullYear()}-${String(dNow.getMonth() + 1).padStart(2, '0')}-${String(dNow.getDate()).padStart(2, '0')}`;
+        const today = formatLocalYMD();
         try {
           await fetch('/api/tracking', {
             method: 'POST',
@@ -435,28 +661,71 @@ export function useReminderScheduler() {
         } catch (err) {
           console.warn('[NativeNotifications] Failed to mark complete:', err);
         }
-      } else if (actionId === 'snooze') {
-        // Already rescheduled by setupNativeNotificationListeners
+        return;
+      }
+
+      if (actionId === 'complete' && (extra.goalId || extra.milestoneId || extra.topicId || extra.journeyId || (extra.targetType && extra.targetType !== 'habit'))) {
+        if (extra.fromNativeAlarmEvent) {
+          await processPendingAlarmActions(session);
+          refreshReminders('native_reminder_completed');
+          return;
+        }
+        await handleNonHabitCompleteAction(extra);
+        return;
+      }
+
+      if (actionId === 'snooze') {
         console.log('[NativeNotifications] Snooze handled');
-      } else {
-        // Tapped or opened from notification
-        if (extra.isAlarm) {
-          const matchedReminder = remindersRef.current?.find((r) => r.id === extra.reminderId);
+        return;
+      }
+
+      // Tapped or clicked 'open'
+      if (extra.isAlarm && extra.habitId) {
+        const matchedReminder = remindersRef.current?.find((r) => r.id === extra.reminderId);
+        window.dispatchEvent(
+          new CustomEvent('habittracker-alarm-fired', {
+            detail: {
+              reminder: matchedReminder || { id: extra.reminderId, habit_id: extra.habitId, is_alarm: true },
+              habit: matchedReminder?.habits || { id: extra.habitId, habit_name: extra.itemName || 'Habit' },
+              streak: statsRef.current?.currentStreak || 0,
+            },
+          })
+        );
+      } else if (extra.targetType && extra.targetType !== 'habit') {
+        const matchedReminder = remindersRef.current?.find((r) => r.id === extra.reminderId);
+        const remObj = matchedReminder || {
+          id: extra.reminderId,
+          target_type: extra.targetType,
+          goal_id: extra.goalId || null,
+          milestone_id: extra.milestoneId || null,
+          journey_id: extra.journeyId || null,
+          topic_id: extra.topicId || null,
+          goal_name: extra.itemName || '',
+          journey_title: extra.itemName || '',
+          hasMilestones: Boolean(extra.hasMilestones),
+          reminder_mode: extra.reminderMode || 'scheduled',
+        };
+        const hasMs = Boolean(
+          extra.hasMilestones ||
+          remObj.goal_has_milestones ||
+          remObj.milestone_id ||
+          (remObj.goal_id && goalMilestonesMapRef.current.get(remObj.goal_id)?.length > 0)
+        );
+        const mode = getReminderActionMode(remObj, hasMs);
+        if (mode === 'confirm_goal' || mode === 'confirm_journey') {
+          window.dispatchEvent(new CustomEvent('habittracker-goal-confirm-open', { detail: { reminder: remObj } }));
+        } else if (mode === 'ack_goal_day') {
+          window.dispatchEvent(new CustomEvent('habittracker-navigate', { detail: { path: '/goals' } }));
+        } else {
           window.dispatchEvent(
-            new CustomEvent('habittracker-alarm-fired', {
-              detail: {
-                reminder: matchedReminder || { id: extra.reminderId, habit_id: extra.habitId, is_alarm: true },
-                habit: matchedReminder?.habits || { id: extra.habitId, habit_name: extra.itemName || 'Habit' },
-                streak: statsRef.current?.currentStreak || 0,
-              },
-            })
+            new CustomEvent('habittracker-goal-confirm-open', { detail: { reminder: remObj } })
           );
         }
       }
     });
 
     return cleanup;
-  }, [session, refreshReminders]);
+  }, [session, refreshReminders, handleNonHabitCompleteAction]);
 
   // Main active interval ticker (checks every 5 seconds)
   useEffect(() => {
@@ -470,11 +739,7 @@ export function useReminderScheduler() {
       const mm = String(now.getMinutes()).padStart(2, '0');
       const currentTime = `${hh}:${mm}`;
 
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const date = String(now.getDate()).padStart(2, '0');
-      const todayYMD = `${year}-${month}-${date}`;
-
+      const todayYMD = formatLocalYMD(now);
       const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       const currentDay = dayNames[now.getDay()];
 
@@ -485,6 +750,7 @@ export function useReminderScheduler() {
 
       const nativeState = getHandledNativeState(now.getTime());
       const combinedFiredKeys = new Set([...firedRef.current, ...nativeState.firedKeys]);
+      const ackedReminderDates = getAckedReminderDates(todayYMD);
 
       for (const reminder of remindersRef.current) {
         const status = (reminder.notification_status || 'active').toLowerCase();
@@ -494,12 +760,8 @@ export function useReminderScheduler() {
 
         // 1. Verify Date / Day Eligibility
         if (isDeadlineMode) {
-          const targetDateStr = reminder.goals?.target_date || reminder.learning_topics?.target_date || reminder.learning_journeys?.target_date || reminder.target_date;
-          if (!targetDateStr) continue;
-          const days = Number(reminder.days_before_deadline) || 0;
-          const checkDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
-          const checkYMD = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
-          if (targetDateStr !== checkYMD) continue;
+          const fireYMD = getDeadlineFireDateYMD(reminder);
+          if (!fireYMD || fireYMD !== todayYMD) continue;
         } else {
           let daysList = reminder.days_of_week;
           if (typeof daysList === 'string') {
@@ -524,22 +786,11 @@ export function useReminderScheduler() {
         }
 
         // 2. Verify Time Match
-        let rawAlerts = reminder.alerts;
-        if (typeof rawAlerts === 'string') {
-          try {
-            rawAlerts = JSON.parse(rawAlerts);
-          } catch {
-            rawAlerts = rawAlerts.replace(/[{}"']/g, '').split(',').map((s) => s.trim()).filter(Boolean);
-          }
-        }
-        const alertsArr = Array.isArray(rawAlerts) ? rawAlerts : (rawAlerts ? [rawAlerts] : []);
-        const allTimes = [...alertsArr, reminder.reminder_time];
-        const alertsList = Array.from(new Set(allTimes.map(getTimeValue).filter(Boolean)));
-
+        const alertsList = getReminderAlertsList(reminder);
         const timeMatches = alertsList.some((t) => t === currentTime);
         if (!timeMatches) continue;
 
-        // 3. Deduplication & Check A / native-handled skip BEFORE recording firedKey or dispatching events
+        // 3. Deduplication & Check A / native-handled / daily-ack skip
         const triggerKey = `${reminder.id}_${todayYMD}_${currentTime}`;
         const skipCheck = shouldSkipInAppAlarmFire(reminder, {
           todayYMD,
@@ -547,8 +798,10 @@ export function useReminderScheduler() {
           nowMs: now.getTime(),
           completedHabits: completedHabitsRef.current,
           completedGoals: completedGoalsRef.current,
+          completedMilestones: completedMilestonesRef.current,
           completedLearning: completedLearningRef.current,
           handledHabitDates: nativeState.handledHabitDates,
+          ackedReminderDates,
           recentSnoozes: nativeState.recentSnoozes,
           firedKeys: combinedFiredKeys,
         });
@@ -567,11 +820,11 @@ export function useReminderScheduler() {
           firedRef.current = new Set(arr.slice(arr.length - 100));
         }
 
-        // 4. Build Detailed Notification Title & Body displaying Category & Item Name
+        // 4. Build Detailed Notification Title & Body displaying Category, Milestone/Topic & Item Name
         const type = reminder.target_type || 'habit';
         let title = '🔔 HabiZ Reminder';
         let body = reminder.custom_text || 'You have an active reminder.';
-        let url = '/dashboard';
+        let url = '/';
 
         if (type === 'habit') {
           const habitName = reminder.habits?.habit_name || reminder.habit_name || 'Daily Habit';
@@ -580,38 +833,14 @@ export function useReminderScheduler() {
             ? `${reminder.custom_text} • Habit: ${habitName}`
             : `Time to complete your habit "${habitName}"! Keep your streak going.`;
           url = '/habits';
-        } else if (type === 'goal') {
-          const goalName = reminder.goals?.goal_name || reminder.goal_name || 'Goal';
-          if (isDeadlineMode) {
-            const days = Number(reminder.days_before_deadline) || 0;
-            title = `🎯 Goal Deadline: ${goalName}`;
-            body = reminder.custom_text || (days === 0
-              ? `🚨 Today is the target deadline for Goal: "${goalName}"!`
-              : days === 1
-              ? `🚨 Tomorrow is the final day for Goal: "${goalName}"!`
-              : `⏳ Only ${days} days remaining for Goal: "${goalName}"!`);
-          } else {
-            title = `🎯 Goal: ${goalName}`;
-            body = reminder.custom_text
-              ? `${reminder.custom_text} • Goal: ${goalName}`
-              : `Time to log progress for Goal: "${goalName}"!`;
-          }
-          url = '/goals';
-        } else if (type === 'learning_journey' || type === 'learning_topic') {
-          const topicName = reminder.learning_topics?.title || reminder.learning_journeys?.title || reminder.topic_title || reminder.journey_title || 'Study Session';
-          if (isDeadlineMode) {
-            title = `📚 Learning Hub: ${topicName}`;
-            body = reminder.custom_text || `Target deadline approaching for Learning Roadmap: "${topicName}"!`;
-          } else {
-            title = `📚 Learning Hub: ${topicName}`;
-            body = reminder.custom_text
-              ? `${reminder.custom_text} • Topic: ${topicName}`
-              : `Time for your Learning Hub study session on "${topicName}"!`;
-          }
-          url = '/learning';
+        } else {
+          const copy = buildReminderDisplayCopy(reminder);
+          title = copy.title;
+          body = copy.body;
+          url = copy.url;
         }
 
-        const isAlarmEvent = Boolean(
+        const rawIsAlarmEvent = Boolean(
           reminder.is_alarm === true ||
           reminder.is_alarm === 'true' ||
           reminder.is_alarm === 1 ||
@@ -619,33 +848,41 @@ export function useReminderScheduler() {
           reminder.reminder_mode === 'alarm'
         );
         const isHabitEvent = (type || '').toLowerCase() === 'habit' || Boolean(reminder.habit_id);
+        const isAlarmEvent = isHabitEvent && rawIsAlarmEvent;
 
-        // Check A for in-app / ticker: Suppress alert if activity is already completed
-        if (type === 'habit' && reminder.habit_id && completedHabitsRef.current.has(reminder.habit_id)) {
-          console.log(`[ReminderScheduler] Skipping notification/alarm for already-completed habit "${reminder.habits?.habit_name || reminder.habit_id}"`);
-          continue;
-        }
-
-        if (type === 'goal' && reminder.goal_id && completedGoalsRef.current.has(reminder.goal_id)) {
-          console.log(`[ReminderScheduler] Skipping notification/alarm for already-completed goal "${reminder.goals?.goal_name || reminder.goal_id}"`);
-          continue;
-        }
-
-        if ((type === 'learning_journey' || type === 'learning_topic') && completedLearningRef.current.has(reminder.journey_id || reminder.topic_id)) {
-          console.log(`[ReminderScheduler] Skipping notification/alarm for already-completed learning activity`);
-          continue;
-        }
+        const hasMilestones = Boolean(
+          reminder.goal_has_milestones ||
+          reminder.milestone_id ||
+          (reminder.goal_id && goalMilestonesMapRef.current.get(reminder.goal_id)?.length > 0)
+        );
+        const actionMode = getReminderActionMode(reminder, hasMilestones);
 
         console.log(`[ReminderScheduler] 🔔 Triggering reminder/alarm at ${currentTime}:`, {
           id: reminder.id,
           type,
           isAlarm: isAlarmEvent,
-          name: reminder.habits?.habit_name || reminder.goals?.goal_name || reminder.custom_text || 'Reminder'
+          actionMode,
+          name: reminder.habits?.habit_name || reminder.goals?.goal_name || reminder.custom_text || 'Reminder',
         });
 
-        // 5. Fire Native System Notification (in web browsers; on native Android, LocalNotifications handles it)
+        // 5. Fire System Notification (in web browsers; on native Android, LocalNotifications handles it)
         if (!isNative && 'Notification' in window && Notification.permission === 'granted') {
           const isAlarm = isAlarmEvent;
+          const actions = isAlarm
+            ? [
+                { action: 'complete', title: '✅ Done' },
+                { action: 'skip',     title: '⏭️ Skip' },
+              ]
+            : (actionMode === 'confirm_goal' || actionMode === 'confirm_journey')
+            ? [
+                { action: 'open',   title: '🔍 Open' },
+                { action: 'snooze', title: '⏰ Snooze 10 min' },
+              ]
+            : [
+                { action: 'complete', title: '✅ Mark Done' },
+                { action: 'snooze',   title: '⏰ Snooze 10 min' },
+              ];
+
           const notificationOptions = {
             body,
             icon: '/icons/icon-192.png',
@@ -656,19 +893,18 @@ export function useReminderScheduler() {
             vibrate: isAlarm ? [300, 100, 300, 100, 300] : [200, 100, 200],
             data: {
               url,
-              habitId: reminder.habit_id,
+              targetType: type,
+              habitId: reminder.habit_id || null,
+              goalId: reminder.goal_id || null,
+              milestoneId: reminder.milestone_id || null,
+              journeyId: reminder.journey_id || null,
+              topicId: reminder.topic_id || null,
+              hasMilestones,
+              reminderMode: reminder.reminder_mode || 'scheduled',
               reminderId: reminder.id,
               isAlarm,
             },
-            actions: isAlarm
-              ? [
-                  { action: 'complete', title: '✅ Done' },
-                  { action: 'skip',     title: '⏭️ Skip' },
-                ]
-              : [
-                  { action: 'complete', title: '✅ Mark Done' },
-                  { action: 'snooze',   title: '⏰ Snooze 10 min' },
-                ],
+            actions,
           };
 
           if (swRegRef.current && swRegRef.current.showNotification) {
@@ -687,7 +923,7 @@ export function useReminderScheduler() {
 
         // 6. Dispatch in-app events
         window.dispatchEvent(new CustomEvent('habittracker-reminder-fired', {
-          detail: { reminder, title, body, url }
+          detail: { reminder, title, body, url, hasMilestones }
         }));
 
         if (isAlarmEvent && isHabitEvent) {
@@ -701,7 +937,7 @@ export function useReminderScheduler() {
         }
       }
 
-      // Check Re-ping events that are due
+      // Check Re-ping events that are due (habits only, untouched)
       const repings = repingEventsRef.current || [];
       for (const ev of repings) {
         if (!ev.next_reping_at) continue;
@@ -717,7 +953,6 @@ export function useReminderScheduler() {
           firedRef.current.add(repingKey);
           markFiredAlarmKey(repingKey);
 
-          // Find associated reminder
           const matchedReminder = remindersRef.current?.find((r) => r.habit_id === ev.habit_id);
           const habitData = matchedReminder?.habits || {
             id: ev.habit_id,
@@ -733,7 +968,6 @@ export function useReminderScheduler() {
             ? `Final call today for "${habitName}"! Protect your streak now.`
             : `Reminder re-ping for "${habitName}". Keep your momentum.`;
 
-          // Fire in-app alarm takeover
           window.dispatchEvent(new CustomEvent('habittracker-alarm-fired', {
             detail: {
               reminder: matchedReminder || { id: ev.reminder_id || `reping_${ev.habit_id}`, habit_id: ev.habit_id, is_alarm: true },
@@ -742,7 +976,6 @@ export function useReminderScheduler() {
             }
           }));
 
-          // Fire sticky push notification
           if ('Notification' in window && Notification.permission === 'granted') {
             const opts = {
               body: urgentBody,

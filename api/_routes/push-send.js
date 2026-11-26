@@ -3,6 +3,7 @@ import webPush from 'web-push';
 import supabase from './db-client.js';
 import { applyCors } from './cors.js';
 import { fetchAllSupabaseRows } from './paginate-query.js';
+import { getDateInTimeZone, addDaysInTimeZone, isValidTimeZone } from './date-utils.js';
 
 const REMINDER_PAGE_SIZE = 500;
 const USER_SUB_CHUNK_SIZE = 100;
@@ -27,6 +28,53 @@ if (process.env.VAPID_EMAIL && process.env.VITE_VAPID_PUBLIC_KEY && process.env.
   }
 }
 
+function getUserNowContext(now, rawTz) {
+  const userTz = isValidTimeZone(rawTz) ? rawTz : 'UTC';
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: userTz,
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(now);
+    const weekday = parts.find((p) => p.type === 'weekday')?.value || 'Sun';
+    const hour = (parts.find((p) => p.type === 'hour')?.value || '00').replace('24', '00').padStart(2, '0');
+    const minute = (parts.find((p) => p.type === 'minute')?.value || '00').padStart(2, '0');
+    return {
+      userTz,
+      todayYMD: getDateInTimeZone(now, userTz),
+      currentTime: `${hour}:${minute}`,
+      dayName: weekday.slice(0, 3),
+    };
+  } catch {
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const hh = String(now.getUTCHours()).padStart(2, '0');
+    const mm = String(now.getUTCMinutes()).padStart(2, '0');
+    return {
+      userTz: 'UTC',
+      todayYMD: getDateInTimeZone(now, 'UTC'),
+      currentTime: `${hh}:${mm}`,
+      dayName: dayNames[now.getUTCDay()],
+    };
+  }
+}
+
+export function isPushReminderTargetCompleted(reminder) {
+  const type = reminder?.target_type || 'habit';
+  if (type === 'goal') {
+    if (reminder.milestone_id && reminder.goal_milestones?.completed === true) return true;
+    if (reminder.goals?.status === 'Completed') return true;
+  } else if (type === 'learning_topic') {
+    if (reminder.learning_topics?.status === 'Completed') return true;
+    if (reminder.learning_journeys?.status === 'Completed') return true;
+  } else if (type === 'learning_journey') {
+    if (reminder.topic_id && reminder.learning_topics?.status === 'Completed') return true;
+    if (reminder.learning_journeys?.status === 'Completed') return true;
+  }
+  return false;
+}
+
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
 
@@ -41,22 +89,40 @@ export default async function handler(req, res) {
   try {
     const now = new Date();
 
-    // Page through active reminders instead of a fixed .limit(1000)
-    const { data: reminders, error: remErr } = await fetchAllSupabaseRows(
-      () =>
-        supabase
-          .from('reminders')
-          .select(`
+    const buildReminderQuery = (withMilestones) => () =>
+      supabase
+        .from('reminders')
+        .select(withMilestones
+          ? `
+            *,
+            habits(id, habit_name),
+            goals(id, goal_name, target_date, status),
+            goal_milestones:milestone_id(id, title, completed, goal_id),
+            learning_journeys:journey_id(id, title, target_date, status),
+            learning_topics:topic_id(id, title, target_date, status)
+          `
+          : `
             *,
             habits(id, habit_name),
             goals(id, goal_name, target_date, status),
             learning_journeys:journey_id(id, title, target_date, status),
             learning_topics:topic_id(id, title, target_date, status)
-          `)
-          .eq('notification_status', 'Active')
-          .order('id', { ascending: true }),
+          `
+        )
+        .eq('notification_status', 'Active')
+        .order('id', { ascending: true });
+
+    // Page through active reminders instead of a fixed .limit(1000)
+    let { data: reminders, error: remErr } = await fetchAllSupabaseRows(
+      buildReminderQuery(true),
       REMINDER_PAGE_SIZE
     );
+
+    if (remErr && (remErr.code === 'PGRST204' || remErr.code === '42703' || remErr.code === 'PGRST200')) {
+      const fallback = await fetchAllSupabaseRows(buildReminderQuery(false), REMINDER_PAGE_SIZE);
+      reminders = fallback.data;
+      remErr = fallback.error;
+    }
 
     if (remErr) {
       console.error('[/api/push-send] reminders error:', remErr);
@@ -66,9 +132,11 @@ export default async function handler(req, res) {
       return res.status(200).json({ sent: 0, message: 'No active reminders found' });
     }
 
-    // Scope push subscriptions only to users who have active reminders, chunked by 100 IDs
+    // Scope push subscriptions & milestone presence checks to active reminder users
     const activeUserIds = [...new Set(reminders.map((r) => r.user_id).filter(Boolean))];
     const subs = [];
+    const goalsWithMilestones = new Set();
+
     for (let i = 0; i < activeUserIds.length; i += USER_SUB_CHUNK_SIZE) {
       const userIdChunk = activeUserIds.slice(i, i + USER_SUB_CHUNK_SIZE);
       const { data: chunkSubs, error: subErr } = await supabase
@@ -83,6 +151,20 @@ export default async function handler(req, res) {
       if (chunkSubs?.length) {
         subs.push(...chunkSubs);
       }
+
+      try {
+        const { data: msChunk } = await supabase
+          .from('goal_milestones')
+          .select('goal_id')
+          .in('user_id', userIdChunk);
+        if (Array.isArray(msChunk)) {
+          for (const m of msChunk) {
+            if (m?.goal_id) goalsWithMilestones.add(m.goal_id);
+          }
+        }
+      } catch {
+        // Ignore if goal_milestones query fails on legacy schema
+      }
     }
 
     if (!subs.length) {
@@ -95,7 +177,6 @@ export default async function handler(req, res) {
       subsByUser[s.user_id].push(s);
     }
 
-    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     let sent = 0;
     const stale = [];
 
@@ -103,30 +184,11 @@ export default async function handler(req, res) {
       const userSubs = subsByUser[reminder.user_id] || [];
       if (!userSubs.length) continue;
 
-      // Extract user timezone or fallback
-      const userTz = req.headers['x-timezone'] || 'UTC';
-      let userNow;
-      try {
-        const userTimeStr = new Intl.DateTimeFormat('en-US', {
-          timeZone: userTz,
-          year: 'numeric', month: '2-digit', day: '2-digit',
-          hour: '2-digit', minute: '2-digit', second: '2-digit',
-          hour12: false,
-        }).format(now);
-        const [, timePart] = userTimeStr.split(', ');
-        const [uH, uM] = timePart.split(':');
-        userNow = {
-          currentTime: `${uH.padStart(2, '0')}:${uM.padStart(2, '0')}`,
-          dayName: dayNames[now.getDay()],
-        };
-      } catch {
-        const hh = String(now.getUTCHours()).padStart(2, '0');
-        const mm = String(now.getUTCMinutes()).padStart(2, '0');
-        userNow = {
-          currentTime: `${hh}:${mm}`,
-          dayName: dayNames[now.getUTCDay()],
-        };
-      }
+      // Skip already completed goals, milestones, learning topics, or learning journeys
+      if (isPushReminderTargetCompleted(reminder)) continue;
+
+      const subTz = userSubs[0]?.timezone || req.headers['x-timezone'] || 'UTC';
+      const userNow = getUserNowContext(now, subTz);
 
       const isDeadlineMode = reminder.reminder_mode === 'deadline_proximity';
 
@@ -138,26 +200,34 @@ export default async function handler(req, res) {
       const timeMatches = alertsList.some((t) => t && t.slice(0, 5) === userNow.currentTime);
       if (!timeMatches) continue;
 
-      // Check day / deadline eligibility
+      // Check day / deadline eligibility using user-local YMD (zero UTC off-by-one)
       if (isDeadlineMode) {
-        const targetDateStr = reminder.goals?.target_date || reminder.learning_topics?.target_date || reminder.learning_journeys?.target_date;
-        if (!targetDateStr) continue;
-        const days = Number(reminder.days_before_deadline) || 0;
-        const checkDate = new Date(now);
-        checkDate.setDate(checkDate.getDate() + days);
-        const checkYMD = checkDate.toISOString().split('T')[0];
-        if (targetDateStr !== checkYMD) continue;
+        if (reminder.remind_on_date) {
+          if (String(reminder.remind_on_date).trim() !== userNow.todayYMD) continue;
+        } else {
+          const targetDateStr =
+            reminder.goals?.target_date ||
+            reminder.learning_topics?.target_date ||
+            reminder.learning_journeys?.target_date;
+          if (!targetDateStr) continue;
+          const days = Number(reminder.days_before_deadline) || 0;
+          const checkYMD = addDaysInTimeZone(userNow.todayYMD, days, userNow.userTz);
+          if (targetDateStr !== checkYMD) continue;
+        }
       } else {
         if (Array.isArray(reminder.days_of_week) && reminder.days_of_week.length > 0) {
-          if (!reminder.days_of_week.includes(userNow.dayName)) continue;
+          const normDays = reminder.days_of_week.map((d) => String(d).trim().toLowerCase());
+          const isEvery = normDays.some((d) => d === 'everyday' || d === 'daily' || d === 'all');
+          if (!isEvery && !normDays.some((d) => d.startsWith(userNow.dayName.toLowerCase()))) continue;
         }
       }
 
-      // Build Notification Content specifying Category & Exact Name
+      // Build Notification Content specifying Category, Exact Name, and Milestone/Topic if chosen
       const type = reminder.target_type || 'habit';
       let title = '🔔 HabiZ Reminder';
       let body = reminder.custom_text || 'You have an active reminder.';
       let url = '/';
+      const hasMilestones = Boolean(reminder.goal_id && goalsWithMilestones.has(reminder.goal_id));
 
       if (type === 'habit') {
         const habitName = reminder.habits?.habit_name || 'Habit';
@@ -172,10 +242,16 @@ export default async function handler(req, res) {
         url = '/habits';
       } else if (type === 'goal') {
         const goalName = reminder.goals?.goal_name || 'Goal';
-        if (isDeadlineMode) {
+        const milestoneTitle = reminder.goal_milestones?.title || '';
+        if (reminder.milestone_id && milestoneTitle) {
+          title = `🎯 Goal: "${goalName}" - Milestone: "${milestoneTitle}"`;
+          body = reminder.custom_text || `Time to finish Milestone "${milestoneTitle}" for Goal "${goalName}".`;
+        } else if (isDeadlineMode) {
           const days = Number(reminder.days_before_deadline) || 0;
           title = `🎯 Goal Deadline: ${goalName}`;
-          body = reminder.custom_text || (days === 0
+          body = reminder.custom_text || (reminder.remind_on_date
+            ? `Goal deadline reminder for "${goalName}".`
+            : days === 0
             ? `🚨 Today is the target deadline for Goal: "${goalName}"!`
             : days === 1
             ? `🚨 Tomorrow is the final day for Goal: "${goalName}"!`
@@ -188,29 +264,40 @@ export default async function handler(req, res) {
         }
         url = '/goals';
       } else if (type === 'learning_journey' || type === 'learning_topic') {
-        const topicName = reminder.learning_topics?.title || reminder.learning_journeys?.title || 'Study Session';
+        const topicName = reminder.learning_topics?.title || '';
+        const journeyName = reminder.learning_journeys?.title || 'Study Session';
+        const displayName = topicName ? `${journeyName} - ${topicName}` : journeyName;
+        title = `📚 Learning Hub: ${displayName}`;
         if (isDeadlineMode) {
-          title = `📚 Learning Hub: ${topicName}`;
-          body = reminder.custom_text || `Target deadline approaching for Learning Roadmap: "${topicName}"!`;
+          body = reminder.custom_text || `Target deadline reminder for "${topicName || journeyName}"!`;
         } else {
-          title = `📚 Learning Hub: ${topicName}`;
           body = reminder.custom_text
-            ? `${reminder.custom_text} • Topic: ${topicName}`
-            : `Time for your Learning Hub study session on "${topicName}"!`;
+            ? `${reminder.custom_text} • ${displayName}`
+            : `Time for your Learning Hub session on "${topicName || journeyName}"!`;
         }
-        url = '/learning';
+        url = reminder.journey_id ? `/learning/journey/${reminder.journey_id}` : '/learning';
       }
+
+      const isHabitAlarm = Boolean(reminder.is_alarm) && type === 'habit';
 
       for (const sub of userSubs) {
         const payload = JSON.stringify({
           title,
           body,
-          tag: reminder.is_alarm && reminder.habit_id ? `alarm-habit-${reminder.habit_id}` : `reminder-${reminder.id}`,
+          tag: isHabitAlarm && reminder.habit_id ? `alarm-habit-${reminder.habit_id}` : `reminder-${reminder.id}`,
           url,
           reminderId: reminder.id,
           habitId: reminder.habit_id || null,
+          goalId: reminder.goal_id || null,
+          milestoneId: reminder.milestone_id || null,
+          journeyId: reminder.journey_id || null,
+          topicId: reminder.topic_id || null,
+          hasMilestones,
+          reminderMode: reminder.reminder_mode || 'scheduled',
           targetType: type,
-          isAlarm: Boolean(reminder.is_alarm),
+          itemName: reminder.goals?.goal_name || reminder.learning_topics?.title || reminder.learning_journeys?.title || reminder.habits?.habit_name || '',
+          milestoneTitle: reminder.goal_milestones?.title || '',
+          isAlarm: isHabitAlarm,
         });
 
         try {

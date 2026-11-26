@@ -87,9 +87,54 @@ async function processAction(action, accessToken) {
       headers,
       body: JSON.stringify({
         id: payload.id || payload.goal_id,
-        current_value: payload.current_value,
+        ...(payload.current_value !== undefined ? { current_value: payload.current_value } : {}),
         status: payload.status,
       }),
+    });
+    return res;
+  }
+
+  if (actionType === 'UPDATE_MILESTONE') {
+    const res = await fetch('/api/milestones', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        id: payload.id || payload.milestone_id,
+        completed: Boolean(payload.completed),
+      }),
+    });
+    return res;
+  }
+
+  if (actionType === 'UPDATE_TOPIC') {
+    const res = await fetch('/api/learning?action=update_topic', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        id: payload.id || payload.topic_id,
+        status: payload.status || 'Completed',
+      }),
+    });
+    return res;
+  }
+
+  if (actionType === 'UPDATE_JOURNEY') {
+    const res = await fetch('/api/learning?action=update_journey', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        id: payload.id || payload.journey_id,
+        status: payload.status || 'Completed',
+      }),
+    });
+    return res;
+  }
+
+  if (actionType === 'UPDATE_REMINDER') {
+    const res = await fetch('/api/reminders', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(payload),
     });
     return res;
   }
@@ -221,10 +266,17 @@ export async function syncOfflineQueue(userId, accessToken) {
                   })
                 );
               }
-            } else if (action.actionType === 'UPDATE_GOAL') {
+            } else if (
+              action.actionType === 'UPDATE_GOAL' ||
+              action.actionType === 'UPDATE_MILESTONE' ||
+              action.actionType === 'UPDATE_TOPIC' ||
+              action.actionType === 'UPDATE_JOURNEY' ||
+              action.actionType === 'UPDATE_REMINDER'
+            ) {
               window.dispatchEvent(
                 new CustomEvent('habittracker-stats-updated', { detail: { source: 'offline-sync-goal' } })
               );
+              window.dispatchEvent(new CustomEvent('habittracker-reminders-updated'));
             }
           }
         } else if (response.status === 429 || response.status === 408) {

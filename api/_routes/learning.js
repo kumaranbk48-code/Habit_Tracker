@@ -77,7 +77,13 @@ export default async function handler(req, res) {
             journeyTopics.find(topic => topic.status === 'Not Started') ||
             journeyTopics[0]
           )?.title || 'No topic added yet',
-          topic_titles: journeyTopics.map(t => t.title).filter(Boolean)
+          topic_titles: journeyTopics.map(t => t.title).filter(Boolean),
+          topics: journeyTopics.map(t => ({
+            id: t.id,
+            title: t.title,
+            status: t.status,
+            target_date: t.target_date,
+          })),
         };
       });
 
@@ -584,7 +590,7 @@ export default async function handler(req, res) {
       const { id: journeyId, ...updates } = req.body || {};
       if (!journeyId) return res.status(400).json({ error: 'Journey id is required' });
 
-      const allowedFields = ['title', 'description', 'personal_goal', 'category', 'icon', 'target_date'];
+      const allowedFields = ['title', 'description', 'personal_goal', 'category', 'icon', 'target_date', 'status'];
       const payload = { updated_at: new Date().toISOString() };
       for (const f of allowedFields) {
         if (updates[f] !== undefined) payload[f] = updates[f];
