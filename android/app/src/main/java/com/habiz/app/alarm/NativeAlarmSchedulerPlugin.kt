@@ -243,24 +243,76 @@ class NativeAlarmSchedulerPlugin : Plugin() {
 
     @PluginMethod
     fun canUseFullScreenIntent(call: PluginCall) {
-        val granted = NativeAlarmScheduler.canUseFullScreenIntent(context)
-        val needed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
-        val ret = JSObject()
-        ret.put("full_screen_intent", if (granted) "granted" else "denied")
-        ret.put("needed", needed)
-        call.resolve(ret)
+        try {
+            val granted = NativeAlarmScheduler.canUseFullScreenIntent(context)
+            val needed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+            val ret = JSObject()
+            ret.put("full_screen_intent", if (granted) "granted" else "denied")
+            ret.put("needed", needed)
+            call.resolve(ret)
+        } catch (e: Exception) {
+            NativeAlarmScheduler.logDiag(context, "permission_check_error", "canUseFullScreenIntent: ${e.javaClass.simpleName}:${e.message}")
+            call.reject("Failed to check full screen intent permission: ${e.message}", e)
+        }
     }
 
     @PluginMethod
     fun canShowOverlays(call: PluginCall) {
-        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(context)
-        } else {
-            true
+        try {
+            val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                Settings.canDrawOverlays(context)
+            } else {
+                true
+            }
+            val ret = JSObject()
+            ret.put("granted", granted)
+            call.resolve(ret)
+        } catch (e: Exception) {
+            NativeAlarmScheduler.logDiag(context, "permission_check_error", "canShowOverlays: ${e.javaClass.simpleName}:${e.message}")
+            call.reject("Failed to check overlay permission: ${e.message}", e)
         }
-        val ret = JSObject()
-        ret.put("granted", granted)
-        call.resolve(ret)
+    }
+
+    @PluginMethod
+    fun getAlarmDiagnostics(call: PluginCall) {
+        try {
+            val entries = NativeAlarmScheduler.getDiagnostics(context)
+            val arr = JSArray()
+            for (entry in entries) arr.put(entry)
+            val ret = JSObject()
+            ret.put("entries", arr)
+            call.resolve(ret)
+        } catch (e: Exception) {
+            call.reject("Failed to read alarm diagnostics: ${e.message}", e)
+        }
+    }
+
+    @PluginMethod
+    fun clearAlarmDiagnostics(call: PluginCall) {
+        try {
+            NativeAlarmScheduler.clearDiagnostics(context)
+            val ret = JSObject()
+            ret.put("cleared", true)
+            call.resolve(ret)
+        } catch (e: Exception) {
+            call.reject("Failed to clear alarm diagnostics: ${e.message}", e)
+        }
+    }
+
+    @PluginMethod
+    fun recordDiagnostic(call: PluginCall) {
+        try {
+            val event = call.getString("event") ?: ""
+            val detail = call.getString("detail") ?: ""
+            if (event.isNotEmpty()) {
+                NativeAlarmScheduler.logDiag(context, event, detail)
+            }
+            val ret = JSObject()
+            ret.put("recorded", event.isNotEmpty())
+            call.resolve(ret)
+        } catch (e: Exception) {
+            call.reject("Failed to record diagnostic: ${e.message}", e)
+        }
     }
 
     @PluginMethod

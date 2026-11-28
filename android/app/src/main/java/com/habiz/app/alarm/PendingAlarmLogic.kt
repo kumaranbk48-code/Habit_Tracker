@@ -17,7 +17,111 @@ data class PendingAlarmAction(
 
 object PendingAlarmLogic {
     const val MAX_PENDING_ACTIONS = 100
+    const val MAX_DIAGNOSTIC_ENTRIES = 60
     const val RETENTION_MILLIS = 7L * 24L * 60L * 60L * 1000L
+
+    /**
+     * Pure decision helper for Check A completion suppression.
+     * Returns a non-null reason string when the alarm must be skipped:
+     * - "habit-complete": habit completed on [dateStr]
+     * - "synced-complete": non-habit entity permanently synced as Completed
+     * - "acked-today": non-habit reminder locally dismissed on [dateStr]
+     * Returns null when the alarm must ring.
+     */
+    fun checkCompletedReason(
+        targetType: String,
+        entityId: String,
+        reminderId: String,
+        dateStr: String,
+        completedHabits: Set<String>,
+        completedGoals: Set<String>,
+        completedLearning: Set<String>,
+        ackedRemindersByDate: Set<String>
+    ): String? {
+        val type = (if (targetType.isEmpty()) "habit" else targetType).lowercase()
+        return when (type) {
+            "habit" -> {
+                if ((entityId.isNotEmpty() && completedHabits.contains("$entityId:$dateStr")) ||
+                    (reminderId.isNotEmpty() && completedHabits.contains("$reminderId:$dateStr"))
+                ) {
+                    "habit-complete"
+                } else {
+                    null
+                }
+            }
+            "goal" -> {
+                if ((entityId.isNotEmpty() && completedGoals.contains(entityId)) ||
+                    (reminderId.isNotEmpty() && completedGoals.contains(reminderId))
+                ) {
+                    "synced-complete"
+                } else if (reminderId.isNotEmpty() && ackedRemindersByDate.contains("$reminderId:$dateStr")) {
+                    "acked-today"
+                } else {
+                    null
+                }
+            }
+            "learning_journey", "learning_topic", "learning" -> {
+                if ((entityId.isNotEmpty() && completedLearning.contains(entityId)) ||
+                    (reminderId.isNotEmpty() && completedLearning.contains(reminderId))
+                ) {
+                    "synced-complete"
+                } else if (reminderId.isNotEmpty() && ackedRemindersByDate.contains("$reminderId:$dateStr")) {
+                    "acked-today"
+                } else {
+                    null
+                }
+            }
+            else -> null
+        }
+    }
+
+    fun isEntityCompletedDecision(
+        targetType: String,
+        entityId: String,
+        reminderId: String,
+        dateStr: String,
+        completedHabits: Set<String>,
+        completedGoals: Set<String>,
+        completedLearning: Set<String>,
+        ackedRemindersByDate: Set<String>
+    ): Boolean = checkCompletedReason(
+        targetType = targetType,
+        entityId = entityId,
+        reminderId = reminderId,
+        dateStr = dateStr,
+        completedHabits = completedHabits,
+        completedGoals = completedGoals,
+        completedLearning = completedLearning,
+        ackedRemindersByDate = ackedRemindersByDate
+    ) != null
+
+    /**
+     * Prunes `<key>:<yyyy-MM-dd>` entries whose suffix is strictly older than [cutoffDateStr].
+     */
+    fun pruneDateScopedEntries(entries: Set<String>, cutoffDateStr: String): MutableSet<String> {
+        val pruned = mutableSetOf<String>()
+        for (entry in entries) {
+            val sepIdx = entry.lastIndexOf(':')
+            if (sepIdx <= 0 || sepIdx >= entry.length - 1) continue
+            val entryDate = entry.substring(sepIdx + 1)
+            if (entryDate.length == 10 && entryDate >= cutoffDateStr) {
+                pruned.add(entry)
+            }
+        }
+        return pruned
+    }
+
+    /**
+     * Appends a diagnostic log entry while retaining only the most recent [MAX_DIAGNOSTIC_ENTRIES].
+     */
+    fun appendDiagnosticEntry(existing: List<String>, entry: String): List<String> {
+        val combined = existing + entry
+        return if (combined.size > MAX_DIAGNOSTIC_ENTRIES) {
+            combined.subList(combined.size - MAX_DIAGNOSTIC_ENTRIES, combined.size).toList()
+        } else {
+            combined.toList()
+        }
+    }
 
     fun makeActionId(
         type: String,

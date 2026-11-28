@@ -95,17 +95,84 @@ function emitWindowEvent(name, detail) {
   }
 }
 
-async function updateCachedMilestoneDone(userId, milestoneId, completed) {
+async function updateCachedMilestoneDone(userId, milestoneId, completed, goalId = null) {
+  if (!userId || !milestoneId) return;
   try {
     const cachedMs = await getCachedData(userId, 'milestones');
     if (Array.isArray(cachedMs)) {
+      const nextMs = cachedMs.map((m) => (m.id === milestoneId ? { ...m, completed } : m));
+      await saveCachedData(userId, 'milestones', nextMs);
+      if (goalId) {
+        const goalMs = nextMs.filter((m) => m.goal_id === goalId);
+        if (goalMs.length > 0 && goalMs.every((m) => m.completed)) {
+          await updateCachedGoalDone(userId, goalId, 'Completed');
+        }
+      }
+    }
+  } catch {}
+}
+
+async function updateCachedGoalDone(userId, goalId, status = 'Completed') {
+  if (!userId || !goalId) return;
+  try {
+    const cachedGoals = await getCachedData(userId, 'goals');
+    if (Array.isArray(cachedGoals)) {
       await saveCachedData(
         userId,
-        'milestones',
-        cachedMs.map((m) => (m.id === milestoneId ? { ...m, completed } : m))
+        'goals',
+        cachedGoals.map((g) => (g.id === goalId ? { ...g, status } : g))
       );
     }
   } catch {}
+}
+
+async function updateCachedLearningTopicDone(userId, topicId, status = 'Completed') {
+  if (!userId || !topicId) return;
+  try {
+    const cachedHub = await getCachedData(userId, 'learning_hub');
+    if (!cachedHub || !Array.isArray(cachedHub.journeys)) return;
+    const patchJourney = (j) => {
+      if (!j) return j;
+      if (!Array.isArray(j.topics) || !j.topics.some((t) => t.id === topicId)) return j;
+      const topics = j.topics.map((t) => (t.id === topicId ? { ...t, status } : t));
+      const topicsCompleted = topics.filter((t) => t.status === 'Completed').length;
+      return {
+        ...j,
+        topics,
+        topics_completed: topicsCompleted,
+      };
+    };
+    await saveCachedData(userId, 'learning_hub', {
+      ...cachedHub,
+      journeys: cachedHub.journeys.map(patchJourney),
+      continueJourney: patchJourney(cachedHub.continueJourney),
+    });
+  } catch {}
+}
+
+async function updateCachedLearningJourneyDone(userId, journeyId, status = 'Completed') {
+  if (!userId || !journeyId) return;
+  try {
+    const cachedHub = await getCachedData(userId, 'learning_hub');
+    if (!cachedHub || !Array.isArray(cachedHub.journeys)) return;
+    const patchJourney = (j) => (j && j.id === journeyId ? { ...j, status, completion_progress: 100 } : j);
+    await saveCachedData(userId, 'learning_hub', {
+      ...cachedHub,
+      journeys: cachedHub.journeys.map(patchJourney),
+      continueJourney: patchJourney(cachedHub.continueJourney),
+    });
+  } catch {}
+}
+
+/**
+ * Maps explicit confirmation / prompt modes ('confirm_goal', 'confirm_journey') to
+ * executable completion modes while leaving all other modes unchanged.
+ */
+export function normalizeReminderActionMode(mode, reminder, hasMilestones = false) {
+  const resolved = mode || getReminderActionMode(reminder, hasMilestones);
+  if (resolved === 'confirm_goal') return 'complete_goal';
+  if (resolved === 'confirm_journey') return 'complete_journey';
+  return resolved;
 }
 
 async function updateCachedReminderStatus(userId, reminderId, notification_status) {
@@ -149,7 +216,8 @@ export async function executeReminderDone({
   const journeyId = reminder.journey_id || reminder.journeyId || null;
   const topicId = reminder.topic_id || reminder.topicId || null;
 
-  const mode = modeOverride || getReminderActionMode(reminder, hasMilestones);
+  const rawMode = modeOverride || getReminderActionMode(reminder, hasMilestones);
+  const mode = normalizeReminderActionMode(rawMode, reminder, hasMilestones);
   const accessToken = session?.access_token;
   const userId = session?.user?.id;
 
@@ -210,8 +278,14 @@ export async function executeReminderDone({
           }
         }
 
+        if (userId) {
+          await updateCachedMilestoneDone(userId, milestoneId, true, goalId);
+          if (reminderId) {
+            await updateCachedReminderStatus(userId, reminderId, 'Done');
+          }
+        }
         acknowledgeReminderForDate(reminderId, todayYMD, storage);
-        emitWindowEvent('habittracker-entity-completed', { targetType: 'goal', entityId: milestoneId, reminderId, date: todayYMD });
+        emitWindowEvent('habittracker-entity-completed', { targetType: 'goal', entityId: milestoneId, goalId, reminderId, date: todayYMD });
         emitWindowEvent('habittracker-stats-updated', { source: 'reminder-milestone' });
         emitWindowEvent('habittracker-reminders-updated');
 
@@ -246,7 +320,7 @@ export async function executeReminderDone({
           });
           await updateCachedReminderStatus(userId, reminderId, 'Done');
         }
-        await updateCachedMilestoneDone(userId, milestoneId, true);
+        await updateCachedMilestoneDone(userId, milestoneId, true, goalId);
         acknowledgeReminderForDate(reminderId, todayYMD, storage);
         emitWindowEvent('habittracker-stats-updated', { source: 'reminder-milestone-offline' });
         emitWindowEvent('habittracker-reminders-updated');
@@ -303,8 +377,14 @@ export async function executeReminderDone({
           }
         }
 
+        if (userId) {
+          await updateCachedLearningTopicDone(userId, topicId, 'Completed');
+          if (reminderId && isDeadline) {
+            await updateCachedReminderStatus(userId, reminderId, 'Done');
+          }
+        }
         acknowledgeReminderForDate(reminderId, todayYMD, storage);
-        emitWindowEvent('habittracker-entity-completed', { targetType: 'learning_topic', entityId: topicId, reminderId, date: todayYMD });
+        emitWindowEvent('habittracker-entity-completed', { targetType: 'learning_topic', entityId: topicId, journeyId, reminderId, date: todayYMD });
         emitWindowEvent('habittracker-stats-updated', { source: 'reminder-topic' });
         emitWindowEvent('habittracker-reminders-updated');
 
@@ -339,6 +419,9 @@ export async function executeReminderDone({
             notification_status: 'Done',
           });
           await updateCachedReminderStatus(userId, reminderId, 'Done');
+        }
+        if (userId) {
+          await updateCachedLearningTopicDone(userId, topicId, 'Completed');
         }
         acknowledgeReminderForDate(reminderId, todayYMD, storage);
         emitWindowEvent('habittracker-stats-updated', { source: 'reminder-topic-offline' });
@@ -376,6 +459,9 @@ export async function executeReminderDone({
           return { ok: false, error: errJson?.error || 'Failed to complete goal.' };
         }
 
+        if (userId) {
+          await updateCachedGoalDone(userId, goalId, 'Completed');
+        }
         acknowledgeReminderForDate(reminderId, todayYMD, storage);
         emitWindowEvent('habittracker-entity-completed', { targetType: 'goal', entityId: goalId, reminderId, date: todayYMD });
         emitWindowEvent('habittracker-stats-updated', { source: 'reminder-goal' });
@@ -397,6 +483,7 @@ export async function executeReminderDone({
         status: 'Completed',
       });
       if (queuedGoal) {
+        await updateCachedGoalDone(userId, goalId, 'Completed');
         acknowledgeReminderForDate(reminderId, todayYMD, storage);
         emitWindowEvent('habittracker-stats-updated', { source: 'reminder-goal-offline' });
         emitWindowEvent('habittracker-reminders-updated');
@@ -433,6 +520,9 @@ export async function executeReminderDone({
           return { ok: false, error: errJson?.error || 'Failed to complete journey.' };
         }
 
+        if (userId) {
+          await updateCachedLearningJourneyDone(userId, journeyId, 'Completed');
+        }
         acknowledgeReminderForDate(reminderId, todayYMD, storage);
         emitWindowEvent('habittracker-entity-completed', { targetType: 'learning_journey', entityId: journeyId, reminderId, date: todayYMD });
         emitWindowEvent('habittracker-stats-updated', { source: 'reminder-journey' });
@@ -454,6 +544,7 @@ export async function executeReminderDone({
         status: 'Completed',
       });
       if (queuedJourney) {
+        await updateCachedLearningJourneyDone(userId, journeyId, 'Completed');
         acknowledgeReminderForDate(reminderId, todayYMD, storage);
         emitWindowEvent('habittracker-stats-updated', { source: 'reminder-journey-offline' });
         emitWindowEvent('habittracker-reminders-updated');
@@ -469,7 +560,7 @@ export async function executeReminderDone({
     return { ok: false, error: 'Failed to complete learning journey. Check your connection.' };
   }
 
-  return { ok: false, error: 'Unsupported reminder action mode.' };
+  return { ok: false, error: `Unsupported reminder action mode: ${String(mode)}` };
 }
 
 export async function undoReminderDone({

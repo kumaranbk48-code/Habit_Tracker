@@ -104,6 +104,20 @@ export default function LearningHubDashboard() {
     }
   }, [session, fetchDashboardData]);
 
+  useEffect(() => {
+    const handleRefreshEvent = () => {
+      if (session) fetchDashboardData(true);
+    };
+    window.addEventListener('habittracker-stats-updated', handleRefreshEvent);
+    window.addEventListener('habittracker-entity-completed', handleRefreshEvent);
+    window.addEventListener('habittracker-entity-uncompleted', handleRefreshEvent);
+    return () => {
+      window.removeEventListener('habittracker-stats-updated', handleRefreshEvent);
+      window.removeEventListener('habittracker-entity-completed', handleRefreshEvent);
+      window.removeEventListener('habittracker-entity-uncompleted', handleRefreshEvent);
+    };
+  }, [session, fetchDashboardData]);
+
   useRefreshOnConnectivity(fetchDashboardData, { enabled: Boolean(session), delayMs: 250 });
 
   const handleCreateJourney = async (journeyData) => {
@@ -309,12 +323,12 @@ export default function LearningHubDashboard() {
             <div className="pt-2 max-w-md space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-400 font-medium">{featuredJourney.category || 'Self-Paced'}</span>
-                <span className="font-bold text-teal-300">{featuredJourney.completion_progress ?? 0}%</span>
+                <span className="font-bold text-teal-300">{featuredJourney.status === 'Completed' ? 100 : (featuredJourney.completion_progress ?? 0)}%</span>
               </div>
               <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-teal-400 rounded-full transition-all duration-500"
-                  style={{ width: `${featuredJourney.completion_progress ?? 0}%` }}
+                  style={{ width: `${featuredJourney.status === 'Completed' ? 100 : (featuredJourney.completion_progress ?? 0)}%` }}
                 />
               </div>
             </div>
@@ -496,12 +510,12 @@ export default function LearningHubDashboard() {
                   <div className="space-y-2 pt-2 border-t border-white/[0.04]">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-slate-400">{j.topics_count ?? 0} {(j.topics_count ?? 0) === 1 ? 'topic' : 'topics'}</span>
-                      <span className="font-bold text-teal-300">{j.completion_progress ?? 0}%</span>
+                      <span className="font-bold text-teal-300">{j.status === 'Completed' ? 100 : (j.completion_progress ?? 0)}%</span>
                     </div>
                     <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-teal-400 rounded-full transition-all duration-300"
-                        style={{ width: `${j.completion_progress ?? 0}%` }}
+                        style={{ width: `${j.status === 'Completed' ? 100 : (j.completion_progress ?? 0)}%` }}
                       />
                     </div>
                   </div>

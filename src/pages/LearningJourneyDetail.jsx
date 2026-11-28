@@ -80,6 +80,20 @@ export default function LearningJourneyDetail() {
 
   const refreshJourneySilent = useCallback(() => fetchJourneyDetail(true), [fetchJourneyDetail]);
   useRefreshOnConnectivity(refreshJourneySilent, { enabled: Boolean(session), delayMs: 250 });
+
+  useEffect(() => {
+    const handleRefreshEvent = () => {
+      if (session) fetchJourneyDetail(true);
+    };
+    window.addEventListener('habittracker-stats-updated', handleRefreshEvent);
+    window.addEventListener('habittracker-entity-completed', handleRefreshEvent);
+    window.addEventListener('habittracker-entity-uncompleted', handleRefreshEvent);
+    return () => {
+      window.removeEventListener('habittracker-stats-updated', handleRefreshEvent);
+      window.removeEventListener('habittracker-entity-completed', handleRefreshEvent);
+      window.removeEventListener('habittracker-entity-uncompleted', handleRefreshEvent);
+    };
+  }, [session, fetchJourneyDetail]);
   
   // Close actions dropdown when clicking outside
   useEffect(() => {
@@ -832,12 +846,12 @@ export default function LearningJourneyDetail() {
           <div>
             <div className="flex items-center justify-between text-slate-400 mb-1">
               <span>Overall Completion Progress</span>
-              <span className="font-bold text-teal-300">{journey.completion_progress}%</span>
+              <span className="font-bold text-teal-300">{journey.status === 'Completed' ? 100 : (journey.completion_progress ?? 0)}%</span>
             </div>
             <div className="w-full h-2 bg-white/[0.05] rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-[#178274] to-[#2dd4bf] rounded-full transition-all duration-300"
-                style={{ width: `${journey.completion_progress}%` }}
+                style={{ width: `${journey.status === 'Completed' ? 100 : (journey.completion_progress ?? 0)}%` }}
               />
             </div>
           </div>

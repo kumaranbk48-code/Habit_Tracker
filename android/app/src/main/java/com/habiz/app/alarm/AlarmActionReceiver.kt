@@ -101,8 +101,19 @@ class AlarmActionReceiver : BroadcastReceiver() {
             }
 
             ACTION_DISMISS -> {
-                // CHECK B: Save completion and cancel any active snooze for this entity
-                NativeAlarmScheduler.saveCompletedEntity(context, targetType, habitId, todayDate)
+                val isHabitTarget = targetType.isEmpty() || targetType.equals("habit", ignoreCase = true)
+                val occDateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(refTime))
+
+                if (isHabitTarget) {
+                    // Habit Mark Done: save daily completion & cancel active habit snooze
+                    NativeAlarmScheduler.saveCompletedEntity(context, targetType, habitId, todayDate)
+                    NativeAlarmScheduler.cancelSnoozeForEntity(context, habitId, reminderId)
+                } else {
+                    // Goal / Learning Mark Done: only ack this reminder for occurrence date until JS syncs server result
+                    NativeAlarmScheduler.ackReminderForDate(context, reminderId.ifEmpty { habitId }, occDateStr)
+                    NativeAlarmScheduler.cancelSnoozeForEntity(context, "", reminderId.ifEmpty { habitId })
+                }
+
                 NativeAlarmScheduler.addPendingAction(
                     context = context,
                     type = "complete",
@@ -113,7 +124,6 @@ class AlarmActionReceiver : BroadcastReceiver() {
                     occurrenceMinute = occMinute,
                     timestamp = now
                 )
-                NativeAlarmScheduler.cancelSnoozeForEntity(context, habitId, reminderId)
 
                 NativeAlarmScheduler.recordDismissed(context, id, reminderId, habitId)
                 NativeAlarmSchedulerPlugin.notifyDismissed(id, reminderId, habitId)

@@ -55,6 +55,14 @@ class AlarmActivity : AppCompatActivity() {
 
         renderCurrentAlarm()
         setupButtons()
+        AlarmService.clearOverlayCallback?.invoke()
+
+        val firstItem = alarmQueue.firstOrNull()
+        NativeAlarmScheduler.logDiag(
+            this,
+            "activity_onCreate_shown",
+            "id=${firstItem?.id ?: intent.getIntExtra("id", 0)} type=${firstItem?.targetType ?: intent.getStringExtra("targetType") ?: "habit"} queueSize=${alarmQueue.size}"
+        )
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -236,14 +244,15 @@ class AlarmActivity : AppCompatActivity() {
             keyguardManager.requestDismissKeyguard(this, null)
         } else {
             @Suppress("DEPRECATION")
-            window.addFlags(
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
-            )
+            window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD)
         }
 
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        @Suppress("DEPRECATION")
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        )
     }
 
     override fun onDestroy() {

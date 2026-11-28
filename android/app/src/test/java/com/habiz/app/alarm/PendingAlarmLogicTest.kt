@@ -170,4 +170,106 @@ class PendingAlarmLogicTest {
             mergedHabits.contains("shared-id:$today")
         )
     }
+
+    @Test
+    fun testCheckCompletedDecisionUsesPerReminderAckAndNotPermanentGoalSuppression() {
+        val today = "2026-11-28"
+        val tomorrow = "2026-11-29"
+        val acked = setOf("rem-goal-ms1:$today", "rem-topic-1:$today")
+
+        // Marking rem-goal-ms1 done acknowledges ONLY rem-goal-ms1 on today
+        assertEquals(
+            "acked-today",
+            PendingAlarmLogic.checkCompletedReason(
+                targetType = "goal",
+                entityId = "goal-1",
+                reminderId = "rem-goal-ms1",
+                dateStr = today,
+                completedHabits = emptySet(),
+                completedGoals = emptySet(),
+                completedLearning = emptySet(),
+                ackedRemindersByDate = acked
+            )
+        )
+        // Another reminder (rem-goal-ms2) for the SAME goal still rings today
+        assertEquals(
+            null,
+            PendingAlarmLogic.checkCompletedReason(
+                targetType = "goal",
+                entityId = "goal-1",
+                reminderId = "rem-goal-ms2",
+                dateStr = today,
+                completedHabits = emptySet(),
+                completedGoals = emptySet(),
+                completedLearning = emptySet(),
+                ackedRemindersByDate = acked
+            )
+        )
+        // Acked reminder rings again tomorrow if server did not actually complete the entity
+        assertEquals(
+            null,
+            PendingAlarmLogic.checkCompletedReason(
+                targetType = "goal",
+                entityId = "goal-1",
+                reminderId = "rem-goal-ms1",
+                dateStr = tomorrow,
+                completedHabits = emptySet(),
+                completedGoals = emptySet(),
+                completedLearning = emptySet(),
+                ackedRemindersByDate = acked
+            )
+        )
+        // Synced completion from server suppresses all reminders of that goal
+        assertEquals(
+            "synced-complete",
+            PendingAlarmLogic.checkCompletedReason(
+                targetType = "goal",
+                entityId = "goal-1",
+                reminderId = "rem-goal-ms2",
+                dateStr = tomorrow,
+                completedHabits = emptySet(),
+                completedGoals = setOf("goal-1"),
+                completedLearning = emptySet(),
+                ackedRemindersByDate = emptySet()
+            )
+        )
+        // Learning topic ack behaves identically
+        assertEquals(
+            "acked-today",
+            PendingAlarmLogic.checkCompletedReason(
+                targetType = "learning_topic",
+                entityId = "topic-1",
+                reminderId = "rem-topic-1",
+                dateStr = today,
+                completedHabits = emptySet(),
+                completedGoals = emptySet(),
+                completedLearning = emptySet(),
+                ackedRemindersByDate = acked
+            )
+        )
+        assertEquals(
+            null,
+            PendingAlarmLogic.checkCompletedReason(
+                targetType = "learning_journey",
+                entityId = "topic-1",
+                reminderId = "rem-other-topic",
+                dateStr = today,
+                completedHabits = emptySet(),
+                completedGoals = emptySet(),
+                completedLearning = emptySet(),
+                ackedRemindersByDate = acked
+            )
+        )
+    }
+
+    @Test
+    fun testDiagnosticRingBufferRetainsLast60EntriesInOrder() {
+        var entries = emptyList<String>()
+        for (i in 1..75) {
+            entries = PendingAlarmLogic.appendDiagnosticEntry(entries, "entry-$i")
+        }
+        assertEquals(PendingAlarmLogic.MAX_DIAGNOSTIC_ENTRIES, entries.size)
+        assertEquals("entry-16", entries.first())
+        assertEquals("entry-75", entries.last())
+    }
 }

@@ -24,7 +24,7 @@ import {
   resolveEditedTargetId,
   sortTargetsActiveFirst,
 } from '../lib/reminderPickerUtils';
-import { requestAlarmPermissionCheck } from '../lib/alarmPermissionPrompt';
+import { hasSeenAlarmPermissionPrompt } from '../lib/alarmPermissionPrompt';
 import {
   Plus, Pencil, Trash2, Bell, BellOff, BellRing, AlertCircle, ShieldCheck,
   Sun, Sunset, Moon, Clock, Calendar, Check, MessageSquare, Sparkles,
@@ -41,6 +41,7 @@ import {
   cancelNativeReminder,
   checkExactAlarmPermission,
   requestExactAlarmPermission,
+  getAlarmPermissionStatus,
   getNextFireTime,
 } from '../lib/nativeNotifications';
 
@@ -148,20 +149,25 @@ export default function Reminders() {
   const [pendingDeleteReminder, setPendingDeleteReminder] = useState(null);
   const [deletingReminder, setDeletingReminder] = useState(false);
   const fetchSeqRef = useRef(0);
+  const lastPermWarnAtRef = useRef(0);
 
-  const maybePromptFullScreenIntent = useCallback(async (scheduleResult) => {
+  const notifyIfAlarmPermissionMissing = useCallback(async () => {
     if (!isNative) return;
-    if (scheduleResult?.fullScreenIntentDenied === true) {
-      requestAlarmPermissionCheck({ beforeScheduling: true });
-      return;
-    }
-    requestAlarmPermissionCheck({ beforeScheduling: true });
-  }, []);
-
-  useEffect(() => {
-    if (isNative) {
-      requestAlarmPermissionCheck({ beforeScheduling: false });
-    }
+    if (!hasSeenAlarmPermissionPrompt()) return;
+    try {
+      const status = await getAlarmPermissionStatus();
+      const missing = (status.fsiNeeded && !status.fsiGranted) || !status.overlayGranted;
+      if (missing) {
+        const now = Date.now();
+        if (now - lastPermWarnAtRef.current > 2000) {
+          lastPermWarnAtRef.current = now;
+          setToast({
+            message: 'Full-screen alarm permission is off. Allow it in Profile > Alarm permissions.',
+            type: 'error',
+          });
+        }
+      }
+    } catch {}
   }, []);
 
   // Filters
@@ -460,7 +466,7 @@ export default function Reminders() {
     // Immediately schedule or update alarm natively on Android
     if (isNative) {
       if (newIsAlarm) {
-        requestAlarmPermissionCheck({ beforeScheduling: true });
+        notifyIfAlarmPermissionMissing();
         checkExactAlarmPermission().then((ok) => {
           if (!ok) requestExactAlarmPermission();
         });
@@ -473,11 +479,6 @@ export default function Reminders() {
         rem.learning_journeys?.title ||
         'Reminder';
       scheduleSingleNativeReminder({ ...rem, is_alarm: newIsAlarm }, targetName)
-        .then((schedRes) => {
-          if (newIsAlarm) {
-            maybePromptFullScreenIntent(schedRes);
-          }
-        })
         .catch(() => {});
     }
 
@@ -638,7 +639,7 @@ export default function Reminders() {
       if (isNative) {
         try {
           if (payload.is_alarm) {
-            requestAlarmPermissionCheck({ beforeScheduling: true });
+            notifyIfAlarmPermissionMissing();
             const exactAllowed = await checkExactAlarmPermission();
             if (!exactAllowed) {
               await requestExactAlarmPermission();
@@ -662,10 +663,7 @@ export default function Reminders() {
             learning_topics: selectedTopicObj || null,
             id: editing ? editing.id : `client_${form.habit_id || form.goal_id || form.topic_id || Date.now()}`,
           };
-          const schedRes = await scheduleSingleNativeReminder(clientReminder, targetName || 'Habit');
-          if (payload.is_alarm) {
-            await maybePromptFullScreenIntent(schedRes);
-          }
+          await scheduleSingleNativeReminder(clientReminder, targetName || 'Habit');
         } catch (nativeErr) {
           console.warn('[Reminders] Immediate native schedule warning:', nativeErr);
         }
@@ -778,11 +776,6 @@ export default function Reminders() {
         const targetName = reminder.habits?.habit_name || reminder.goals?.goal_name || reminder.learning_journeys?.title || 'Reminder';
         const isAlarmRem = Boolean(reminder.is_alarm || reminder.reminder_mode === 'alarm');
         scheduleSingleNativeReminder({ ...reminder, notification_status: 'Active' }, targetName)
-          .then((schedRes) => {
-            if (isAlarmRem) {
-              maybePromptFullScreenIntent(schedRes);
-            }
-          })
           .catch(() => {});
       } else {
         cancelNativeReminder(reminder.id).catch(() => {});
@@ -1769,7 +1762,7 @@ export default function Reminders() {
                       const checked = e.target.checked;
                       setForm({ ...form, is_alarm: checked });
                       if (checked && isNative) {
-                        requestAlarmPermissionCheck({ beforeScheduling: true });
+                        notifyIfAlarmPermissionMissing();
                         const exactAllowed = await checkExactAlarmPermission();
                         if (!exactAllowed) {
                           await requestExactAlarmPermission();

@@ -38,6 +38,9 @@ object NativeAlarmScheduler {
     private val prefsLock = Any()
     private const val KEY_COMPLETED_GOALS = "completed_goals_set"
     private const val KEY_COMPLETED_LEARNING = "completed_learning_set"
+    private const val KEY_ACKED_REMINDERS_BY_DATE = "acked_reminders_by_date"
+    private const val ACKED_REMINDERS_RETENTION_DAYS = 14
+    private const val KEY_DIAGNOSTICS_LOG = "alarm_diagnostics_log"
     private const val KEY_PENDING_ALARM_ACTIONS = "pending_alarm_actions"
 
     /**
@@ -58,36 +61,98 @@ object NativeAlarmScheduler {
      * Goals: checked globally (status Completed or milestones done).
      * Learning Hub / Roadmaps: checked globally (status Completed).
      */
+    fun checkEntityCompletedReason(
+        context: Context,
+        targetType: String,
+        entityId: String,
+        reminderId: String,
+        dateStr: String
+    ): String? {
+        val prefs = getPrefs(context)
+        val completedHabits = prefs.getStringSet(KEY_COMPLETED_HABITS, emptySet()) ?: emptySet()
+        val completedGoals = prefs.getStringSet(KEY_COMPLETED_GOALS, emptySet()) ?: emptySet()
+        val completedLearning = prefs.getStringSet(KEY_COMPLETED_LEARNING, emptySet()) ?: emptySet()
+        val ackedByDate = prefs.getStringSet(KEY_ACKED_REMINDERS_BY_DATE, emptySet()) ?: emptySet()
+
+        return PendingAlarmLogic.checkCompletedReason(
+            targetType = targetType,
+            entityId = entityId,
+            reminderId = reminderId,
+            dateStr = dateStr,
+            completedHabits = completedHabits,
+            completedGoals = completedGoals,
+            completedLearning = completedLearning,
+            ackedRemindersByDate = ackedByDate
+        )
+    }
+
     fun isEntityCompleted(
         context: Context,
         targetType: String,
         entityId: String,
         reminderId: String,
         dateStr: String
-    ): Boolean {
-        val prefs = getPrefs(context)
-        val type = (if (targetType.isEmpty()) "habit" else targetType).lowercase()
+    ): Boolean = checkEntityCompletedReason(context, targetType, entityId, reminderId, dateStr) != null
 
-        when (type) {
-            "habit" -> {
-                val habitsSet = prefs.getStringSet(KEY_COMPLETED_HABITS, emptySet()) ?: emptySet()
-                if (entityId.isNotEmpty() && habitsSet.contains("$entityId:$dateStr")) return true
-                if (reminderId.isNotEmpty() && habitsSet.contains("$reminderId:$dateStr")) return true
-                return false
+    /**
+     * Records a date-scoped per-reminder acknowledgement ("<reminderId>:<yyyy-MM-dd>")
+     * for non-habit reminders dismissed/marked done natively. Never touches
+     * completed_goals_set / completed_learning_set and is never cleared by syncCompletions.
+     */
+    fun ackReminderForDate(context: Context, reminderId: String, dateStr: String) {
+        if (reminderId.isEmpty() || dateStr.isEmpty()) return
+        val cutoffCal = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_YEAR, -ACKED_REMINDERS_RETENTION_DAYS)
+        }
+        val cutoffStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cutoffCal.time)
+        synchronized(prefsLock) {
+            val prefs = getPrefs(context)
+            val existing = prefs.getStringSet(KEY_ACKED_REMINDERS_BY_DATE, emptySet()) ?: emptySet()
+            val updated = PendingAlarmLogic.pruneDateScopedEntries(existing, cutoffStr)
+            updated.add("$reminderId:$dateStr")
+            prefs.edit().putStringSet(KEY_ACKED_REMINDERS_BY_DATE, updated).apply()
+        }
+        Log.i(TAG, "[COMPLETION] Acked reminderId='$reminderId' for date='$dateStr'")
+    }
+
+    /**
+     * Appends an entry to the persistent alarm diagnostics ring buffer (last 60 entries).
+     */
+    fun logDiag(context: Context, event: String, detail: String = "") {
+        val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
+        val line = if (detail.isNotEmpty()) "$ts [$event] $detail" else "$ts [$event]"
+        synchronized(prefsLock) {
+            val prefs = getPrefs(context)
+            val raw = prefs.getString(KEY_DIAGNOSTICS_LOG, "[]") ?: "[]"
+            val arr = try { JSONArray(raw) } catch (_: Exception) { JSONArray() }
+            val current = mutableListOf<String>()
+            for (i in 0 until arr.length()) {
+                val item = arr.optString(i, "")
+                if (item.isNotEmpty()) current.add(item)
             }
-            "goal" -> {
-                val goalsSet = prefs.getStringSet(KEY_COMPLETED_GOALS, emptySet()) ?: emptySet()
-                if (entityId.isNotEmpty() && goalsSet.contains(entityId)) return true
-                if (reminderId.isNotEmpty() && goalsSet.contains(reminderId)) return true
-                return false
+            val next = PendingAlarmLogic.appendDiagnosticEntry(current, line)
+            val outArr = JSONArray()
+            for (item in next) outArr.put(item)
+            prefs.edit().putString(KEY_DIAGNOSTICS_LOG, outArr.toString()).apply()
+        }
+    }
+
+    fun getDiagnostics(context: Context): List<String> {
+        synchronized(prefsLock) {
+            val raw = getPrefs(context).getString(KEY_DIAGNOSTICS_LOG, "[]") ?: "[]"
+            val arr = try { JSONArray(raw) } catch (_: Exception) { JSONArray() }
+            val result = mutableListOf<String>()
+            for (i in 0 until arr.length()) {
+                val item = arr.optString(i, "")
+                if (item.isNotEmpty()) result.add(item)
             }
-            "learning_journey", "learning_topic", "learning" -> {
-                val learnSet = prefs.getStringSet(KEY_COMPLETED_LEARNING, emptySet()) ?: emptySet()
-                if (entityId.isNotEmpty() && learnSet.contains(entityId)) return true
-                if (reminderId.isNotEmpty() && learnSet.contains(reminderId)) return true
-                return false
-            }
-            else -> return false
+            return result
+        }
+    }
+
+    fun clearDiagnostics(context: Context) {
+        synchronized(prefsLock) {
+            getPrefs(context).edit().remove(KEY_DIAGNOSTICS_LOG).apply()
         }
     }
 

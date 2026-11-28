@@ -3,12 +3,20 @@ import { useAuth } from '../contexts/AuthContext';
 import supabase from '../lib/supabase';
 import {
   User, Mail, Download, Edit3, LogOut, Sparkles,
-  Camera, Trash2, HelpCircle, ChevronRight, Heart
+  Camera, Trash2, HelpCircle, ChevronRight, Heart,
+  BellRing, Layers, ExternalLink, Copy, Check
 } from 'lucide-react';
 import BadgeGrid from '../components/BadgeGrid';
 import Modal from '../components/Modal';
 import { motion } from 'framer-motion';
 import { calculateXP, checkNewBadges } from '../hooks/useGamification';
+import {
+  isNative,
+  getAlarmPermissionStatus,
+  requestFullScreenIntentPermission,
+  openOverlaySettings,
+  getAlarmDiagnostics,
+} from '../lib/nativeNotifications';
 
 export default function Profile() {
   const { user, signOut, signOutDirect } = useAuth();
@@ -28,6 +36,74 @@ export default function Profile() {
   const [deleteModal, setDeleteModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [alarmPermStatus, setAlarmPermStatus] = useState({
+    fsiNeeded: false,
+    fsiGranted: true,
+    overlayGranted: true,
+  });
+  const [diagCopied, setDiagCopied] = useState(false);
+  const [diagStatusText, setDiagStatusText] = useState('');
+
+  const refreshAlarmPermissions = useCallback(async () => {
+    if (!isNative) return;
+    try {
+      const st = await getAlarmPermissionStatus();
+      setAlarmPermStatus({
+        fsiNeeded: Boolean(st.fsiNeeded),
+        fsiGranted: Boolean(st.fsiGranted),
+        overlayGranted: Boolean(st.overlayGranted),
+      });
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!isNative) return undefined;
+    refreshAlarmPermissions();
+
+    const handleForegroundRefresh = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      refreshAlarmPermissions();
+    };
+
+    window.addEventListener('focus', handleForegroundRefresh);
+    document.addEventListener('visibilitychange', handleForegroundRefresh);
+    document.addEventListener('resume', handleForegroundRefresh);
+    return () => {
+      window.removeEventListener('focus', handleForegroundRefresh);
+      document.removeEventListener('visibilitychange', handleForegroundRefresh);
+      document.removeEventListener('resume', handleForegroundRefresh);
+    };
+  }, [refreshAlarmPermissions]);
+
+  const handleCopyAlarmDiagnostics = async () => {
+    try {
+      const entries = await getAlarmDiagnostics();
+      const text = entries.length > 0
+        ? entries.join('\n')
+        : 'No alarm diagnostics recorded yet.';
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setDiagCopied(true);
+      setDiagStatusText(entries.length > 0 ? `Copied ${entries.length} entries` : 'Copied (empty log)');
+      setTimeout(() => {
+        setDiagCopied(false);
+        setDiagStatusText('');
+      }, 2500);
+    } catch {
+      setDiagStatusText('Could not copy diagnostics');
+    }
+  };
 
   useEffect(() => {
     if (user?.user_metadata) {
@@ -587,6 +663,92 @@ export default function Profile() {
           </div>
         </div>
       </div>
+
+      {/* ── Section: Alarm Permissions (APK only) ── */}
+      {isNative && (
+        <div className="habiz-panel p-5 sm:p-6 rounded-3xl border border-white/[0.08] shadow-xl space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block">
+                Alarm permissions
+              </span>
+              <p className="text-xs text-slate-400 mt-1">
+                Allow both permissions so scheduled alarms wake your screen reliably on lock screen or over other apps.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleCopyAlarmDiagnostics}
+              className="px-3.5 py-2 rounded-xl bg-white/[0.04] hover:bg-teal-500/[0.08] border border-white/[0.08] hover:border-teal-500/30 text-xs font-semibold text-slate-200 inline-flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              {diagCopied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} className="text-teal-400" />}
+              <span>{diagCopied ? 'Copied!' : 'Copy alarm diagnostics'}</span>
+            </button>
+          </div>
+
+          {diagStatusText && (
+            <p className="text-[11px] text-teal-300">{diagStatusText}</p>
+          )}
+
+          <div className="space-y-2.5">
+            {alarmPermStatus.fsiNeeded && (
+              <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/[0.05] flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center flex-shrink-0">
+                    <BellRing size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-sm font-bold text-white block">Full-screen notifications</span>
+                    <span className={`text-xs font-medium ${alarmPermStatus.fsiGranted ? 'text-emerald-400' : 'text-amber-300'}`}>
+                      {alarmPermStatus.fsiGranted ? 'Granted' : 'Not allowed'}
+                    </span>
+                  </div>
+                </div>
+                {!alarmPermStatus.fsiGranted && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await requestFullScreenIntentPermission();
+                      await refreshAlarmPermissions();
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-[#178274] hover:bg-[#136c60] text-white text-xs font-bold inline-flex items-center gap-1.5 transition-all cursor-pointer flex-shrink-0"
+                  >
+                    <span>Open settings</span>
+                    <ExternalLink size={12} />
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/[0.05] flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center flex-shrink-0">
+                  <Layers size={18} />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-sm font-bold text-white block">Display over other apps</span>
+                  <span className={`text-xs font-medium ${alarmPermStatus.overlayGranted ? 'text-emerald-400' : 'text-amber-300'}`}>
+                    {alarmPermStatus.overlayGranted ? 'Granted' : 'Not allowed'}
+                  </span>
+                </div>
+              </div>
+              {!alarmPermStatus.overlayGranted && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await openOverlaySettings();
+                    await refreshAlarmPermissions();
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-[#178274] hover:bg-[#136c60] text-white text-xs font-bold inline-flex items-center gap-1.5 transition-all cursor-pointer flex-shrink-0"
+                >
+                  <span>Open settings</span>
+                  <ExternalLink size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Section: Full Achievements & Badges Showcase ── */}
       <BadgeGrid

@@ -2,18 +2,20 @@ import supabase from './db-client.js';
 import { verifyUserToken } from './auth-helper.js';
 import { applyCors } from './cors.js';
 
-function calculateTopicCompletion(topicId, tasks) {
+function calculateTopicCompletion(topicId, tasks, topicStatus = null) {
+  if (topicStatus === 'Completed') return 100;
   const topicTasks = (tasks || []).filter(t => t.topic_id === topicId);
   if (topicTasks.length === 0) return 0;
   const done = topicTasks.filter(t => t.completed).length;
   return Math.round((done / topicTasks.length) * 100);
 }
 
-function calculateJourneyCompletion(journeyId, topics, tasks) {
+function calculateJourneyCompletion(journeyId, topics, tasks, journeyStatus = null) {
+  if (journeyStatus === 'Completed') return 100;
   const jTopics = (topics || []).filter(t => t.journey_id === journeyId);
   if (jTopics.length === 0) return 0;
   return Math.round(
-    jTopics.reduce((total, topic) => total + calculateTopicCompletion(topic.id, tasks), 0) /
+    jTopics.reduce((total, topic) => total + calculateTopicCompletion(topic.id, tasks, topic.status), 0) /
       jTopics.length
   );
 }
@@ -65,7 +67,7 @@ export default async function handler(req, res) {
         const journeyTopics = topics.filter(topic => topic.journey_id === journey.id);
         return {
           ...journey,
-          completion_progress: calculateJourneyCompletion(journey.id, topics, tasks),
+          completion_progress: calculateJourneyCompletion(journey.id, topics, tasks, journey.status),
           understanding_progress: calculateJourneyMastery(journey.id, topics),
           topics_count: journeyTopics.length,
           topics_completed: journeyTopics.filter(topic =>
@@ -196,7 +198,7 @@ export default async function handler(req, res) {
 
       const enrichedTopics = topics.map(topic => ({
         ...topic,
-        completion_progress: calculateTopicCompletion(topic.id, tasks),
+        completion_progress: calculateTopicCompletion(topic.id, tasks, topic.status),
         tasks: tasks.filter(task => task.topic_id === topic.id),
         resources: resources.filter(resource => resource.topic_id === topic.id),
         notes: notes.filter(note => note.topic_id === topic.id)
@@ -206,7 +208,7 @@ export default async function handler(req, res) {
         db_configured: true,
         journey: {
           ...journey,
-          completion_progress: calculateJourneyCompletion(journeyId, topics, tasks),
+          completion_progress: calculateJourneyCompletion(journeyId, topics, tasks, journey.status),
           understanding_progress: calculateJourneyMastery(journeyId, topics)
         },
         phases: phases.map(phase => ({
@@ -567,6 +569,9 @@ export default async function handler(req, res) {
       const payload = { last_activity_at: new Date().toISOString() };
       for (const f of allowedFields) {
         if (updates[f] !== undefined) payload[f] = updates[f];
+      }
+      if (payload.status === 'Completed' && payload.completion_progress === undefined) {
+        payload.completion_progress = 100;
       }
 
       const { data, error } = await supabase

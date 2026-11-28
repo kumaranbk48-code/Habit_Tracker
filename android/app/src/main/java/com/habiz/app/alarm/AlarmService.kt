@@ -1,12 +1,11 @@
 package com.habiz.app.alarm
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.PixelFormat
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -14,15 +13,20 @@ import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.provider.Settings
 import android.util.Log
-import androidx.core.app.NotificationCompat
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
+import androidx.core.app.NotificationManagerCompat
 import com.habiz.app.R
-import java.util.Date
 
 data class ActiveAlarmItem(
     val id: Int,
@@ -58,6 +62,9 @@ class AlarmService : Service() {
         var currentAlarmId: Int = 0
             private set
 
+        @Volatile
+        var clearOverlayCallback: (() -> Unit)? = null
+
         fun removeAlarm(removeId: Int, removeHabitId: String) {
             if (removeId != 0 || removeHabitId.isNotEmpty()) {
                 synchronized(activeAlarms) {
@@ -77,6 +84,10 @@ class AlarmService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
+    private var windowManager: WindowManager? = null
+    private var overlayAnchorView: View? = null
+    private val watchdogHandler = Handler(Looper.getMainLooper())
+    private var watchdogGeneration: Long = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -84,6 +95,7 @@ class AlarmService : Service() {
         super.onCreate()
         Log.i(TAG, "[SERVICE] AlarmService.onCreate()")
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
         // Acquire partial wake lock for up to 10 minutes to guarantee sound continues if device sleeps
         try {
@@ -114,7 +126,8 @@ class AlarmService : Service() {
                 // Update persistent notification with the next active alarm
                 val topItem = activeAlarms[0]
                 currentAlarmId = topItem.id
-                val notif = buildAlarmNotification(
+                val notif = AlarmNotificationHelper.buildAlarmNotification(
+                    context = this,
                     id = topItem.id,
                     title = topItem.title,
                     body = topItem.body,
@@ -153,7 +166,8 @@ class AlarmService : Service() {
         val topItem = activeAlarms[0]
 
         // 1. Build the persistent high-priority foreground notification with Snooze & Dismiss actions
-        val notification = buildAlarmNotification(
+        val notification = AlarmNotificationHelper.buildAlarmNotification(
+            context = this,
             id = topItem.id,
             title = topItem.title,
             body = topItem.body,
@@ -172,105 +186,134 @@ class AlarmService : Service() {
                 startForeground(currentAlarmId, notification)
             }
             Log.i(TAG, "[SERVICE] startForeground active for alarm id=$currentAlarmId (queue size=${activeAlarms.size})")
+            NativeAlarmScheduler.logDiag(
+                this,
+                "fsi_notification_posted",
+                "source=service id=$currentAlarmId canFsi=${NativeAlarmScheduler.canUseFullScreenIntent(this)} canOverlay=${AlarmNotificationHelper.canShowOverlays(this)} sdk=${Build.VERSION.SDK_INT}"
+            )
         } catch (e: Exception) {
             Log.e(TAG, "[SERVICE_ERROR] startForeground failed", e)
+            NativeAlarmScheduler.logDiag(this, "service_start_foreground", "error=${e.javaClass.simpleName}:${e.message}")
         }
 
-        // 3. Start repeating audio playback if not already playing
+        // 3. Start repeating audio playback and vibration
         startAlarmAudio()
-
-        // 4. Start repeating vibration if not already vibrating
         startAlarmVibration()
+
+        // 4. Launch AlarmActivity from service (with temporary 1x1 overlay anchor on Android 15+ when permitted)
+        launchActivityWithOverlayAnchor(incoming)
+
+        // 5. Watchdog retries at 2s & 6s if AlarmActivity failed to show
+        scheduleLaunchWatchdog(incoming)
 
         return START_NOT_STICKY
     }
 
-    private fun buildAlarmNotification(
-        id: Int,
-        title: String,
-        body: String,
-        scheduledTime: Long,
-        reminderId: String,
-        habitId: String,
-        targetType: String,
-        queueSize: Int = 1
-    ): android.app.Notification {
-        ensureChannelExists()
-
-        val displayTitle = if (queueSize > 1) "$title (+${queueSize - 1} more)" else title
-
-        // Intent to launch the Full-Screen AlarmActivity
-        val fullScreenIntent = Intent(this, AlarmActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra("id", id)
-            putExtra("title", title)
-            putExtra("body", body)
-            putExtra("scheduledTime", scheduledTime)
-            putExtra("reminderId", reminderId)
-            putExtra("habitId", habitId)
-            putExtra("targetType", targetType)
+    private fun addOverlayAnchorIfPermitted() {
+        if (overlayAnchorView != null) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || !Settings.canDrawOverlays(this)) return
+        try {
+            val view = View(this).apply {
+                setBackgroundColor(0x00000000)
+            }
+            val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                @Suppress("DEPRECATION")
+                WindowManager.LayoutParams.TYPE_PHONE
+            }
+            val params = WindowManager.LayoutParams(
+                1,
+                1,
+                layoutType,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = 0
+                y = 0
+            }
+            windowManager?.addView(view, params)
+            overlayAnchorView = view
+            clearOverlayCallback = { removeOverlayAnchor() }
+            NativeAlarmScheduler.logDiag(this, "overlay_view_added", "ok sdk=${Build.VERSION.SDK_INT}")
+        } catch (e: Exception) {
+            Log.w(TAG, "[SERVICE] Failed to add 1x1 overlay anchor (${e.javaClass.simpleName}): ${e.message}")
+            NativeAlarmScheduler.logDiag(this, "overlay_view_added", "error=${e.javaClass.simpleName}:${e.message}")
         }
-        val fullScreenPendingIntent = PendingIntent.getActivity(
-            this,
-            id,
-            fullScreenIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+    }
 
-        // Action: Snooze 10 minutes
-        val snoozeIntent = Intent(this, AlarmActionReceiver::class.java).apply {
-            this.action = AlarmActionReceiver.ACTION_SNOOZE
-            putExtra("id", id)
-            putExtra("title", title)
-            putExtra("body", body)
-            putExtra("scheduledTime", scheduledTime)
-            putExtra("reminderId", reminderId)
-            putExtra("habitId", habitId)
-            putExtra("targetType", targetType)
+    private fun removeOverlayAnchor() {
+        clearOverlayCallback = null
+        val view = overlayAnchorView ?: return
+        overlayAnchorView = null
+        try {
+            windowManager?.removeViewImmediate(view)
+        } catch (_: Exception) {
+            try {
+                windowManager?.removeView(view)
+            } catch (_: Exception) {}
         }
-        val snoozePendingIntent = PendingIntent.getBroadcast(
-            this,
-            id,
-            snoozeIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+    }
 
-        // Action: Dismiss Alarm
-        val dismissIntent = Intent(this, AlarmActionReceiver::class.java).apply {
-            this.action = AlarmActionReceiver.ACTION_DISMISS
-            putExtra("id", id)
-            putExtra("scheduledTime", scheduledTime)
-            putExtra("reminderId", reminderId)
-            putExtra("habitId", habitId)
-            putExtra("targetType", targetType)
+    private fun launchActivityWithOverlayAnchor(item: ActiveAlarmItem) {
+        addOverlayAnchorIfPermitted()
+        try {
+            val actIntent = AlarmNotificationHelper.buildAlarmActivityIntent(
+                context = this,
+                id = item.id,
+                title = item.title,
+                body = item.body,
+                scheduledTime = item.scheduledTime,
+                reminderId = item.reminderId,
+                habitId = item.habitId,
+                targetType = item.targetType,
+                isSnooze = item.isSnooze
+            )
+            startActivity(actIntent)
+            Log.i(TAG, "[SERVICE] Launched AlarmActivity for id=${item.id}")
+        } catch (e: Exception) {
+            Log.w(TAG, "[SERVICE] AlarmActivity launch from service failed (${e.javaClass.simpleName}): ${e.message}")
+            NativeAlarmScheduler.logDiag(this, "service_activity_launch", "error=${e.javaClass.simpleName}:${e.message}")
         }
-        val dismissPendingIntent = PendingIntent.getBroadcast(
-            this,
-            id,
-            dismissIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+    }
 
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_name)
-            .setContentTitle(displayTitle)
-            .setContentText(body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setOngoing(true)
-            .setAutoCancel(false)
-            .setContentIntent(fullScreenPendingIntent)
-            .addAction(0, "+10 min", snoozePendingIntent)
-            .addAction(0, "✓ Mark Done", dismissPendingIntent)
+    private fun scheduleLaunchWatchdog(item: ActiveAlarmItem) {
+        watchdogHandler.removeCallbacksAndMessages(null)
+        val gen = ++watchdogGeneration
+        val delays = listOf(2000L to 1, 6000L to 2)
+        for ((delayMs, attempt) in delays) {
+            watchdogHandler.postDelayed({
+                if (gen != watchdogGeneration || !isRunning) return@postDelayed
+                val stillActive = synchronized(activeAlarms) { activeAlarms.any { it.id == item.id } }
+                if (!stillActive) return@postDelayed
 
-        if (!NativeAlarmScheduler.canUseFullScreenIntent(this)) {
-            Log.w(TAG, "[SERVICE] USE_FULL_SCREEN_INTENT permission denied on Android 14+; attaching fullScreenIntent anyway.")
+                if (AlarmActivity.activeActivity != null) {
+                    removeOverlayAnchor()
+                    return@postDelayed
+                }
+
+                Log.w(TAG, "[WATCHDOG] Retry #$attempt: AlarmActivity still null for id=${item.id}; relaunching")
+                NativeAlarmScheduler.logDiag(this, "watchdog_retry", "attempt=$attempt id=${item.id}")
+                launchActivityWithOverlayAnchor(item)
+                try {
+                    val notif = AlarmNotificationHelper.buildAlarmNotification(
+                        context = this,
+                        id = item.id,
+                        title = item.title,
+                        body = item.body,
+                        scheduledTime = item.scheduledTime,
+                        reminderId = item.reminderId,
+                        habitId = item.habitId,
+                        targetType = item.targetType,
+                        queueSize = activeAlarms.size.coerceAtLeast(1)
+                    )
+                    NotificationManagerCompat.from(this).notify(item.id, notif)
+                } catch (_: Exception) {}
+            }, delayMs)
         }
-        builder.setFullScreenIntent(fullScreenPendingIntent, true)
-
-        return builder.build()
     }
 
     private fun startAlarmAudio() {
@@ -356,6 +399,9 @@ class AlarmService : Service() {
 
     private fun stopAlarm() {
         Log.i(TAG, "[SERVICE] Stopping alarm service, audio, and vibration")
+        watchdogGeneration++
+        watchdogHandler.removeCallbacksAndMessages(null)
+        removeOverlayAnchor()
         try {
             mediaPlayer?.let {
                 if (it.isPlaying) {
@@ -408,34 +454,11 @@ class AlarmService : Service() {
         stopSelf()
     }
 
-    private fun ensureChannelExists() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (notificationManager.getNotificationChannel(CHANNEL_ID) == null) {
-                val soundUri = Uri.parse("android.resource://" + packageName + "/" + R.raw.alarm)
-                val audioAttributes = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-
-                val channel = NotificationChannel(
-                    CHANNEL_ID,
-                    "Habit & Goal Alarms",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply {
-                    description = "High-priority alarms with sound, vibration, and heads-up banner"
-                    setSound(soundUri, audioAttributes)
-                    enableVibration(true)
-                    vibrationPattern = longArrayOf(0, 500, 250, 500, 250, 500)
-                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-                }
-                notificationManager.createNotificationChannel(channel)
-            }
-        }
-    }
-
     override fun onDestroy() {
         Log.i(TAG, "[SERVICE] AlarmService.onDestroy()")
+        watchdogGeneration++
+        watchdogHandler.removeCallbacksAndMessages(null)
+        removeOverlayAnchor()
         stopAlarm()
         super.onDestroy()
     }

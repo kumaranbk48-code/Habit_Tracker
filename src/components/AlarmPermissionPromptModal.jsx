@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { BellRing, Layers, ExternalLink } from 'lucide-react';
+import { BellRing, Layers, ExternalLink, CheckCircle2 } from 'lucide-react';
 import Modal from './Modal';
 import {
   isNative,
@@ -9,33 +9,35 @@ import {
 } from '../lib/nativeNotifications';
 import {
   ALARM_PERMISSION_PROMPT_EVENT,
-  dismissAlarmPermissionPromptForSession,
   evaluateAlarmPermissionPrompt,
-  getAlarmPermissionPromptSession,
-  markAlarmPermissionPromptShown,
+  hasSeenAlarmPermissionPrompt,
+  markAlarmPermissionPromptSeen,
 } from '../lib/alarmPermissionPrompt';
 
 export default function AlarmPermissionPromptModal() {
   const [open, setOpen] = useState(false);
   const [missingItems, setMissingItems] = useState([]);
+  const [allSet, setAllSet] = useState(false);
   const openRef = useRef(false);
 
   useEffect(() => {
     openRef.current = open;
   }, [open]);
 
-  const runCheck = useCallback(async ({ isResumeRefresh = false } = {}) => {
+  const runCheck = useCallback(async ({ trigger = 'auto', isResumeRefresh = false } = {}) => {
     if (!isNative) return;
+    if (isResumeRefresh && !openRef.current) return;
+
     try {
       const status = await getAlarmPermissionStatus();
-      const session = getAlarmPermissionPromptSession();
+      const seenEver = hasSeenAlarmPermissionPrompt();
       const decision = evaluateAlarmPermissionPrompt({
         isNative: status.isNative,
         fsiNeeded: status.fsiNeeded,
         fsiGranted: status.fsiGranted,
         overlayGranted: status.overlayGranted,
-        shownThisSession: session.shown,
-        dismissedThisSession: session.dismissed,
+        seenEver,
+        trigger,
         currentlyOpen: isResumeRefresh && openRef.current,
       });
 
@@ -43,54 +45,66 @@ export default function AlarmPermissionPromptModal() {
         openRef.current = false;
         setOpen(false);
         setMissingItems([]);
+        setAllSet(false);
         return;
       }
 
-      if (decision.shouldOpen && decision.missingItems.length > 0) {
-        if (!openRef.current) {
-          markAlarmPermissionPromptShown();
+      if (decision.shouldOpen) {
+        if (!seenEver && trigger === 'auto') {
+          markAlarmPermissionPromptSeen();
         }
         openRef.current = true;
         setMissingItems(decision.missingItems);
+        setAllSet(Boolean(decision.allSet));
         setOpen(true);
-      } else if (openRef.current && decision.missingItems.length > 0) {
+      } else if (openRef.current) {
         setMissingItems(decision.missingItems);
+        setAllSet(Boolean(decision.allSet));
       }
     } catch (err) {
       console.warn('[AlarmPermissionPromptModal] Permission check failed:', err);
     }
   }, []);
 
-  // App start check + shared trigger listener (Reminders mount & before scheduling alarms)
+  // Automatic first-entry check runs ONCE on mount (plus explicit manual opens)
   useEffect(() => {
     if (!isNative) return undefined;
 
-    runCheck({ isResumeRefresh: false });
+    runCheck({ trigger: 'auto', isResumeRefresh: false });
 
-    const handleTrigger = () => {
-      runCheck({ isResumeRefresh: openRef.current });
-    };
-
-    const handleForegroundRefresh = () => {
-      if (typeof document !== 'undefined' && document.hidden) return;
-      runCheck({ isResumeRefresh: true });
+    const handleTrigger = (e) => {
+      if (e?.detail?.manual === true) {
+        runCheck({ trigger: 'manual', isResumeRefresh: false });
+      }
     };
 
     window.addEventListener(ALARM_PERMISSION_PROMPT_EVENT, handleTrigger);
-    window.addEventListener('focus', handleForegroundRefresh);
-    document.addEventListener('visibilitychange', handleForegroundRefresh);
-    document.addEventListener('resume', handleForegroundRefresh);
-
     return () => {
       window.removeEventListener(ALARM_PERMISSION_PROMPT_EVENT, handleTrigger);
-      window.removeEventListener('focus', handleForegroundRefresh);
-      document.removeEventListener('visibilitychange', handleForegroundRefresh);
-      document.removeEventListener('resume', handleForegroundRefresh);
     };
   }, [runCheck]);
 
-  const handleLater = () => {
-    dismissAlarmPermissionPromptForSession();
+  // Refresh live status while the modal IS ALREADY OPEN (never opens a closed modal)
+  useEffect(() => {
+    if (!open || !isNative) return undefined;
+
+    const handleResumeRefresh = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      runCheck({ trigger: 'auto', isResumeRefresh: true });
+    };
+
+    window.addEventListener('focus', handleResumeRefresh);
+    document.addEventListener('visibilitychange', handleResumeRefresh);
+    document.addEventListener('resume', handleResumeRefresh);
+
+    return () => {
+      window.removeEventListener('focus', handleResumeRefresh);
+      document.removeEventListener('visibilitychange', handleResumeRefresh);
+      document.removeEventListener('resume', handleResumeRefresh);
+    };
+  }, [open, runCheck]);
+
+  const handleClose = () => {
     openRef.current = false;
     setOpen(false);
   };
@@ -101,62 +115,72 @@ export default function AlarmPermissionPromptModal() {
     } else if (itemId === 'overlay') {
       await openOverlaySettings();
     }
-    // Live refresh in case user returned immediately or OS granted without restart
-    await runCheck({ isResumeRefresh: true });
+    await runCheck({ trigger: 'auto', isResumeRefresh: true });
   };
 
-  if (!open || missingItems.length === 0) return null;
+  if (!open || (!allSet && missingItems.length === 0)) return null;
 
   return (
     <Modal
       isOpen={open}
-      onClose={handleLater}
+      onClose={handleClose}
       title="Full-Screen Alarm Permissions"
     >
       <div className="space-y-4">
-        <p className="text-sm text-slate-300">
-          Allow {missingItems.length === 2 ? 'these permissions' : 'this permission'} so HabiZ alarms always appear full-screen when your phone is locked or in another app.
-        </p>
+        {allSet ? (
+          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 flex items-center gap-3">
+            <CheckCircle2 size={20} className="text-emerald-400 flex-shrink-0" />
+            <p className="text-sm text-emerald-100 font-medium">
+              All set! Full-screen alarm permissions are enabled.
+            </p>
+          </div>
+        ) : (
+          <>
+            <p className="text-sm text-slate-300">
+              Allow {missingItems.length === 2 ? 'these permissions' : 'this permission'} so HabiZ alarms always appear full-screen when your phone is locked or in another app.
+            </p>
 
-        <div className="space-y-3">
-          {missingItems.map((item) => {
-            const Icon = item.id === 'fsi' ? BellRing : Layers;
-            return (
-              <div
-                key={item.id}
-                className="p-3.5 rounded-2xl bg-[#141d26] border border-white/[0.08] flex items-center justify-between gap-3"
-              >
-                <div className="flex items-start gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-xl bg-[#178274]/20 border border-[#178274]/40 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Icon size={15} className="text-[#5fae9e]" />
+            <div className="space-y-3">
+              {missingItems.map((item) => {
+                const Icon = item.id === 'fsi' ? BellRing : Layers;
+                return (
+                  <div
+                    key={item.id}
+                    className="p-3.5 rounded-2xl bg-[#141d26] border border-white/[0.08] flex items-center justify-between gap-3"
+                  >
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-xl bg-[#178274]/20 border border-[#178274]/40 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Icon size={15} className="text-[#5fae9e]" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-white">{item.title}</div>
+                        <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                          {item.description}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenItemSettings(item.id)}
+                      className="px-3.5 py-2 text-xs font-bold text-white bg-[#178274] hover:bg-[#136c60] rounded-xl transition-all shadow-md shadow-teal-950/40 active:scale-95 cursor-pointer flex-shrink-0 inline-flex items-center gap-1.5"
+                    >
+                      <span>{item.buttonLabel}</span>
+                      <ExternalLink size={12} />
+                    </button>
                   </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-white">{item.title}</div>
-                    <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-                      {item.description}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleOpenItemSettings(item.id)}
-                  className="px-3.5 py-2 text-xs font-bold text-white bg-[#178274] hover:bg-[#136c60] rounded-xl transition-all shadow-md shadow-teal-950/40 active:scale-95 cursor-pointer flex-shrink-0 inline-flex items-center gap-1.5"
-                >
-                  <span>{item.buttonLabel}</span>
-                  <ExternalLink size={12} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
+                );
+              })}
+            </div>
+          </>
+        )}
 
         <div className="flex items-center justify-end gap-3 pt-2 border-t border-white/[0.06]">
           <button
             type="button"
-            onClick={handleLater}
+            onClick={handleClose}
             className="px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
           >
-            Later
+            {allSet ? 'Done' : 'Later'}
           </button>
         </div>
       </div>

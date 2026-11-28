@@ -26,6 +26,7 @@ const SNOOZE_COOLDOWN_MS = 10 * 60 * 1000;
 const handledHabitDatesMemory = new Set();
 const recentSnoozesMemory = new Map();
 const firedAlarmKeysMemory = new Set();
+const warnedUnresolvedReminderIds = new Set();
 
 function safeGetStorage() {
   if (typeof localStorage !== 'undefined') return localStorage;
@@ -457,6 +458,34 @@ export async function openOverlaySettings() {
   }
 }
 
+export async function recordAlarmDiagnostic(event, detail = '') {
+  if (!isNative || !event) return;
+  try {
+    await NativeAlarmScheduler.recordDiagnostic?.({ event: String(event), detail: String(detail || '') });
+  } catch {}
+}
+
+export async function getAlarmDiagnostics() {
+  if (!isNative) return [];
+  try {
+    const res = await NativeAlarmScheduler.getAlarmDiagnostics?.();
+    return Array.isArray(res?.entries) ? res.entries : [];
+  } catch (err) {
+    console.warn('[NativeNotifications] getAlarmDiagnostics error:', err);
+    return [];
+  }
+}
+
+export async function clearAlarmDiagnostics() {
+  if (!isNative) return false;
+  try {
+    await NativeAlarmScheduler.clearAlarmDiagnostics?.();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Query combined Android alarm reliability permissions (Full-screen notifications on
  * Android 14+ & Display over other apps). Returns granted on web.
@@ -467,8 +496,16 @@ export async function getAlarmPermissionStatus() {
   }
   try {
     const [fsiRes, overlayRes] = await Promise.all([
-      NativeAlarmScheduler.canUseFullScreenIntent().catch(() => null),
-      NativeAlarmScheduler.canShowOverlays().catch(() => null),
+      NativeAlarmScheduler.canUseFullScreenIntent().catch((err) => {
+        console.warn('[NativeNotifications] canUseFullScreenIntent error:', err);
+        recordAlarmDiagnostic('permission_check_error', `canUseFullScreenIntent: ${err?.message || err}`);
+        return null;
+      }),
+      NativeAlarmScheduler.canShowOverlays().catch((err) => {
+        console.warn('[NativeNotifications] canShowOverlays error:', err);
+        recordAlarmDiagnostic('permission_check_error', `canShowOverlays: ${err?.message || err}`);
+        return null;
+      }),
     ]);
     const fsiGranted = fsiRes?.full_screen_intent ? fsiRes.full_screen_intent === 'granted' : true;
     const fsiNeeded = typeof fsiRes?.needed === 'boolean' ? fsiRes.needed : !fsiGranted;
@@ -476,6 +513,7 @@ export async function getAlarmPermissionStatus() {
     return { isNative: true, fsiNeeded, fsiGranted, overlayGranted };
   } catch (err) {
     console.warn('[NativeNotifications] getAlarmPermissionStatus error:', err);
+    recordAlarmDiagnostic('permission_check_error', `getAlarmPermissionStatus: ${err?.message || err}`);
     return { isNative: true, fsiNeeded: false, fsiGranted: true, overlayGranted: true };
   }
 }
@@ -1183,21 +1221,99 @@ async function runProcessPendingAlarmActions(session, options = {}) {
         if (act.timestamp) ackTimestamps.push(act.timestamp);
       }
     } else if (type === 'complete' && (targetType === 'goal' || targetType === 'learning_topic' || targetType === 'learning_journey')) {
+      const remIdStr = act.reminderId ? String(act.reminderId) : '';
+      let resolvedRem = null;
+      const isCurrentlyOnline = Boolean(getOnlineFn());
+
+      if (remIdStr) {
+        if (Array.isArray(options.reminders)) {
+          resolvedRem = options.reminders.find((r) => String(r?.id) === remIdStr) || null;
+        }
+        if (!resolvedRem) {
+          try {
+            const cachedReminders = await getCachedData(userId, 'reminders');
+            if (Array.isArray(cachedReminders)) {
+              resolvedRem = cachedReminders.find((r) => String(r?.id) === remIdStr) || null;
+            }
+          } catch {}
+        }
+        if (!resolvedRem && isCurrentlyOnline && accessToken && fetchFn) {
+          try {
+            const remListResp = await fetchFn('/api/reminders', {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            });
+            if (remListResp?.ok) {
+              const remJson = await remListResp.json().catch(() => []);
+              const remArray = Array.isArray(remJson) ? remJson : (remJson?.reminders || []);
+              resolvedRem = remArray.find((r) => String(r?.id) === remIdStr) || null;
+            }
+          } catch {}
+        }
+      }
+
+      if (!resolvedRem) {
+        const hasExplicitActIds = Boolean(act.goalId || act.milestoneId || act.topicId || act.journeyId);
+        if (remIdStr || !hasExplicitActIds) {
+          if (!warnedUnresolvedReminderIds.has(remIdStr || act.id || 'unknown')) {
+            warnedUnresolvedReminderIds.add(remIdStr || act.id || 'unknown');
+            console.warn(`[NativeNotifications] Could not resolve full reminder for pending ${targetType} action; leaving pending (reminderId=${remIdStr || 'none'}).`);
+          }
+          continue;
+        }
+      }
+
+      let resolvedHasMilestones = Boolean(
+        resolvedRem?.goal_has_milestones ||
+        resolvedRem?.hasMilestones ||
+        resolvedRem?.milestone_id ||
+        act.hasMilestones
+      );
+
+      const resolvedGoalId = resolvedRem?.goal_id ?? act.goalId ?? null;
+      if (resolvedGoalId && !resolvedHasMilestones) {
+        let msList = Array.isArray(options.milestones) ? options.milestones : null;
+        if (!msList) {
+          try {
+            const cachedMs = await getCachedData(userId, 'milestones');
+            if (Array.isArray(cachedMs)) msList = cachedMs;
+          } catch {}
+        }
+        if (Array.isArray(msList) && msList.some((m) => String(m?.goal_id) === String(resolvedGoalId))) {
+          resolvedHasMilestones = true;
+        }
+      }
+
+      const resolvedTargetType = String(resolvedRem?.target_type || targetType).toLowerCase();
+      const resolvedReminderPayload = resolvedRem
+        ? {
+            ...resolvedRem,
+            id: resolvedRem.id || remIdStr || null,
+            target_type: resolvedTargetType,
+            goal_id: resolvedGoalId,
+            milestone_id: resolvedRem.milestone_id || null,
+            journey_id: resolvedRem.journey_id ?? act.journeyId ?? null,
+            topic_id: resolvedRem.topic_id ?? act.topicId ?? null,
+            reminder_mode: resolvedRem.reminder_mode || act.reminderMode || 'scheduled',
+            goal_has_milestones: resolvedHasMilestones,
+            hasMilestones: resolvedHasMilestones,
+          }
+        : {
+            id: remIdStr || null,
+            target_type: resolvedTargetType,
+            goal_id: act.goalId || null,
+            milestone_id: act.milestoneId || null,
+            journey_id: act.journeyId || null,
+            topic_id: act.topicId || null,
+            hasMilestones: resolvedHasMilestones,
+            reminder_mode: act.reminderMode || 'scheduled',
+          };
+
       const doneResult = await executeReminderDone({
-        reminder: {
-          id: act.reminderId || null,
-          target_type: targetType,
-          goal_id: act.goalId || (targetType === 'goal' ? act.habitId : null) || null,
-          milestone_id: act.milestoneId || null,
-          journey_id: act.journeyId || (targetType === 'learning_journey' ? act.habitId : null) || null,
-          topic_id: act.topicId || (targetType === 'learning_topic' ? act.habitId : null) || null,
-          hasMilestones: Boolean(act.hasMilestones),
-          reminder_mode: act.reminderMode || 'scheduled',
-        },
+        reminder: resolvedReminderPayload,
         session,
         isNativePlatform: true,
-        isOnline: Boolean(getOnlineFn()),
-        hasMilestones: Boolean(act.hasMilestones),
+        isOnline: isCurrentlyOnline,
+        hasMilestones: resolvedHasMilestones,
         fetchImpl: fetchFn,
         enqueueAction: enqueueFn,
         storage,

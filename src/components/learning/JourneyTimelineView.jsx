@@ -162,12 +162,12 @@ export default function JourneyTimelineView({
             <div>
               <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400 mb-1">
                 <span>Task Completion</span>
-                <span className="font-semibold text-gray-700 dark:text-gray-300">{topic.completion_progress ?? 0}%</span>
+                <span className="font-semibold text-gray-700 dark:text-gray-300">{topic.status === 'Completed' ? 100 : (topic.completion_progress ?? 0)}%</span>
               </div>
               <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-[#5fae9e] rounded-full transition-all duration-300"
-                  style={{ width: `${topic.completion_progress ?? 0}%` }}
+                  style={{ width: `${topic.status === 'Completed' ? 100 : (topic.completion_progress ?? 0)}%` }}
                 />
               </div>
             </div>

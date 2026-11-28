@@ -132,8 +132,17 @@ export default function Goals() {
       if (e?.detail?.source === 'goals') return;
       if (session) fetchGoals();
     };
+    const handleEntityChanged = () => {
+      if (session) fetchGoals();
+    };
     window.addEventListener('habittracker-stats-updated', handleStatsUpdated);
-    return () => window.removeEventListener('habittracker-stats-updated', handleStatsUpdated);
+    window.addEventListener('habittracker-entity-completed', handleEntityChanged);
+    window.addEventListener('habittracker-entity-uncompleted', handleEntityChanged);
+    return () => {
+      window.removeEventListener('habittracker-stats-updated', handleStatsUpdated);
+      window.removeEventListener('habittracker-entity-completed', handleEntityChanged);
+      window.removeEventListener('habittracker-entity-uncompleted', handleEntityChanged);
+    };
   }, [session, fetchGoals]);
 
   const openAdd = (typeOverride) => {

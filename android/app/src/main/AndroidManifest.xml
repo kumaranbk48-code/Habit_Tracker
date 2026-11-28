@@ -61,6 +61,7 @@
             android:showOnLockScreen="true"
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
+            android:taskAffinity=""
             android:exported="false" />
 
         <!-- Receiver for Snooze and Dismiss actions from notification & activity -->
