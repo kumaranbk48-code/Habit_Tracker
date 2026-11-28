@@ -16,6 +16,16 @@ import {
   validateReminderDeadline,
 } from '../lib/goalReminderUtils';
 import {
+  formatGoalPickerLabel,
+  formatJourneyPickerLabel,
+  getFirstActiveTargetId,
+  isGoalCompleted,
+  isJourneyCompleted,
+  resolveEditedTargetId,
+  sortTargetsActiveFirst,
+} from '../lib/reminderPickerUtils';
+import { requestAlarmPermissionCheck } from '../lib/alarmPermissionPrompt';
+import {
   Plus, Pencil, Trash2, Bell, BellOff, BellRing, AlertCircle, ShieldCheck,
   Sun, Sunset, Moon, Clock, Calendar, Check, MessageSquare, Sparkles,
   Target, GraduationCap, CheckCircle2, AlertTriangle, Layers, BookOpen
@@ -31,8 +41,6 @@ import {
   cancelNativeReminder,
   checkExactAlarmPermission,
   requestExactAlarmPermission,
-  checkFullScreenIntentPermission,
-  requestFullScreenIntentPermission,
   getNextFireTime,
 } from '../lib/nativeNotifications';
 
@@ -137,17 +145,22 @@ export default function Reminders() {
   const [toast, setToast] = useState(null);
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState('');
-  const [fsiPromptOpen, setFsiPromptOpen] = useState(false);
+  const [pendingDeleteReminder, setPendingDeleteReminder] = useState(null);
+  const [deletingReminder, setDeletingReminder] = useState(false);
   const fetchSeqRef = useRef(0);
 
   const maybePromptFullScreenIntent = useCallback(async (scheduleResult) => {
     if (!isNative) return;
-    try {
-      if (localStorage.getItem('habiz_fsi_prompted') === '1') return;
-    } catch {}
-    const denied = scheduleResult?.fullScreenIntentDenied === true || !(await checkFullScreenIntentPermission());
-    if (denied) {
-      setFsiPromptOpen(true);
+    if (scheduleResult?.fullScreenIntentDenied === true) {
+      requestAlarmPermissionCheck({ beforeScheduling: true });
+      return;
+    }
+    requestAlarmPermissionCheck({ beforeScheduling: true });
+  }, []);
+
+  useEffect(() => {
+    if (isNative) {
+      requestAlarmPermissionCheck({ beforeScheduling: false });
     }
   }, []);
 
@@ -288,7 +301,7 @@ export default function Reminders() {
         .map((rem) => ({
           ...rem,
           target_type: rem.target_type || 'habit',
-          is_alarm: Boolean(rem.is_alarm || rem.reminder_mode === 'alarm') && (rem.target_type || 'habit') === 'habit',
+          is_alarm: Boolean(rem.is_alarm || rem.reminder_mode === 'alarm'),
           habit_name: rem.habits?.habit_name || '',
           tracking_type: rem.habits?.tracking_type || '',
           target_quantity: rem.habits?.target_quantity || 1,
@@ -347,9 +360,9 @@ export default function Reminders() {
     setForm({
       target_type: preferredType === 'learning_topic' ? 'learning_journey' : preferredType,
       habit_id: preferredType === 'habit' ? (preferredId || habits[0]?.id || '') : (habits[0]?.id || ''),
-      goal_id: preferredType === 'goal' ? (preferredId || goals[0]?.id || '') : (goals[0]?.id || ''),
+      goal_id: preferredType === 'goal' ? (preferredId || getFirstActiveTargetId(goals, isGoalCompleted)) : getFirstActiveTargetId(goals, isGoalCompleted),
       milestone_id: '',
-      journey_id: (preferredType === 'learning_journey' || preferredType === 'learning_topic') ? (preferredId || journeys[0]?.id || '') : (journeys[0]?.id || ''),
+      journey_id: (preferredType === 'learning_journey' || preferredType === 'learning_topic') ? (preferredId || getFirstActiveTargetId(journeys, isJourneyCompleted)) : getFirstActiveTargetId(journeys, isJourneyCompleted),
       topic_id: '',
       reminder_mode: preferredType === 'goal' ? 'deadline_proximity' : 'scheduled',
       days_before_deadline: 1,
@@ -407,15 +420,15 @@ export default function Reminders() {
     const mainTime = getTimeValue(reminder.reminder_time) || parsedAlerts[0] || '08:00';
     const targetType = reminder.target_type || 'habit';
     const isLearning = targetType === 'learning_journey' || targetType === 'learning_topic';
-    const resolvedJourneyId = reminder.journey_id
+    const rawJourneyId = reminder.journey_id
       || (reminder.topic_id ? journeys.find((j) => (j.topics || []).some((t) => t.id === reminder.topic_id))?.id : '')
-      || journeys[0]?.id
       || '';
+    const resolvedJourneyId = resolveEditedTargetId(journeys, rawJourneyId, isJourneyCompleted);
 
     setForm({
       target_type: targetType === 'learning_topic' ? 'learning_journey' : targetType,
       habit_id: targetType === 'habit' ? (reminder.habit_id || habits[0]?.id || '') : '',
-      goal_id: targetType === 'goal' ? (reminder.goal_id || goals[0]?.id || '') : '',
+      goal_id: targetType === 'goal' ? resolveEditedTargetId(goals, reminder.goal_id, isGoalCompleted) : '',
       milestone_id: targetType === 'goal' ? (reminder.milestone_id || '') : '',
       journey_id: isLearning ? resolvedJourneyId : '',
       topic_id: isLearning ? (reminder.topic_id || '') : '',
@@ -447,11 +460,18 @@ export default function Reminders() {
     // Immediately schedule or update alarm natively on Android
     if (isNative) {
       if (newIsAlarm) {
+        requestAlarmPermissionCheck({ beforeScheduling: true });
         checkExactAlarmPermission().then((ok) => {
           if (!ok) requestExactAlarmPermission();
         });
       }
-      const targetName = rem.habits?.habit_name || rem.goals?.goal_name || rem.learning_journeys?.title || 'Reminder';
+      const targetName =
+        rem.habits?.habit_name ||
+        rem.goal_milestones?.title ||
+        rem.goals?.goal_name ||
+        rem.learning_topics?.title ||
+        rem.learning_journeys?.title ||
+        'Reminder';
       scheduleSingleNativeReminder({ ...rem, is_alarm: newIsAlarm }, targetName)
         .then((schedRes) => {
           if (newIsAlarm) {
@@ -494,15 +514,21 @@ export default function Reminders() {
     setFormError('');
 
     if (form.target_type === 'habit' && !form.habit_id) {
-      setToast({ message: 'Please select a habit first.', type: 'error' });
+      const msg = 'Please select a habit first.';
+      setFormError(msg);
+      setToast({ message: msg, type: 'error' });
       return;
     }
     if (form.target_type === 'goal' && !form.goal_id) {
-      setToast({ message: 'Please select a goal first.', type: 'error' });
+      const msg = 'Please select an active goal first.';
+      setFormError(msg);
+      setToast({ message: msg, type: 'error' });
       return;
     }
     if (form.target_type === 'learning_journey' && !form.journey_id) {
-      setToast({ message: 'Please select a learning journey first.', type: 'error' });
+      const msg = 'Please select an active learning roadmap first.';
+      setFormError(msg);
+      setToast({ message: msg, type: 'error' });
       return;
     }
 
@@ -603,7 +629,7 @@ export default function Reminders() {
         days_of_week: Array.isArray(form.days_of_week) && form.days_of_week.length > 0 ? form.days_of_week : WEEKDAYS,
         custom_text: form.custom_text || '',
         ...(!editing && { notification_status: form.notification_status || 'Active' }),
-        is_alarm: effectiveTargetType === 'habit' ? Boolean(form.is_alarm) : false,
+        is_alarm: Boolean(form.is_alarm),
       };
 
       const selectedMsObj = milestones.find((m) => m.id === form.milestone_id);
@@ -611,7 +637,8 @@ export default function Reminders() {
       // CRITICAL: Schedule directly with Android AlarmManager / LocalNotifications immediately on Save tap
       if (isNative) {
         try {
-          if (payload.is_alarm && effectiveTargetType === 'habit') {
+          if (payload.is_alarm) {
+            requestAlarmPermissionCheck({ beforeScheduling: true });
             const exactAllowed = await checkExactAlarmPermission();
             if (!exactAllowed) {
               await requestExactAlarmPermission();
@@ -636,7 +663,7 @@ export default function Reminders() {
             id: editing ? editing.id : `client_${form.habit_id || form.goal_id || form.topic_id || Date.now()}`,
           };
           const schedRes = await scheduleSingleNativeReminder(clientReminder, targetName || 'Habit');
-          if (payload.is_alarm && effectiveTargetType === 'habit') {
+          if (payload.is_alarm) {
             await maybePromptFullScreenIntent(schedRes);
           }
         } catch (nativeErr) {
@@ -785,8 +812,14 @@ export default function Reminders() {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Delete this reminder?')) return;
+  const handleDelete = (id) => {
+    const target = reminders.find((r) => r.id === id);
+    if (!target) return;
+    setPendingDeleteReminder(target);
+  };
+
+  const handleConfirmDelete = async (id) => {
+    setDeletingReminder(true);
     const deletedReminder = reminders.find((r) => r.id === id);
 
     // Instant optimistic deletion
@@ -805,6 +838,7 @@ export default function Reminders() {
       });
       if (res.ok) {
         setToast({ message: 'Reminder deleted', type: 'success' });
+        setPendingDeleteReminder(null);
         fetchData();
       } else {
         setReminders((current) => (deletedReminder && !current.some((r) => r.id === id) ? [...current, deletedReminder] : current));
@@ -814,6 +848,8 @@ export default function Reminders() {
     } catch {
       setReminders((current) => (deletedReminder && !current.some((r) => r.id === id) ? [...current, deletedReminder] : current));
       setToast({ message: 'Network error.', type: 'error' });
+    } finally {
+      setDeletingReminder(false);
     }
   };
 
@@ -1176,7 +1212,7 @@ export default function Reminders() {
                           <Check size={10} /> Done
                         </span>
                       )}
-                      {isHabit && rem.is_alarm && (
+                      {rem.is_alarm && (
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-red-500/15 text-red-400 border border-red-500/30">
                           <BellRing size={10} /> Alarm
                         </span>
@@ -1216,7 +1252,7 @@ export default function Reminders() {
 
                 {/* Right: Alarm switch + Toggle + Edit/Delete */}
                 <div className="flex items-center justify-between sm:justify-end gap-3 self-end sm:self-center w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-white/[0.04]">
-                  {isHabit && (
+                  {!isDone && (
                     <button
                       type="button"
                       onClick={() => handleToggleAlarm(rem)}
@@ -1322,14 +1358,14 @@ export default function Reminders() {
                         ...form,
                         target_type: item.type,
                         habit_id: item.type === 'habit' ? (habits[0]?.id || '') : '',
-                        goal_id: item.type === 'goal' ? (goals[0]?.id || '') : '',
+                        goal_id: item.type === 'goal' ? getFirstActiveTargetId(goals, isGoalCompleted) : '',
                         milestone_id: '',
-                        journey_id: item.type === 'learning_journey' ? (journeys[0]?.id || '') : '',
+                        journey_id: item.type === 'learning_journey' ? getFirstActiveTargetId(journeys, isJourneyCompleted) : '',
                         topic_id: '',
                         remind_on_date: '',
                         use_custom_date: false,
                         reminder_mode: item.type === 'goal' ? 'deadline_proximity' : 'scheduled',
-                        is_alarm: item.type === 'habit' ? form.is_alarm : false,
+                        is_alarm: form.is_alarm,
                       });
                     }}
                     className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-bold transition-all ${
@@ -1383,9 +1419,9 @@ export default function Reminders() {
                     }}
                     className="w-full px-3 py-2 border border-slate-200 dark:border-[#2a343d] rounded-xl focus:ring-2 focus:ring-[#3d7a75] outline-none text-sm dark:bg-[#14181c] dark:text-slate-100"
                   >
-                    {goals.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.goal_name} {g.target_date ? `(Deadline: ${g.target_date})` : ''}
+                    {sortTargetsActiveFirst(goals, isGoalCompleted).map((g) => (
+                      <option key={g.id} value={g.id} disabled={isGoalCompleted(g)}>
+                        {formatGoalPickerLabel(g)}
                       </option>
                     ))}
                   </CustomSelect>
@@ -1435,9 +1471,9 @@ export default function Reminders() {
                     }}
                     className="w-full px-3 py-2 border border-slate-200 dark:border-[#2a343d] rounded-xl focus:ring-2 focus:ring-[#3d7a75] outline-none text-sm dark:bg-[#14181c] dark:text-slate-100"
                   >
-                    {journeys.map((j) => (
-                      <option key={j.id} value={j.id}>
-                        {j.title} {j.target_date ? `(Deadline: ${j.target_date})` : ''}
+                    {sortTargetsActiveFirst(journeys, isJourneyCompleted).map((j) => (
+                      <option key={j.id} value={j.id} disabled={isJourneyCompleted(j)}>
+                        {formatJourneyPickerLabel(j)}
                       </option>
                     ))}
                   </CustomSelect>
@@ -1712,8 +1748,8 @@ export default function Reminders() {
             />
           </div>
 
-          {/* Alarm-Style Reminder Toggle (For Habits) */}
-          {form.target_type === 'habit' && (
+          {/* Alarm-Style Reminder Toggle */}
+          {(form.target_type === 'habit' || form.target_type === 'goal' || form.target_type === 'learning_journey' || form.target_type === 'learning_topic') && (
             <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-[#3a2c14]/40 border border-amber-200/80 dark:border-amber-800/40 flex flex-col gap-2.5">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -1733,6 +1769,7 @@ export default function Reminders() {
                       const checked = e.target.checked;
                       setForm({ ...form, is_alarm: checked });
                       if (checked && isNative) {
+                        requestAlarmPermissionCheck({ beforeScheduling: true });
                         const exactAllowed = await checkExactAlarmPermission();
                         if (!exactAllowed) {
                           await requestExactAlarmPermission();
@@ -1768,44 +1805,48 @@ export default function Reminders() {
       </Modal>
 
       <Modal
-        isOpen={fsiPromptOpen}
-        onClose={() => {
-          try {
-            localStorage.setItem('habiz_fsi_prompted', '1');
-          } catch {}
-          setFsiPromptOpen(false);
-        }}
-        title="Full-Screen Alarms"
+        isOpen={Boolean(pendingDeleteReminder)}
+        onClose={() => { if (!deletingReminder) setPendingDeleteReminder(null); }}
+        title="Delete Reminder"
       >
         <div className="space-y-4">
           <p className="text-sm text-slate-300">
-            To show the full-screen alarm on your phone, allow &apos;Full-screen notifications&apos; for HabiZ.
+            Delete reminder for{' '}
+            <span className="font-semibold text-white">
+              {pendingDeleteReminder
+                ? (
+                  pendingDeleteReminder.goal_milestones?.title
+                    ? `${pendingDeleteReminder.goals?.goal_name || pendingDeleteReminder.goal_name || 'Goal'} — ${pendingDeleteReminder.goal_milestones.title}`
+                    : pendingDeleteReminder.goals?.goal_name
+                    || pendingDeleteReminder.goal_name
+                    || (pendingDeleteReminder.learning_topics?.title
+                      ? `${pendingDeleteReminder.learning_journeys?.title || 'Learning Roadmap'} — ${pendingDeleteReminder.learning_topics.title}`
+                      : pendingDeleteReminder.learning_journeys?.title)
+                    || pendingDeleteReminder.habits?.habit_name
+                    || pendingDeleteReminder.habit_name
+                    || pendingDeleteReminder.custom_text
+                    || 'this reminder'
+                )
+                : ''}
+            </span>
+            ?
           </p>
           <div className="flex items-center justify-end gap-3 pt-2">
             <button
               type="button"
-              onClick={() => {
-                try {
-                  localStorage.setItem('habiz_fsi_prompted', '1');
-                } catch {}
-                setFsiPromptOpen(false);
-              }}
-              className="px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+              disabled={deletingReminder}
+              onClick={() => setPendingDeleteReminder(null)}
+              className="px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
             >
-              Later
+              Cancel
             </button>
             <button
               type="button"
-              onClick={() => {
-                try {
-                  localStorage.setItem('habiz_fsi_prompted', '1');
-                } catch {}
-                setFsiPromptOpen(false);
-                requestFullScreenIntentPermission();
-              }}
-              className="px-5 py-2 text-sm font-bold text-white bg-[#178274] hover:bg-[#136c60] rounded-xl transition-all shadow-md shadow-teal-950/40 active:scale-95 cursor-pointer"
+              disabled={deletingReminder || !pendingDeleteReminder}
+              onClick={() => pendingDeleteReminder && handleConfirmDelete(pendingDeleteReminder.id)}
+              className="px-5 py-2 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
             >
-              Open settings
+              {deletingReminder ? 'Deleting...' : 'Delete'}
             </button>
           </div>
         </div>

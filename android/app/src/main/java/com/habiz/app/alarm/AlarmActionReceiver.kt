@@ -63,6 +63,8 @@ class AlarmActionReceiver : BroadcastReceiver() {
 
         when (action) {
             ACTION_SNOOZE -> {
+                // Re-enters NativeAlarmScheduler.scheduleAlarm -> AlarmReceiver -> AlarmService /
+                // AlarmActivity so snoozed alarms inherit the exact same full-screen / overlay flow.
                 val snoozeTime = now + 10 * 60 * 1000L // 10 minutes
                 val snoozeId = NativeAlarmScheduler.hashStringToId("snooze_${reminderId.ifEmpty { habitId }}_${id}_$snoozeTime")
 

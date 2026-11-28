@@ -278,13 +278,19 @@ export default async function handler(req, res) {
         url = reminder.journey_id ? `/learning/journey/${reminder.journey_id}` : '/learning';
       }
 
-      const isHabitAlarm = Boolean(reminder.is_alarm) && type === 'habit';
+      const isAlarmEvent =
+        Boolean(reminder.is_alarm || reminder.reminder_mode === 'alarm') &&
+        ['habit', 'goal', 'learning_journey', 'learning_topic'].includes(type);
+      const entityIdForTag = reminder.habit_id || reminder.goal_id || reminder.topic_id || reminder.journey_id || reminder.id;
+      const alarmTitle = isAlarmEvent && type !== 'habit' && !String(title).startsWith('🚨 ALARM:')
+        ? `🚨 ALARM: ${reminder.goals?.goal_name || reminder.learning_topics?.title || reminder.learning_journeys?.title || title}`
+        : title;
 
       for (const sub of userSubs) {
         const payload = JSON.stringify({
-          title,
+          title: alarmTitle,
           body,
-          tag: isHabitAlarm && reminder.habit_id ? `alarm-habit-${reminder.habit_id}` : `reminder-${reminder.id}`,
+          tag: isAlarmEvent ? `alarm-${type}-${entityIdForTag}` : `reminder-${reminder.id}`,
           url,
           reminderId: reminder.id,
           habitId: reminder.habit_id || null,
@@ -297,7 +303,7 @@ export default async function handler(req, res) {
           targetType: type,
           itemName: reminder.goals?.goal_name || reminder.learning_topics?.title || reminder.learning_journeys?.title || reminder.habits?.habit_name || '',
           milestoneTitle: reminder.goal_milestones?.title || '',
-          isAlarm: isHabitAlarm,
+          isAlarm: isAlarmEvent,
         });
 
         try {

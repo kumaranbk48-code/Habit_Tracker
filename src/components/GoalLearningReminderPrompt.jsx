@@ -34,6 +34,7 @@ export default function GoalLearningReminderPrompt() {
       if (!reminder) return;
       const type = String(reminder.target_type || 'habit').toLowerCase();
       if (type === 'habit') return;
+      if (reminder.is_alarm === true || reminder.reminder_mode === 'alarm') return;
 
       const mode = getReminderActionMode(reminder, Boolean(hasMilestones));
       setActivePrompt({

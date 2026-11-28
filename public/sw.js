@@ -210,8 +210,9 @@ self.addEventListener('push', (event) => {
     payload = { title: 'HabitTracker', body: event.data.text() };
   }
 
-  const targetType = payload.targetType || payload.target_type || 'habit';
-  const isAlarm = Boolean(payload.isAlarm || payload.is_alarm) && targetType === 'habit';
+  const targetType = String(payload.targetType || payload.target_type || 'habit').toLowerCase();
+  const isAlarm = Boolean(payload.isAlarm || payload.is_alarm)
+    && ['habit', 'goal', 'learning_journey', 'learning_topic'].includes(targetType);
   const habitId = payload.habitId || payload.habit_id || null;
   const goalId = payload.goalId || payload.goal_id || null;
   const milestoneId = payload.milestoneId || payload.milestone_id || null;
@@ -220,6 +221,7 @@ self.addEventListener('push', (event) => {
   const reminderId = payload.reminderId || payload.reminder_id || null;
   const hasMilestones = Boolean(payload.hasMilestones || payload.goal_has_milestones);
   const reminderMode = payload.reminderMode || payload.reminder_mode || 'scheduled';
+  const entityId = habitId || goalId || topicId || journeyId || reminderId;
 
   const data = {
     url: payload.url || (targetType === 'goal' ? '/goals' : targetType.startsWith('learning') ? '/learning' : '/habits'),
@@ -241,7 +243,7 @@ self.addEventListener('push', (event) => {
     body: payload.body || 'Time to check your habits!',
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
-    tag: payload.tag || (isAlarm && habitId ? `alarm-habit-${habitId}` : reminderId ? `reminder-${reminderId}` : 'habit-reminder'),
+    tag: payload.tag || (isAlarm && entityId ? `alarm-${targetType}-${entityId}` : reminderId ? `reminder-${reminderId}` : 'habit-reminder'),
     renotify: true,
     requireInteraction: isAlarm,
     vibrate: isAlarm ? [300, 100, 300, 100, 300] : [200, 100, 200],
@@ -545,10 +547,17 @@ self.addEventListener('message', (event) => {
           targetUrl = reminder.journey_id ? `/learning/journey/${reminder.journey_id}` : '/learning';
         }
 
-        const isAlarm = Boolean(reminder.is_alarm || reminder.reminder_mode === 'alarm') && targetType === 'habit';
+        const normTargetType = String(targetType || 'habit').toLowerCase();
+        const isAlarm = Boolean(reminder.is_alarm || reminder.reminder_mode === 'alarm')
+          && ['habit', 'goal', 'learning_journey', 'learning_topic'].includes(normTargetType);
+        const entityIdForTag = reminder.habit_id || reminder.goal_id || reminder.topic_id || reminder.journey_id || reminder.id;
+        if (isAlarm && normTargetType !== 'habit' && !String(title).startsWith('🚨 ALARM:')) {
+          const alarmLabel = reminder.goal_name || reminder.goals?.goal_name || reminder.topic_title || reminder.learning_topics?.title || reminder.journey_title || reminder.learning_journeys?.title || title;
+          title = `🚨 ALARM: ${alarmLabel}`;
+        }
         const data = {
           url: isAlarm && reminder.habit_id ? `/habits?alarm_habit_id=${reminder.habit_id}` : targetUrl,
-          targetType,
+          targetType: normTargetType,
           habitId: reminder.habit_id || null,
           goalId: reminder.goal_id || null,
           milestoneId: reminder.milestone_id || null,
@@ -567,7 +576,7 @@ self.addEventListener('message', (event) => {
             body,
             icon: '/icons/icon-192.png',
             badge: '/icons/icon-192.png',
-            tag: isAlarm ? `alarm-habit-${reminder.habit_id || reminder.id}` : `local-${reminder.id}-${idx}`,
+            tag: isAlarm ? `alarm-${normTargetType}-${entityIdForTag}` : `local-${reminder.id}-${idx}`,
             vibrate: isAlarm ? [300, 100, 300, 100, 300] : [200, 100, 200],
             requireInteraction: isAlarm,
             data,

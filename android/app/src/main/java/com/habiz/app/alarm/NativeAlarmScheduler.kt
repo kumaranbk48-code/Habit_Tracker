@@ -305,12 +305,13 @@ object NativeAlarmScheduler {
         if (habitId.isEmpty() && reminderId.isEmpty()) return
         synchronized(prefsLock) {
             val current = readPendingActionList(context)
+            val resolvedTargetType = targetType.ifEmpty { "habit" }
             val newAction = PendingAlarmAction(
-                id = PendingAlarmLogic.makeActionId(type, habitId, reminderId, date),
+                id = PendingAlarmLogic.makeActionId(type, habitId, reminderId, date, resolvedTargetType),
                 type = type,
                 habitId = habitId,
                 reminderId = reminderId,
-                targetType = targetType.ifEmpty { "habit" },
+                targetType = resolvedTargetType,
                 date = date,
                 occurrenceMinute = occurrenceMinute,
                 timestamp = timestamp

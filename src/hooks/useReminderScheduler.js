@@ -680,14 +680,30 @@ export function useReminderScheduler() {
       }
 
       // Tapped or clicked 'open'
-      if (extra.isAlarm && extra.habitId) {
+      const tappedTargetType = String(extra.targetType || 'habit').toLowerCase();
+      if (extra.isAlarm && (extra.habitId || tappedTargetType !== 'habit')) {
         const matchedReminder = remindersRef.current?.find((r) => r.id === extra.reminderId);
+        const entityId = extra.habitId || extra.goalId || extra.topicId || extra.journeyId || extra.reminderId || '';
         window.dispatchEvent(
           new CustomEvent('habittracker-alarm-fired', {
             detail: {
-              reminder: matchedReminder || { id: extra.reminderId, habit_id: extra.habitId, is_alarm: true },
-              habit: matchedReminder?.habits || { id: extra.habitId, habit_name: extra.itemName || 'Habit' },
+              reminder: matchedReminder || {
+                id: extra.reminderId,
+                target_type: tappedTargetType,
+                habit_id: extra.habitId || null,
+                goal_id: extra.goalId || null,
+                milestone_id: extra.milestoneId || null,
+                journey_id: extra.journeyId || null,
+                topic_id: extra.topicId || null,
+                is_alarm: true,
+              },
+              habit: tappedTargetType === 'habit'
+                ? (matchedReminder?.habits || { id: extra.habitId, habit_name: extra.itemName || 'Habit' })
+                : null,
               streak: statsRef.current?.currentStreak || 0,
+              targetType: tappedTargetType,
+              entityId,
+              hasMilestones: Boolean(extra.hasMilestones || matchedReminder?.milestone_id),
             },
           })
         );
@@ -847,8 +863,10 @@ export function useReminderScheduler() {
           reminder.is_alarm === 't' ||
           reminder.reminder_mode === 'alarm'
         );
-        const isHabitEvent = (type || '').toLowerCase() === 'habit' || Boolean(reminder.habit_id);
-        const isAlarmEvent = isHabitEvent && rawIsAlarmEvent;
+        const normType = String(type || 'habit').toLowerCase();
+        const isHabitEvent = normType === 'habit' || Boolean(reminder.habit_id);
+        const isSupportedAlarmType = isHabitEvent || normType === 'goal' || normType === 'learning_journey' || normType === 'learning_topic';
+        const isAlarmEvent = isSupportedAlarmType && rawIsAlarmEvent;
 
         const hasMilestones = Boolean(
           reminder.goal_has_milestones ||
@@ -856,19 +874,20 @@ export function useReminderScheduler() {
           (reminder.goal_id && goalMilestonesMapRef.current.get(reminder.goal_id)?.length > 0)
         );
         const actionMode = getReminderActionMode(reminder, hasMilestones);
+        const entityId = reminder.habit_id || reminder.goal_id || reminder.topic_id || reminder.journey_id || reminder.id;
 
         console.log(`[ReminderScheduler] 🔔 Triggering reminder/alarm at ${currentTime}:`, {
           id: reminder.id,
           type,
           isAlarm: isAlarmEvent,
           actionMode,
-          name: reminder.habits?.habit_name || reminder.goals?.goal_name || reminder.custom_text || 'Reminder',
+          name: reminder.habits?.habit_name || reminder.goals?.goal_name || reminder.learning_topics?.title || reminder.learning_journeys?.title || reminder.custom_text || 'Reminder',
         });
 
         // 5. Fire System Notification (in web browsers; on native Android, LocalNotifications handles it)
         if (!isNative && 'Notification' in window && Notification.permission === 'granted') {
           const isAlarm = isAlarmEvent;
-          const actions = isAlarm
+          const actions = (isAlarm && isHabitEvent)
             ? [
                 { action: 'complete', title: '✅ Done' },
                 { action: 'skip',     title: '⏭️ Skip' },
@@ -887,7 +906,7 @@ export function useReminderScheduler() {
             body,
             icon: '/icons/icon-192.png',
             badge: '/icons/icon-192.png',
-            tag: isAlarm ? `alarm-habit-${reminder.habit_id || reminder.id}` : `reminder-${reminder.id}-${currentTime}`,
+            tag: isAlarm ? `alarm-${normType}-${entityId}` : `reminder-${reminder.id}-${currentTime}`,
             renotify: true,
             requireInteraction: isAlarm,
             vibrate: isAlarm ? [300, 100, 300, 100, 300] : [200, 100, 200],
@@ -922,17 +941,20 @@ export function useReminderScheduler() {
         }
 
         // 6. Dispatch in-app events
-        window.dispatchEvent(new CustomEvent('habittracker-reminder-fired', {
-          detail: { reminder, title, body, url, hasMilestones }
-        }));
-
-        if (isAlarmEvent && isHabitEvent) {
+        if (isAlarmEvent) {
           window.dispatchEvent(new CustomEvent('habittracker-alarm-fired', {
             detail: {
               reminder: { ...reminder, is_alarm: true },
-              habit: reminder.habits || { id: reminder.habit_id, habit_name: reminder.habit_name || 'Habit' },
-              streak: statsRef.current?.currentStreak || 0
+              habit: isHabitEvent ? (reminder.habits || { id: reminder.habit_id, habit_name: reminder.habit_name || 'Habit' }) : null,
+              streak: statsRef.current?.currentStreak || 0,
+              targetType: normType,
+              entityId,
+              hasMilestones,
             }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('habittracker-reminder-fired', {
+            detail: { reminder, title, body, url, hasMilestones }
           }));
         }
       }

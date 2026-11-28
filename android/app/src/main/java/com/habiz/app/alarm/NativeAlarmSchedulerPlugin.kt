@@ -244,9 +244,51 @@ class NativeAlarmSchedulerPlugin : Plugin() {
     @PluginMethod
     fun canUseFullScreenIntent(call: PluginCall) {
         val granted = NativeAlarmScheduler.canUseFullScreenIntent(context)
+        val needed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
         val ret = JSObject()
         ret.put("full_screen_intent", if (granted) "granted" else "denied")
+        ret.put("needed", needed)
         call.resolve(ret)
+    }
+
+    @PluginMethod
+    fun canShowOverlays(call: PluginCall) {
+        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.canDrawOverlays(context)
+        } else {
+            true
+        }
+        val ret = JSObject()
+        ret.put("granted", granted)
+        call.resolve(ret)
+    }
+
+    @PluginMethod
+    fun openOverlaySettings(call: PluginCall) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            call.resolve()
+            return
+        }
+        val packageUri = Uri.parse("package:" + context.packageName)
+        try {
+            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                data = packageUri
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.w(TAG, "[PLUGIN] Failed to open ACTION_MANAGE_OVERLAY_PERMISSION, falling back to app details: ${e.message}")
+            try {
+                val fallbackIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = packageUri
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(fallbackIntent)
+            } catch (fallbackErr: Exception) {
+                Log.w(TAG, "[PLUGIN] Failed to open application details settings: ${fallbackErr.message}")
+            }
+        }
+        call.resolve()
     }
 
     @PluginMethod

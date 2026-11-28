@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useConfetti } from '../hooks/useConfetti';
 import { getRandomQuote } from '../constants/quotes';
 import {
   Flame, Check, BellRing, Quote, Clock, AlertTriangle, ArrowRight, Plus,
-  Volume2, VolumeX, Sparkles, Layers, CheckCircle2
+  Volume2, VolumeX, Sparkles, Layers, CheckCircle2, Target, GraduationCap, ExternalLink, X
 } from 'lucide-react';
 import {
   startAlarmSound,
@@ -15,8 +16,21 @@ import {
   isAudioContextSuspended
 } from '../utils/alarmSound';
 import { isNative, NativeAlarmScheduler, stopNativeAlarm } from '../lib/nativeNotifications';
+import {
+  getAlarmDeepLink,
+  makeAlarmQueueKey,
+  normalizeIncomingAlarmItem,
+  removeAlarmQueueItem,
+  shouldCallHabitTrackingForTakeoverAction,
+  upsertAlarmQueueItem,
+} from '../lib/alarmQueueUtils';
 
 const BATCH_SIZE = 3;
+
+function getQueueKey(item) {
+  if (!item) return '';
+  return item.queueKey || makeAlarmQueueKey(item.targetType || 'habit', item.entityId || item.id, item.reminderId || '');
+}
 
 function getStreakAtStakeLine(streak, habitName) {
   const s = Number(streak) || 0;
@@ -38,14 +52,16 @@ function getStreakAtStakeLine(streak, habitName) {
 
 export default function AlarmTakeoverModal() {
   const { session } = useAuth();
+  const navigate = useNavigate();
   const { fireSmall, fireMilestone } = useConfetti();
 
-  // Queue of habits to alert
+  // Queue of active alarms (habits, goals, learning)
   const [alarmQueue, setAlarmQueue] = useState([]);
   const [loading, setLoading] = useState(false);
   const [completedAnim, setCompletedAnim] = useState(false);
   const [muted, setMuted] = useState(isAlarmMuted());
-  const [batchProgress, setBatchProgress] = useState({}); // { [habitId]: 'done' | 'skipped' }
+  const [batchProgress, setBatchProgress] = useState({}); // { [queueKey]: 'done' | 'skipped' | 'dismissed' }
+  const snoozeTimersRef = useRef([]);
 
   const activeAlarm = alarmQueue[0] || null;
 
@@ -104,15 +120,22 @@ export default function AlarmTakeoverModal() {
     };
   }, [activeAlarm]);
 
+  // Clear pending local snooze timers on unmount
+  useEffect(() => {
+    return () => {
+      for (const timerId of snoozeTimersRef.current) clearTimeout(timerId);
+    };
+  }, []);
+
   // Reset completion animation whenever active alarm changes
   useEffect(() => {
     setCompletedAnim(false);
-  }, [activeAlarm?.id]);
+  }, [activeAlarm?.queueKey, activeAlarm?.id]);
 
   // Listen for alarm-fired events dispatched by useReminderScheduler
   useEffect(() => {
     const handleAlarmFired = (e) => {
-      const { reminder, habit, streak, isTest } = e.detail || {};
+      const { reminder, habit, streak, isTest, targetType, entityId, hasMilestones } = e.detail || {};
       if (!reminder) return;
 
       const isAlarm = Boolean(
@@ -125,51 +148,69 @@ export default function AlarmTakeoverModal() {
       );
       if (!isAlarm) return;
 
-      const habitData = habit || reminder.habits || {
-        id: reminder.habit_id,
-        habit_name: reminder.habit_name || 'Habit',
-        color: '#3d7a75',
-        tracking_type: reminder.tracking_type || 'boolean',
-        target_quantity: reminder.target_quantity || 1,
-        unit: reminder.unit || '',
-      };
+      const normalized = normalizeIncomingAlarmItem({
+        reminder,
+        habit,
+        targetType,
+        entityId,
+        hasMilestones,
+      });
 
-      const resolvedId = habitData.id || reminder.habit_id;
-      if (!resolvedId) return;
+      if (!normalized.entityId && !normalized.reminderId) return;
 
       const randomQuoteItem = getRandomQuote().quote;
-      const streakLine = getStreakAtStakeLine(streak ?? 0, habitData.habit_name);
 
       setAlarmQueue((prev) => {
-        const newItem = {
-          ...habitData,
-          id: resolvedId,
-          habit_id: resolvedId,
-          reminderId: reminder.id,
-          tracking_type: habitData.tracking_type || reminder.tracking_type || 'boolean',
-          target_quantity: Number(habitData.target_quantity) || Number(reminder.target_quantity) || 1,
-          unit: habitData.unit || reminder.unit || '',
-          streak: streak ?? 0,
-          custom_text: reminder.custom_text || '',
-          alerts: reminder.alerts,
-          time: reminder.reminder_time,
-          quote: randomQuoteItem,
-          streakAtStake: streakLine,
-        };
-        const existingIdx = prev.findIndex((item) => item.id === resolvedId);
-        if (existingIdx !== -1) {
-          const updated = [...prev];
-          updated[existingIdx] = { ...updated[existingIdx], ...newItem };
-          return updated;
+        let nextItem;
+        if (normalized.isHabit) {
+          const habitData = habit || reminder.habits || {
+            id: normalized.entityId,
+            habit_name: reminder.habit_name || 'Habit',
+            color: '#3d7a75',
+            tracking_type: reminder.tracking_type || 'boolean',
+            target_quantity: reminder.target_quantity || 1,
+            unit: reminder.unit || '',
+          };
+          const streakLine = getStreakAtStakeLine(streak ?? 0, habitData.habit_name);
+          nextItem = {
+            ...habitData,
+            ...normalized,
+            id: normalized.entityId,
+            habit_id: normalized.entityId,
+            reminderId: reminder.id,
+            tracking_type: habitData.tracking_type || reminder.tracking_type || 'boolean',
+            target_quantity: Number(habitData.target_quantity) || Number(reminder.target_quantity) || 1,
+            unit: habitData.unit || reminder.unit || '',
+            streak: streak ?? 0,
+            custom_text: reminder.custom_text || '',
+            alerts: reminder.alerts,
+            time: reminder.reminder_time,
+            quote: randomQuoteItem,
+            streakAtStake: streakLine,
+          };
+        } else {
+          nextItem = {
+            ...normalized,
+            custom_text: reminder.custom_text || normalized.subtitle || '',
+            alerts: reminder.alerts,
+            time: reminder.reminder_time,
+            quote: randomQuoteItem,
+          };
         }
-        return [...prev, newItem];
+        return upsertAlarmQueueItem(prev, nextItem);
       });
     };
 
     const handleAlarmDismissed = (e) => {
-      const { habitId, reminderId } = e.detail || {};
+      const { habitId, entityId, reminderId, targetType } = e.detail || {};
+      const dismissEntity = entityId || habitId;
       setAlarmQueue((prev) => prev.filter((item) => {
-        if (habitId && (item.id === habitId || item.habit_id === habitId)) return false;
+        if (targetType && dismissEntity) {
+          return getQueueKey(item) !== makeAlarmQueueKey(targetType, dismissEntity, reminderId || '');
+        }
+        if (dismissEntity && (item.entityId === dismissEntity || item.id === dismissEntity || item.habit_id === dismissEntity)) {
+          return false;
+        }
         if (reminderId && item.reminderId === reminderId) return false;
         return true;
       }));
@@ -257,8 +298,9 @@ export default function AlarmTakeoverModal() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  // Complete habit handler
+  // Complete habit handler (strictly guarded to habits; goal/learning alarms never touch habit tracking)
   const handleDone = async () => {
+    if (!shouldCallHabitTrackingForTakeoverAction(activeAlarm, 'mark_done')) return;
     if (!activeAlarm || !session?.access_token || loading) return;
     setLoading(true);
 
@@ -311,6 +353,7 @@ export default function AlarmTakeoverModal() {
 
   // Add +1 for quantity habits
   const handleAddQuantity = async (amount = 1) => {
+    if (!shouldCallHabitTrackingForTakeoverAction(activeAlarm, 'increment')) return;
     if (!activeAlarm || !session?.access_token || loading) return;
     setLoading(true);
 
@@ -351,6 +394,24 @@ export default function AlarmTakeoverModal() {
     }
   };
 
+  // Open Goal / Learning target screen without altering habit streaks or calling /api/tracking
+  const handleOpenNonHabit = async () => {
+    if (!activeAlarm || loading) return;
+    const targetPath = activeAlarm.deepLinkUrl || getAlarmDeepLink(activeAlarm);
+    stopAlarmSound();
+    await stopNativeAlarm().catch(() => {});
+    popActiveAlarm();
+    navigate(targetPath);
+  };
+
+  // Dismiss Goal / Learning alarm card without marking complete or calling /api/tracking
+  const handleDismissNonHabit = async () => {
+    if (!activeAlarm || loading) return;
+    stopAlarmSound();
+    await stopNativeAlarm().catch(() => {});
+    popActiveAlarm();
+  };
+
   // Snooze handler (+10 min) - stops sound/vibration, dismisses screen, schedules 10m alert
   const handleSnooze10Min = async () => {
     if (!activeAlarm || loading) return;
@@ -361,6 +422,10 @@ export default function AlarmTakeoverModal() {
       stopAlarmSound();
       await stopNativeAlarm().catch(() => {});
 
+      const targetType = activeAlarm.targetType || 'habit';
+      const entityId = String(activeAlarm.entityId || activeAlarm.id || '');
+      const displayName = activeAlarm.isHabit ? activeAlarm.habit_name : activeAlarm.title;
+
       // 2. Schedule native Android alarm for +10 minutes if running native
       if (isNative) {
         const snoozeTime = Date.now() + 10 * 60 * 1000;
@@ -369,18 +434,34 @@ export default function AlarmTakeoverModal() {
           alarms: [{
             id: snoozeId,
             at: snoozeTime,
-            title: `🚨 ALARM: ${activeAlarm.habit_name}`,
-            body: `⏰ Snoozed: Time to complete "${activeAlarm.habit_name}"!`,
-            reminderId: String(activeAlarm.reminderId || activeAlarm.id || ''),
-            habitId: String(activeAlarm.id || ''),
-            targetType: activeAlarm.target_type || 'habit',
+            title: `🚨 ALARM: ${displayName}`,
+            body: activeAlarm.isHabit
+              ? `⏰ Snoozed: Time to complete "${displayName}"!`
+              : `⏰ Snoozed: ${displayName}`,
+            reminderId: String(activeAlarm.reminderId || entityId || ''),
+            habitId: entityId,
+            targetType,
             isSnooze: true,
           }]
         }).catch((err) => console.warn('[AlarmModal] Native snooze schedule error:', err));
+      } else if (!activeAlarm.isHabit) {
+        const snoozedSnapshot = { ...activeAlarm };
+        const timerId = setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('habittracker-alarm-fired', {
+            detail: {
+              reminder: { ...(snoozedSnapshot.reminder || {}), is_alarm: true },
+              habit: null,
+              targetType: snoozedSnapshot.targetType,
+              entityId: snoozedSnapshot.entityId,
+              hasMilestones: snoozedSnapshot.hasMilestones,
+            }
+          }));
+        }, 10 * 60 * 1000);
+        snoozeTimersRef.current.push(timerId);
       }
 
-      // 3. Inform backend of 10 minute snooze without canceling recurring schedule
-      if (session?.access_token) {
+      // 3. Inform backend of 10 minute snooze for habit reminders without touching non-habit tracking
+      if (activeAlarm.isHabit && session?.access_token) {
         const res = await fetch('/api/reminders', {
           method: 'POST',
           headers: {
@@ -419,13 +500,15 @@ export default function AlarmTakeoverModal() {
   // Backwards compatibility alias
   const handleSkip = (delayMinutes = 10) => handleSnooze10Min();
 
-  // Handle individual batch item completion
+  // Handle individual batch item completion (habits only)
   const handleBatchItemDone = async (habit) => {
-    if (!session?.access_token || loading || batchProgress[habit.id]) return;
+    const key = getQueueKey(habit);
+    if (!shouldCallHabitTrackingForTakeoverAction(habit, 'mark_done')) return;
+    if (!session?.access_token || loading || batchProgress[key]) return;
     const today = getTodayDate();
     const isQuantity = habit.tracking_type === 'quantity';
 
-    setBatchProgress((prev) => ({ ...prev, [habit.id]: 'done' }));
+    setBatchProgress((prev) => ({ ...prev, [key]: 'done' }));
     if ((habit.streak || 0) >= 3) {
       fireMilestone();
     } else {
@@ -456,10 +539,12 @@ export default function AlarmTakeoverModal() {
 
   // Add +1 for a quantity habit in a batch
   const handleBatchItemAddQty = async (habit) => {
-    if (!session?.access_token || loading || batchProgress[habit.id]) return;
+    const key = getQueueKey(habit);
+    if (!shouldCallHabitTrackingForTakeoverAction(habit, 'increment')) return;
+    if (!session?.access_token || loading || batchProgress[key]) return;
     const today = getTodayDate();
 
-    setBatchProgress((prev) => ({ ...prev, [habit.id]: 'done' }));
+    setBatchProgress((prev) => ({ ...prev, [key]: 'done' }));
     fireSmall();
 
     try {
@@ -484,11 +569,47 @@ export default function AlarmTakeoverModal() {
     }
   };
 
-  // Handle individual batch item skip
-  const handleBatchItemSkip = async (habit, delayMinutes = 25) => {
-    if (!session?.access_token || loading || batchProgress[habit.id]) return;
-    setBatchProgress((prev) => ({ ...prev, [habit.id]: 'skipped' }));
+  // Handle individual batch item skip / snooze
+  const handleBatchItemSkip = async (item, delayMinutes = 10) => {
+    const key = getQueueKey(item);
+    if (loading || batchProgress[key]) return;
+    setBatchProgress((prev) => ({ ...prev, [key]: 'skipped' }));
 
+    if (!item.isHabit) {
+      if (isNative) {
+        const snoozeTime = Date.now() + delayMinutes * 60 * 1000;
+        const snoozeId = Math.floor(((Date.now() + Math.random() * 1000) / 1000) % 2000000000);
+        NativeAlarmScheduler.schedule({
+          alarms: [{
+            id: snoozeId,
+            at: snoozeTime,
+            title: `🚨 ALARM: ${item.title}`,
+            body: `⏰ Snoozed: ${item.title}`,
+            reminderId: String(item.reminderId || item.entityId || ''),
+            habitId: String(item.entityId || ''),
+            targetType: item.targetType || 'goal',
+            isSnooze: true,
+          }],
+        }).catch(() => {});
+      } else {
+        const snoozedSnapshot = { ...item };
+        const timerId = setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('habittracker-alarm-fired', {
+            detail: {
+              reminder: { ...(snoozedSnapshot.reminder || {}), is_alarm: true },
+              habit: null,
+              targetType: snoozedSnapshot.targetType,
+              entityId: snoozedSnapshot.entityId,
+              hasMilestones: snoozedSnapshot.hasMilestones,
+            },
+          }));
+        }, delayMinutes * 60 * 1000);
+        snoozeTimersRef.current.push(timerId);
+      }
+      return;
+    }
+
+    if (!session?.access_token) return;
     try {
       const res = await fetch('/api/reminders', {
         method: 'POST',
@@ -498,8 +619,8 @@ export default function AlarmTakeoverModal() {
         },
         body: JSON.stringify({
           action: 'skip',
-          reminder_id: habit.reminderId,
-          habit_id: habit.id,
+          reminder_id: item.reminderId,
+          habit_id: item.id,
           delay_minutes: delayMinutes,
         }),
       });
@@ -507,11 +628,11 @@ export default function AlarmTakeoverModal() {
       if (data?.next_reping_at) {
         window.dispatchEvent(new CustomEvent('habittracker-reping-scheduled', {
           detail: {
-            habitId: habit.id,
-            reminderId: habit.reminderId,
+            habitId: item.id,
+            reminderId: item.reminderId,
             nextRepingAt: data.next_reping_at,
             delayMinutes,
-            habitName: habit.habit_name,
+            habitName: item.habit_name,
           }
         }));
       }
@@ -521,17 +642,42 @@ export default function AlarmTakeoverModal() {
     }
   };
 
-  // Complete ALL habits in the current batch in 1 click
+  // Open a Goal/Learning batch item and remove only that item from the queue
+  const handleBatchNonHabitOpen = async (item) => {
+    if (loading) return;
+    const key = getQueueKey(item);
+    const targetPath = item.deepLinkUrl || getAlarmDeepLink(item);
+    stopAlarmSound();
+    setAlarmQueue((prev) => {
+      const next = removeAlarmQueueItem(prev, key);
+      if (next.length === 0) {
+        stopNativeAlarm().catch(() => {});
+      }
+      return next;
+    });
+    navigate(targetPath);
+  };
+
+  // Dismiss a Goal/Learning batch item without calling /api/tracking
+  const handleBatchNonHabitDismiss = (item) => {
+    const key = getQueueKey(item);
+    if (loading || batchProgress[key]) return;
+    setBatchProgress((prev) => ({ ...prev, [key]: 'dismissed' }));
+  };
+
+  // Complete ALL habits in the current batch in 1 click (leaves non-habit items untouched)
   const handleCompleteAllBatch = async (batchItems) => {
     if (!session?.access_token || loading || !batchItems.length) return;
-    setLoading(true);
+    const unhandledHabits = batchItems.filter((h) => h.isHabit && !batchProgress[getQueueKey(h)]);
+    if (unhandledHabits.length === 0) return;
 
+    setLoading(true);
     const today = getTodayDate();
-    const unhandled = batchItems.filter((h) => !batchProgress[h.id]);
+    const hasRemainingNonHabits = batchItems.some((item) => !item.isHabit && !batchProgress[getQueueKey(item)]);
 
     try {
       await Promise.all(
-        unhandled.map((h) =>
+        unhandledHabits.map((h) =>
           fetch('/api/tracking', {
             method: 'POST',
             headers: {
@@ -552,10 +698,25 @@ export default function AlarmTakeoverModal() {
       fireMilestone();
       window.dispatchEvent(new CustomEvent('habittracker-stats-updated'));
       window.dispatchEvent(new CustomEvent('habittracker-reminders-updated'));
+
+      if (hasRemainingNonHabits) {
+        setBatchProgress((prev) => {
+          const updated = { ...prev };
+          for (const h of unhandledHabits) updated[getQueueKey(h)] = 'done';
+          return updated;
+        });
+        setLoading(false);
+        return;
+      }
+
       setCompletedAnim(true);
 
       setTimeout(() => {
-        setAlarmQueue((prev) => prev.slice(batchItems.length));
+        setAlarmQueue((prev) => {
+          const next = prev.slice(batchItems.length);
+          if (next.length === 0) stopNativeAlarm().catch(() => {});
+          return next;
+        });
         setBatchProgress({});
         setCompletedAnim(false);
         setLoading(false);
@@ -575,10 +736,28 @@ export default function AlarmTakeoverModal() {
       stopAlarmSound();
       await stopNativeAlarm().catch(() => {});
 
-      const unhandled = batchItems.filter((h) => !batchProgress[h.id]);
-      if (session?.access_token) {
+      const unhandled = batchItems.filter((item) => !batchProgress[getQueueKey(item)]);
+      const unhandledHabits = unhandled.filter((item) => item.isHabit);
+      const unhandledNonHabits = unhandled.filter((item) => !item.isHabit);
+
+      if (unhandledNonHabits.length > 0 && isNative) {
+        const snoozeTime = Date.now() + delayMinutes * 60 * 1000;
+        const alarms = unhandledNonHabits.map((item, idx) => ({
+          id: Math.floor(((Date.now() + idx * 1000) / 1000) % 2000000000),
+          at: snoozeTime,
+          title: `🚨 ALARM: ${item.title}`,
+          body: `⏰ Snoozed: ${item.title}`,
+          reminderId: String(item.reminderId || item.entityId || ''),
+          habitId: String(item.entityId || ''),
+          targetType: item.targetType || 'goal',
+          isSnooze: true,
+        }));
+        NativeAlarmScheduler.schedule({ alarms }).catch(() => {});
+      }
+
+      if (session?.access_token && unhandledHabits.length > 0) {
         await Promise.all(
-          unhandled.map((h) =>
+          unhandledHabits.map((h) =>
             fetch('/api/reminders', {
               method: 'POST',
               headers: {
@@ -611,10 +790,14 @@ export default function AlarmTakeoverModal() {
     const currentBatch = alarmQueue.slice(0, BATCH_SIZE);
     if (!currentBatch.length) return;
 
-    const allHandled = currentBatch.every((h) => batchProgress[h.id]);
+    const allHandled = currentBatch.every((item) => batchProgress[getQueueKey(item)]);
     if (allHandled) {
       const timer = setTimeout(() => {
-        setAlarmQueue((prev) => prev.slice(currentBatch.length));
+        setAlarmQueue((prev) => {
+          const next = prev.slice(currentBatch.length);
+          if (next.length === 0) stopNativeAlarm().catch(() => {});
+          return next;
+        });
         setBatchProgress({});
       }, 500);
       return () => clearTimeout(timer);
@@ -727,19 +910,106 @@ export default function AlarmTakeoverModal() {
               )}
             </div>
 
-            {/* Checklist of Habits in Current Batch */}
+            {/* Checklist of Alarms in Current Batch */}
             <div className="space-y-2.5 my-1">
-              {currentBatch.map((habit) => {
-                const status = batchProgress[habit.id];
+              {currentBatch.map((item) => {
+                const itemKey = getQueueKey(item);
+                const status = batchProgress[itemKey];
                 const isItemDone = status === 'done';
                 const isItemSkipped = status === 'skipped';
+                const isItemDismissed = status === 'dismissed';
+
+                if (!item.isHabit) {
+                  const NonHabitIcon = item.targetType === 'goal' ? Target : GraduationCap;
+                  const accentColor = item.targetType === 'goal' ? '#178274' : '#6366f1';
+                  return (
+                    <div
+                      key={itemKey}
+                      className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                        isItemDismissed
+                          ? 'bg-slate-800/40 border-slate-700 opacity-60'
+                          : isItemSkipped
+                          ? 'bg-slate-800/40 border-slate-700 opacity-60'
+                          : 'bg-[#151b22] border-[#2a343d] hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center text-white shadow-sm"
+                          style={{ backgroundColor: accentColor }}
+                        >
+                          <NonHabitIcon size={18} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-sm text-slate-100 truncate">
+                              {item.title}
+                            </h3>
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-300 flex-shrink-0">
+                              {item.targetType === 'goal' ? 'Goal' : 'Learning'}
+                            </span>
+                          </div>
+                          {item.subtitle && (
+                            <p className="text-xs text-slate-400 truncate">
+                              {item.subtitle}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        {isItemDismissed ? (
+                          <span className="px-2.5 py-1 rounded-xl bg-slate-700 text-slate-300 text-xs font-semibold">
+                            Dismissed
+                          </span>
+                        ) : isItemSkipped ? (
+                          <span className="px-2.5 py-1 rounded-xl bg-slate-700 text-slate-300 text-xs font-semibold">
+                            Snoozed
+                          </span>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => handleBatchNonHabitOpen(item)}
+                              disabled={loading}
+                              type="button"
+                              className="px-2.5 py-1.5 rounded-xl bg-[#138a78] hover:bg-[#0f766e] text-white text-xs font-bold transition-all flex items-center gap-1 active:scale-95 cursor-pointer disabled:opacity-50 shadow-sm"
+                            >
+                              <ExternalLink size={12} />
+                              <span>Open</span>
+                            </button>
+                            <button
+                              onClick={() => handleBatchItemSkip(item, 10)}
+                              disabled={loading}
+                              type="button"
+                              title="Snooze 10m"
+                              className="px-2 py-1.5 rounded-xl bg-[#222b33] hover:bg-[#2c3742] text-slate-200 text-xs font-semibold transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              Snooze
+                            </button>
+                            <button
+                              onClick={() => handleBatchNonHabitDismiss(item)}
+                              disabled={loading}
+                              type="button"
+                              title="Dismiss"
+                              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-[#222b33] transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                              <X size={14} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
+                const habit = item;
                 const color = habit.color || '#3d7a75';
                 const habitStreak = Number(habit.streak) || 0;
                 const isQty = habit.tracking_type === 'quantity';
 
                 return (
                   <div
-                    key={habit.id}
+                    key={itemKey}
                     className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
                       isItemDone
                         ? 'bg-emerald-950/20 border-emerald-800/60 opacity-90'
@@ -839,14 +1109,16 @@ export default function AlarmTakeoverModal() {
                 </div>
               ) : (
                 <>
-                  <button
-                    onClick={() => handleCompleteAllBatch(currentBatch)}
-                    disabled={loading}
-                    className="w-full py-4 px-4 rounded-2xl bg-[#138a78] hover:bg-[#0f766e] text-white font-extrabold text-base shadow-lg shadow-[#138a78]/25 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer disabled:opacity-50"
-                  >
-                    <Check size={20} strokeWidth={3} />
-                    <span>✓ Mark Done ({currentBatch.filter((h) => !batchProgress[h.id]).length})</span>
-                  </button>
+                  {currentBatch.some((h) => h.isHabit && !batchProgress[getQueueKey(h)]) && (
+                    <button
+                      onClick={() => handleCompleteAllBatch(currentBatch)}
+                      disabled={loading}
+                      className="w-full py-4 px-4 rounded-2xl bg-[#138a78] hover:bg-[#0f766e] text-white font-extrabold text-base shadow-lg shadow-[#138a78]/25 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer disabled:opacity-50"
+                    >
+                      <Check size={20} strokeWidth={3} />
+                      <span>✓ Mark Done ({currentBatch.filter((h) => h.isHabit && !batchProgress[getQueueKey(h)]).length})</span>
+                    </button>
+                  )}
 
                   <button
                     onClick={() => handleSkipBatch(currentBatch, 10)}
@@ -858,6 +1130,114 @@ export default function AlarmTakeoverModal() {
                   </button>
                 </>
               )}
+            </div>
+          </div>
+        ) : !activeAlarm.isHabit ? (
+          /* ============================================================ */
+          /* GOAL / LEARNING SINGLE ALARM TAKEOVER CARD                   */
+          /* ============================================================ */
+          <div className="flex flex-col">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#2a171a] border border-[#5c2429] text-[#f87171] text-xs font-bold tracking-wider">
+                <BellRing size={13} className="text-[#f87171]" />
+                <span>{activeAlarm.targetType === 'goal' ? 'GOAL ALARM' : 'LEARNING ALARM'}</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleToggleMute}
+                  type="button"
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#f87171] hover:opacity-85 transition-opacity cursor-pointer bg-transparent border-0 p-1"
+                  title={muted ? 'Turn Sound ON' : 'Turn Sound OFF'}
+                >
+                  {muted ? (
+                    <>
+                      <VolumeX size={15} className="text-[#f87171]" />
+                      <span>Sound OFF</span>
+                    </>
+                  ) : (
+                    <>
+                      <Volume2 size={15} className="text-[#f87171] animate-pulse" />
+                      <span>Sound ON</span>
+                    </>
+                  )}
+                </button>
+
+                {remainingInQueue > 0 && (
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-[#1e293b] text-slate-300">
+                    +{remainingInQueue} more
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="text-center my-2">
+              <div
+                className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-white shadow-md mb-3"
+                style={{ backgroundColor: activeAlarm.targetType === 'goal' ? '#178274' : '#6366f1' }}
+              >
+                {activeAlarm.targetType === 'goal' ? <Target size={28} /> : <GraduationCap size={28} />}
+              </div>
+
+              <h2
+                id="alarm-title"
+                className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight mb-2"
+              >
+                {activeAlarm.title}
+              </h2>
+
+              {activeAlarm.subtitle && (
+                <p className="text-sm text-slate-300 mt-1 max-w-md mx-auto mb-2">
+                  {activeAlarm.subtitle}
+                </p>
+              )}
+            </div>
+
+            {quote && (
+              <div className="my-3 p-4 rounded-2xl bg-[#090e13]/70 border border-white/[0.06] text-left relative overflow-hidden min-h-[75px] flex flex-col justify-center">
+                <Quote
+                  size={36}
+                  className="absolute -right-2 -bottom-2 text-white/[0.04] pointer-events-none"
+                />
+                <blockquote className="text-xs sm:text-sm italic font-medium text-slate-300 leading-relaxed pr-4">
+                  "{quote.text}"
+                </blockquote>
+                <p className="text-[11px] font-bold text-[#3d7a75] mt-1.5">
+                  — {quote.author}
+                </p>
+              </div>
+            )}
+
+            <div className="mt-2 flex flex-col gap-2.5">
+              <button
+                onClick={handleOpenNonHabit}
+                disabled={loading}
+                className="w-full py-4 px-6 rounded-2xl bg-[#138a78] hover:bg-[#0f766e] active:scale-[0.98] text-white font-extrabold text-base shadow-lg shadow-[#138a78]/25 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                <ExternalLink size={18} />
+                <span>Open</span>
+              </button>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  onClick={() => handleSnooze10Min()}
+                  disabled={loading}
+                  className="w-full py-3 px-4 rounded-xl bg-[#141d26] hover:bg-[#1a2530] border border-white/[0.08] active:scale-[0.98] text-slate-300 hover:text-white font-semibold text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  title="Snooze for 10 minutes"
+                >
+                  <Clock size={14} />
+                  <span>Snooze</span>
+                </button>
+
+                <button
+                  onClick={handleDismissNonHabit}
+                  disabled={loading}
+                  className="w-full py-3 px-4 rounded-xl bg-[#141d26] hover:bg-[#1a2530] border border-white/[0.08] active:scale-[0.98] text-slate-300 hover:text-white font-semibold text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <X size={14} />
+                  <span>Dismiss</span>
+                </button>
+              </div>
             </div>
           </div>
         ) : (

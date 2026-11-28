@@ -10,6 +10,7 @@ import {
   parseLocalYMD,
 } from './goalReminderUtils.js';
 import { executeReminderDone } from './goalReminderActions.js';
+import { getAlarmEntityId, isAlarmSupportedTargetType } from './alarmQueueUtils.js';
 
 export const isNative = Capacitor.isNativePlatform();
 export const NativeAlarmScheduler = registerPlugin('NativeAlarmScheduler');
@@ -424,6 +425,62 @@ export async function requestFullScreenIntentPermission() {
 }
 
 /**
+ * Check if "Display over other apps" (SYSTEM_ALERT_WINDOW) is allowed on Android.
+ * Always returns true on web/non-native platforms.
+ */
+export async function canShowOverlays() {
+  if (!isNative) return true;
+  try {
+    const res = await NativeAlarmScheduler.canShowOverlays().catch(() => null);
+    if (res && typeof res.granted === 'boolean') {
+      return res.granted;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[NativeNotifications] canShowOverlays error:', err);
+    return true;
+  }
+}
+
+/**
+ * Open the Android "Display over other apps" settings screen for HabiZ.
+ * No-op returning true on web/non-native platforms.
+ */
+export async function openOverlaySettings() {
+  if (!isNative) return true;
+  try {
+    await NativeAlarmScheduler.openOverlaySettings();
+    return await canShowOverlays();
+  } catch (err) {
+    console.warn('[NativeNotifications] openOverlaySettings error:', err);
+    return false;
+  }
+}
+
+/**
+ * Query combined Android alarm reliability permissions (Full-screen notifications on
+ * Android 14+ & Display over other apps). Returns granted on web.
+ */
+export async function getAlarmPermissionStatus() {
+  if (!isNative) {
+    return { isNative: false, fsiNeeded: false, fsiGranted: true, overlayGranted: true };
+  }
+  try {
+    const [fsiRes, overlayRes] = await Promise.all([
+      NativeAlarmScheduler.canUseFullScreenIntent().catch(() => null),
+      NativeAlarmScheduler.canShowOverlays().catch(() => null),
+    ]);
+    const fsiGranted = fsiRes?.full_screen_intent ? fsiRes.full_screen_intent === 'granted' : true;
+    const fsiNeeded = typeof fsiRes?.needed === 'boolean' ? fsiRes.needed : !fsiGranted;
+    const overlayGranted = typeof overlayRes?.granted === 'boolean' ? overlayRes.granted : true;
+    return { isNative: true, fsiNeeded, fsiGranted, overlayGranted };
+  } catch (err) {
+    console.warn('[NativeNotifications] getAlarmPermissionStatus error:', err);
+    return { isNative: true, fsiNeeded: false, fsiGranted: true, overlayGranted: true };
+  }
+}
+
+/**
  * Build notification schemas for a reminder over the upcoming week or on a deadline date.
  */
 export function buildNotificationsForReminder(reminder, targetName = '', options = {}) {
@@ -435,8 +492,7 @@ export function buildNotificationsForReminder(reminder, targetName = '', options
     reminder.is_alarm === 't' ||
     reminder.reminder_mode === 'alarm'
   );
-  // Keep alarm takeover strictly for habits; goal & learning reminders use normal notifications
-  const isAlarmEvent = type === 'habit' && rawIsAlarm;
+  const isAlarmEvent = isAlarmSupportedTargetType(type) && rawIsAlarm;
   const isDeadlineMode = reminder.reminder_mode === 'deadline_proximity';
 
   // Skip completed goals, milestones, learning topics, or learning journeys
@@ -486,7 +542,7 @@ export function buildNotificationsForReminder(reminder, targetName = '', options
   } else {
     const copy = buildReminderDisplayCopy(reminder, targetName);
     itemName = copy.itemName;
-    title = copy.title;
+    title = isAlarmEvent ? `🚨 ALARM: ${itemName}` : copy.title;
     body = copy.body;
     milestoneTitle = copy.milestoneTitle || '';
   }
@@ -704,17 +760,18 @@ export async function scheduleSingleNativeReminder(reminder, targetName = '') {
       reminder.is_alarm === 't' ||
       reminder.reminder_mode === 'alarm'
     );
-    const isAlarmEvent = (reminder.target_type || 'habit') === 'habit' && rawIsAlarm;
+    const isAlarmEvent = isAlarmSupportedTargetType(reminder.target_type || 'habit') && rawIsAlarm;
 
     if (isAlarmEvent) {
       // 3a. User-facing Alarm: schedule with dedicated native AlarmManager.setAlarmClock()
+      const entityId = getAlarmEntityId(reminder);
       const alarms = notifications.map((n) => ({
         id: n.id,
         at: n.schedule.at.getTime(),
         title: n.title,
         body: n.body,
         reminderId: String(reminderId),
-        habitId: String(reminder.habit_id || ''),
+        habitId: String(entityId),
         targetType: reminder.target_type || 'habit',
       }));
 
@@ -802,7 +859,7 @@ export async function syncNativeReminders(
         reminder.is_alarm === 't' ||
         reminder.reminder_mode === 'alarm'
       );
-      const isAlarmEvent = (reminder.target_type || 'habit') === 'habit' && rawIsAlarm;
+      const isAlarmEvent = isAlarmSupportedTargetType(reminder.target_type || 'habit') && rawIsAlarm;
 
       const notifs = buildNotificationsForReminder(reminder, '', {
         completedHabitIds,
@@ -812,14 +869,15 @@ export async function syncNativeReminders(
         goalMilestonesMap,
       });
       if (isAlarmEvent) {
+        const entityId = getAlarmEntityId(reminder);
         for (const n of notifs) {
           nativeAlarms.push({
             id: n.id,
             at: n.schedule.at.getTime(),
             title: n.title,
             body: n.body,
-            reminderId: String(reminder.id || reminder.habit_id || ''),
-            habitId: String(reminder.habit_id || ''),
+            reminderId: String(reminder.id || entityId || ''),
+            habitId: String(entityId),
             targetType: reminder.target_type || 'habit',
             isSnooze: false,
             isRecurring: Boolean(n.isRecurring),
@@ -1129,10 +1187,10 @@ async function runProcessPendingAlarmActions(session, options = {}) {
         reminder: {
           id: act.reminderId || null,
           target_type: targetType,
-          goal_id: act.goalId || null,
+          goal_id: act.goalId || (targetType === 'goal' ? act.habitId : null) || null,
           milestone_id: act.milestoneId || null,
-          journey_id: act.journeyId || null,
-          topic_id: act.topicId || null,
+          journey_id: act.journeyId || (targetType === 'learning_journey' ? act.habitId : null) || null,
+          topic_id: act.topicId || (targetType === 'learning_topic' ? act.habitId : null) || null,
           hasMilestones: Boolean(act.hasMilestones),
           reminder_mode: act.reminderMode || 'scheduled',
         },

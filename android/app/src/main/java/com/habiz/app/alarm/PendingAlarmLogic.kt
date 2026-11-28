@@ -19,9 +19,20 @@ object PendingAlarmLogic {
     const val MAX_PENDING_ACTIONS = 100
     const val RETENTION_MILLIS = 7L * 24L * 60L * 60L * 1000L
 
-    fun makeActionId(type: String, habitId: String, reminderId: String, date: String): String {
+    fun makeActionId(
+        type: String,
+        habitId: String,
+        reminderId: String,
+        date: String,
+        targetType: String = "habit"
+    ): String {
         val entityKey = if (habitId.isNotEmpty()) habitId else reminderId
-        return "${type}_${entityKey}_${date}"
+        val normType = targetType.ifEmpty { "habit" }.lowercase()
+        return if (normType == "habit") {
+            "${type}_${entityKey}_${date}"
+        } else {
+            "${type}_${normType}_${entityKey}_${date}"
+        }
     }
 
     fun pruneExpired(actions: List<PendingAlarmAction>, nowMillis: Long): List<PendingAlarmAction> {
@@ -36,9 +47,11 @@ object PendingAlarmLogic {
         nowMillis: Long = newAction.timestamp
     ): List<PendingAlarmAction> {
         val fresh = pruneExpired(actions, nowMillis)
+        val newTargetType = newAction.targetType.ifEmpty { "habit" }
         val filtered = fresh.filterNot { existing ->
             existing.type == newAction.type &&
                 existing.date == newAction.date &&
+                existing.targetType.ifEmpty { "habit" }.equals(newTargetType, ignoreCase = true) &&
                 if (newAction.habitId.isNotEmpty()) {
                     existing.habitId == newAction.habitId
                 } else {
